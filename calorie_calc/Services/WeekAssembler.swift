@@ -1,28 +1,30 @@
 import Foundation
 
-/// Composes `UserProfile`, local `DayLog`s, and HealthKit data into a `WeeklyCalculation`.
+/// Composes a `GoalPeriod` snapshot, local `DayLog`s, and HealthKit data into a
+/// `WeeklyCalculation`. The period is resolved per-week so changing goals today doesn't
+/// rewrite historical weeks' plan math.
 @MainActor
 struct WeekAssembler {
 
-    let profile: UserProfile
+    let period: GoalPeriod
     let referenceDate: Date
     let calendar: Calendar
 
-    init(profile: UserProfile, referenceDate: Date = .now, calendar: Calendar = .current) {
-        self.profile = profile
+    init(period: GoalPeriod, referenceDate: Date = .now, calendar: Calendar = .current) {
+        self.period = period
         self.referenceDate = referenceDate
         self.calendar = calendar
     }
 
     var weekDates: [Date] {
-        calendar.daysOfWeek(containing: referenceDate, firstWeekday: profile.weekStart.calendarValue)
+        calendar.daysOfWeek(containing: referenceDate, firstWeekday: period.weekStart.calendarValue)
     }
 
     func plan() -> WeeklyPlan {
         WeeklyPlan(
-            dailyNetCalorieGoal: profile.dailyNetCalorieGoal,
-            dailyGrossCalorieGoal: profile.dailyGrossCalorieGoal,
-            dailyWorkoutCalorieGoal: profile.dailyWorkoutCalorieGoal
+            dailyNetCalorieGoal: period.dailyNetCalorieGoal,
+            dailyGrossCalorieGoal: period.dailyGrossCalorieGoal,
+            dailyWorkoutCalorieGoal: period.dailyWorkoutCalorieGoal
         )
     }
 
@@ -35,7 +37,7 @@ struct WeekAssembler {
 
         return weekDates.map { date in
             let weekday = date.weekday(in: calendar)
-            let isBanking = profile.isBankingDay(weekday)
+            let isBanking = period.isBankingDay(weekday)
             let status: DayStatus = {
                 if calendar.isDate(date, inSameDayAs: today) { return .today }
                 return date < today ? .past : .future

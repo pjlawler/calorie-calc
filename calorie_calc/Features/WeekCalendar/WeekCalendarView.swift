@@ -7,11 +7,17 @@ struct WeekCalendarView: View {
     @Environment(HealthKitService.self) private var healthKitService
 
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
+    @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
     @Query(sort: \DayLog.date) private var dayLogs: [DayLog]
 
     @State private var viewModel: WeekCalendarViewModel?
     @State private var selectedDate: Date?
     @State private var showSettings = false
+
+    private var currentPeriod: GoalPeriod? { GoalPeriod.current(in: goalPeriods) }
+    private func period(for date: Date) -> GoalPeriod? {
+        GoalPeriod.period(covering: date, in: goalPeriods)
+    }
 
     var body: some View {
         NavigationStack {
@@ -31,17 +37,20 @@ struct WeekCalendarView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let profile = profiles.first, let vm = viewModel {
-            let calculation = vm.calculation(profile: profile, dayLogs: dayLogs)
+        if let vm = viewModel,
+           let current = currentPeriod,
+           let weekPeriod = period(for: vm.referenceDate) {
+            let calculation = vm.calculation(period: weekPeriod, dayLogs: dayLogs)
             WeekCalendarBody(
-                profile: profile,
+                period: weekPeriod,
+                currentPeriod: current,
                 calculation: calculation,
                 dayLogs: dayLogs,
                 selectedDate: $selectedDate,
                 viewModel: vm
             )
-            .task(id: profile.id) { await vm.refreshHealthKit(for: profile) }
-            .refreshable { await vm.refreshHealthKit(for: profile) }
+            .task(id: weekPeriod.id) { await vm.refreshHealthKit(for: weekPeriod) }
+            .refreshable { await vm.refreshHealthKit(for: weekPeriod) }
         } else {
             ProgressView().controlSize(.large)
         }
@@ -66,7 +75,7 @@ struct WeekCalendarView: View {
 
                 Button { viewModel?.jumpToCurrentWeek() } label: {
                     if let reference = viewModel?.referenceDate {
-                        WeekRangeLabel(date: reference, weekStart: profiles.first?.weekStart ?? .monday)
+                        WeekRangeLabel(date: reference, weekStart: currentPeriod?.weekStart ?? .monday)
                     }
                 }
                 .buttonStyle(.plain)
@@ -90,8 +99,9 @@ struct WeekCalendarView: View {
     }
 
     private var showCurrentWeekButton: Bool {
-        guard let profile = profiles.first, let vm = viewModel else { return false }
-        let dates = vm.assembler(for: profile).weekDates
+        guard let current = currentPeriod,
+              let vm = viewModel else { return false }
+        let dates = vm.assembler(for: current).weekDates
         return !dates.contains { Calendar.current.isDate($0, inSameDayAs: .now) }
     }
 
@@ -100,6 +110,9 @@ struct WeekCalendarView: View {
             modelContext.insert(UserProfile())
             try? modelContext.save()
         }
+        if let profile = profiles.first {
+            GoalPeriod.ensureBootstrapped(in: modelContext, profile: profile, existing: goalPeriods)
+        }
         if viewModel == nil {
             viewModel = WeekCalendarViewModel(healthKitService: healthKitService)
         }
@@ -107,13 +120,29 @@ struct WeekCalendarView: View {
 }
 
 private struct WeekCalendarBody: View {
-    let profile: UserProfile
+    let period: GoalPeriod
+    let currentPeriod: GoalPeriod
     let calculation: WeeklyCalculation
     let dayLogs: [DayLog]
     @Binding var selectedDate: Date?
     let viewModel: WeekCalendarViewModel
 
-    private var weekDates: [Date] { viewModel.assembler(for: profile).weekDates }
+    private var weekDates: [Date] { viewModel.assembler(for: period).weekDates }
+
+    private var caloriesRemaining: Double {
+        calculation.weeklyNetTarget - calculation.runningWeeklyNetActual
+    }
+
+    private var remainingColor: Color {
+        caloriesRemaining < 0 ? .red : .primary
+    }
+
+    private var bankedColor: Color {
+        guard let variance = calculation.planVariance else { return .primary }
+        if variance > 0 { return .green }
+        if variance < 0 { return .red }
+        return .primary
+    }
 
     var body: some View {
         ScrollView {
@@ -121,7 +150,9 @@ private struct WeekCalendarBody: View {
                 Text("Week Calorie Log")
                     .font(.title3.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .leading)
-                WeekSummaryCard(profile: profile, calculation: calculation)
+
+                bankedRow
+
                 VStack(spacing: 8) {
                     ForEach(Array(zip(weekDates, calculation.dailyBudgets)), id: \.0) { date, budget in
                         let log = dayLog(for: date)
@@ -134,12 +165,14 @@ private struct WeekCalendarBody: View {
                                     carbs: log?.totalCarbs ?? 0,
                                     fat: log?.totalFat ?? 0
                                 ),
-                                workoutGoal: profile.dailyWorkoutCalorieGoal
+                                workoutGoal: period.dailyWorkoutCalorieGoal
                             )
                         }
                         .buttonStyle(.plain)
                     }
                 }
+
+                remainingRow
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
@@ -147,63 +180,34 @@ private struct WeekCalendarBody: View {
         .scrollBounceBehavior(.basedOnSize)
     }
 
+    private var bankedRow: some View {
+        let amount = calculation.planVariance.map(CalorieFormatter.signed) ?? "—"
+        return (
+            Text(amount)
+                .font(.headline.monospacedDigit())
+                .foregroundStyle(bankedColor)
+            + Text(" ")
+                .font(.headline)
+            + Text("\"banked\"")
+                .font(.headline.italic())
+            + Text(" kCal")
+                .font(.headline.monospacedDigit())
+        )
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .padding(.horizontal, 14)
+    }
+
+    private var remainingRow: some View {
+        Text("\(CalorieFormatter.whole(caloriesRemaining)) kCal remaining")
+            .font(.headline.monospacedDigit())
+            .foregroundStyle(remainingColor)
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.horizontal, 14)
+    }
+
     private func dayLog(for date: Date) -> DayLog? {
         let day = Calendar.current.startOfDay(for: date)
         return dayLogs.first { Calendar.current.isDate($0.date, inSameDayAs: day) }
-    }
-}
-
-private struct WeekSummaryCard: View {
-    let profile: UserProfile
-    let calculation: WeeklyCalculation
-
-    private var caloriesRemaining: Double {
-        calculation.weeklyNetTarget - calculation.runningWeeklyNetActual
-    }
-
-    var body: some View {
-        VStack(spacing: 6) {
-            row(label: "Net calories remaining", value: CalorieFormatter.whole(caloriesRemaining))
-            varianceRow
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(0.12), lineWidth: 1)
-        )
-    }
-
-    private var varianceRow: some View {
-        HStack {
-            Text("Net calorie variance")
-                .font(.subheadline)
-            Spacer()
-            Text(calculation.planVariance.map(CalorieFormatter.signed) ?? "—")
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(varianceColor)
-        }
-    }
-
-    private var varianceColor: Color {
-        guard let variance = calculation.planVariance else { return .primary }
-        if variance > 0 { return .green }
-        if variance < 0 { return .red }
-        return .primary
-    }
-
-    private func row(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.subheadline)
-            Spacer()
-            Text(value)
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-        }
     }
 }
 

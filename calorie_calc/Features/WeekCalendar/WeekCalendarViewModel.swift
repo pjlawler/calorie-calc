@@ -17,21 +17,21 @@ final class WeekCalendarViewModel {
         self.calendar = calendar
     }
 
-    func assembler(for profile: UserProfile) -> WeekAssembler {
-        WeekAssembler(profile: profile, referenceDate: referenceDate, calendar: calendar)
+    func assembler(for period: GoalPeriod) -> WeekAssembler {
+        WeekAssembler(period: period, referenceDate: referenceDate, calendar: calendar)
     }
 
-    func calculation(profile: UserProfile, dayLogs: [DayLog]) -> WeeklyCalculation {
-        let assembler = assembler(for: profile)
+    func calculation(period: GoalPeriod, dayLogs: [DayLog]) -> WeeklyCalculation {
+        let assembler = assembler(for: period)
         let weekStarts = Set(assembler.weekDates.map { calendar.startOfDay(for: $0) })
         let relevantLogs = dayLogs.filter { weekStarts.contains(calendar.startOfDay(for: $0.date)) }
         return assembler.calculate(dayLogs: relevantLogs, healthKitBurn: healthKitBurn)
     }
 
-    func refreshHealthKit(for profile: UserProfile) async {
+    func refreshHealthKit(for period: GoalPeriod) async {
         isRefreshing = true
         defer { isRefreshing = false }
-        let dates = assembler(for: profile).weekDates
+        let dates = assembler(for: period).weekDates
         var burns: [Date: Double] = [:]
         for date in dates {
             let key = calendar.startOfDay(for: date)

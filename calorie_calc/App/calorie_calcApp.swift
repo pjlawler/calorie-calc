@@ -12,6 +12,7 @@ struct calorie_calcApp: App {
     init() {
         let schema = Schema([
             UserProfile.self,
+            GoalPeriod.self,
             DayLog.self,
             FoodEntry.self,
             ManualWorkout.self,

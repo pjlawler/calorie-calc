@@ -6,6 +6,7 @@ struct DashboardView: View {
     @Environment(\.modelContext) private var modelContext
 
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
+    @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
     @Query(sort: [SortDescriptor(\WeightEntry.timestamp, order: .reverse)]) private var weightEntries: [WeightEntry]
 
     @State private var showWeightSheet = false
@@ -225,6 +226,9 @@ struct DashboardView: View {
         if profiles.isEmpty {
             modelContext.insert(UserProfile())
             try? modelContext.save()
+        }
+        if let profile = profiles.first {
+            GoalPeriod.ensureBootstrapped(in: modelContext, profile: profile, existing: goalPeriods)
         }
     }
 }
