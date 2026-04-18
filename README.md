@@ -120,7 +120,7 @@ All math lives in `Services/CalorieBankCalculator.swift` as a pure `nonisolated`
 - Recipe builder
 - Water tracking
 - Notifications / reminders
-- iCloud sync across devices (entitlements are wired but SwiftData CloudKit sync is not enabled)
+- iCloud sync across devices
 - Multiple food-database providers (the `FoodDataSource` protocol makes this a drop-in — just add an implementation)
 - Multi-platform UI polish — the project compiles for macOS/visionOS but HealthKit and barcode scanning are iOS-only
 

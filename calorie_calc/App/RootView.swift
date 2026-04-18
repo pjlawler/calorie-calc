@@ -3,6 +3,7 @@ import SwiftUI
 struct RootView: View {
     @State private var selection: AppTab
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw: String = AppAppearance.system.rawValue
+    @Environment(HealthKitService.self) private var healthKitService
 
     init() {
         let raw = UserDefaults.standard.string(forKey: AppTab.defaultTabStorageKey) ?? AppTab.week.rawValue
@@ -24,6 +25,9 @@ struct RootView: View {
         }
         .task(id: appearanceRaw) {
             AppAppearance.apply(appearance)
+        }
+        .task {
+            await healthKitService.ensureAuthorizationAtStartup()
         }
     }
 }

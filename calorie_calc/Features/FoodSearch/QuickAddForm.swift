@@ -46,8 +46,16 @@ struct QuickAddForm: View {
     @State private var carbsText: String = ""
     @State private var fatText: String = ""
     @State private var servingAmountText: String = "100"
-    @State private var servingUnit: ServingBaseUnit = .grams
+    @State private var servingUnit: PortionUnit = .grams
     @State private var notesText: String = ""
+
+    /// Units offered on the Quick Add serving-size picker. Groups match the portion-sheet
+    /// picker so a food the user creates in `lb` later shows up alongside `kg/g/oz` only.
+    private let unitOptions: [PortionUnit] = [
+        .each,
+        .grams, .kilograms, .ounces, .pounds,
+        .milliliters, .liters, .fluidOunces, .cups, .tablespoons, .teaspoons,
+    ]
 
     private var calories: Double? { Double(caloriesText) }
     private var servingAmount: Double? {
@@ -59,11 +67,16 @@ struct QuickAddForm: View {
         return true
     }
 
-    enum ServingBaseUnit: String, CaseIterable, Identifiable {
-        case grams, milliliters
-        var id: String { rawValue }
-        var label: String {
-            switch self { case .grams: "g"; case .milliliters: "ml" }
+    private var servingFooter: String {
+        let amountText = servingAmountText.isEmpty ? "0" : servingAmountText
+        let unitName = servingUnit.displayName(quantity: servingAmount ?? 1)
+        switch servingUnit.family {
+        case .mass:
+            return "Enter the nutrition values for one \(amountText) \(unitName) serving. You can log partial or multiple servings later and convert to g / kg / oz / lb."
+        case .volume:
+            return "Enter the nutrition values for one \(amountText) \(unitName) serving. You can log partial or multiple servings later and convert to ml / L / fl oz / cups / tbsp / tsp."
+        case .each:
+            return "Enter the nutrition values for one \(unitName) of this item. Non-convertible — log in whole or partial units."
         }
     }
 
@@ -96,8 +109,8 @@ struct QuickAddForm: View {
                             .monospacedDigit()
                             .frame(minWidth: 60)
                         Picker("Unit", selection: $servingUnit) {
-                            ForEach(ServingBaseUnit.allCases) { unit in
-                                Text(unit.label).tag(unit)
+                            ForEach(unitOptions) { unit in
+                                Text(unit.displayName(quantity: servingAmount ?? 1)).tag(unit)
                             }
                         }
                         .labelsHidden()
@@ -105,7 +118,7 @@ struct QuickAddForm: View {
                     }
                 }
             } footer: {
-                Text("Enter the nutrition values for one \(servingAmountText.isEmpty ? "0" : servingAmountText) \(servingUnit.label) serving. You can log partial or multiple servings later and convert to ounces, cups, tbsp, etc.")
+                Text(servingFooter)
             }
 
             Section("Nutrition") {
@@ -162,9 +175,25 @@ struct QuickAddForm: View {
         // Stable ID for the underlying "food" so Recents / Favorites / future edits all refer
         // back to the same CachedFood regardless of how many times the user logs it.
         let externalId: String = scannedBarcode ?? "manual:\(UUID().uuidString)"
-        let servingGrams: Double? = servingUnit == .grams ? amount : nil
-        let servingMilliliters: Double? = servingUnit == .milliliters ? amount : nil
-        let servingDescription = "\(formatAmount(amount)) \(servingUnit.label)"
+        let unitName = servingUnit.displayName(quantity: amount)
+        let servingDescription = "\(formatAmount(amount)) \(unitName)"
+
+        // Convert the user's (amount + unit) into the family's base unit so future logs can
+        // be re-expressed in any compatible unit. `.each` has no base unit — both gram/ml
+        // fields stay nil and the portion sheet will only show `.each` in the picker.
+        let servingGrams: Double?
+        let servingMilliliters: Double?
+        switch servingUnit.family {
+        case .mass:
+            servingGrams = amount * servingUnit.baseMultiplier
+            servingMilliliters = nil
+        case .volume:
+            servingGrams = nil
+            servingMilliliters = amount * servingUnit.baseMultiplier
+        case .each:
+            servingGrams = nil
+            servingMilliliters = nil
+        }
 
         let entry = FoodEntry(
             name: resolvedName,

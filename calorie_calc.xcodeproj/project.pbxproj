@@ -300,6 +300,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = calorie_calc/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CalorieCalc;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSCameraUsageDescription = "CalorieBank uses the camera to scan product barcodes so you can quickly log packaged foods.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "CalorieBank reads your active energy and workouts so the daily burn is reflected in your weekly calorie bank.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "CalorieBank does not currently write to Health — this permission is requested only if future features require it.";
@@ -350,6 +352,8 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = calorie_calc/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = CalorieCalc;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSCameraUsageDescription = "CalorieBank uses the camera to scan product barcodes so you can quickly log packaged foods.";
 				INFOPLIST_KEY_NSHealthShareUsageDescription = "CalorieBank reads your active energy and workouts so the daily burn is reflected in your weekly calorie bank.";
 				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "CalorieBank does not currently write to Health — this permission is requested only if future features require it.";

@@ -37,7 +37,7 @@ struct FoodPortionSheet: View {
     @Query private var cachedFoods: [CachedFood]
 
     @State private var servingSizeAmountText: String = "1"
-    @State private var servingSizeUnit: PortionUnit = .servings
+    @State private var servingSizeUnit: PortionUnit = .each
     @State private var servingsCountText: String = "1"
     @State private var isNutritionFactsExpanded: Bool = true
     @State private var notesText: String = ""
@@ -195,18 +195,32 @@ struct FoodPortionSheet: View {
     }
 
     private func configureInitialState() {
+        // Prefer the unit the user originally typed if it matches the food's family — so
+        // "2 lb" reopens as "2 lb" instead of "907.18 g".
+        let inferred = PortionUnit.inferred(from: result.servingDescription)
+
         if let g = result.servingSizeGrams, g > 0 {
-            servingSizeUnit = .grams
-            servingSizeAmountText = formatAmount(g)
+            if let inferred, inferred.family == .mass {
+                servingSizeUnit = inferred
+                servingSizeAmountText = formatAmount(g / inferred.baseMultiplier)
+            } else {
+                servingSizeUnit = .grams
+                servingSizeAmountText = formatAmount(g)
+            }
         } else if let ml = result.servingSizeMilliliters, ml > 0 {
-            servingSizeUnit = .milliliters
-            servingSizeAmountText = formatAmount(ml)
+            if let inferred, inferred.family == .volume {
+                servingSizeUnit = inferred
+                servingSizeAmountText = formatAmount(ml / inferred.baseMultiplier)
+            } else {
+                servingSizeUnit = .milliliters
+                servingSizeAmountText = formatAmount(ml)
+            }
         } else {
-            servingSizeUnit = .servings
+            servingSizeUnit = .each
             servingSizeAmountText = "1"
         }
         if !availableUnits.contains(servingSizeUnit) {
-            servingSizeUnit = availableUnits.first ?? .servings
+            servingSizeUnit = availableUnits.first ?? .each
         }
         // When editing, the stored quantity is a scalar multiple of the native serving — seed the
         // "Number of Servings" row with it so "1 × 100 g" reopens as "1 × 100 g" rather than
@@ -486,28 +500,31 @@ private struct NutritionFactsContent: View {
 // MARK: - Portion unit
 
 enum PortionUnit: String, CaseIterable, Identifiable {
-    case servings
-    case grams, ounces
+    case each
+    case grams, kilograms, ounces, pounds
     case milliliters, liters, fluidOunces, cups, tablespoons, teaspoons
 
     var id: String { rawValue }
 
-    enum Family { case servings, mass, volume }
+    enum Family { case each, mass, volume }
 
     var family: Family {
         switch self {
-        case .servings: .servings
-        case .grams, .ounces: .mass
+        case .each: .each
+        case .grams, .kilograms, .ounces, .pounds: .mass
         case .milliliters, .liters, .fluidOunces, .cups, .tablespoons, .teaspoons: .volume
         }
     }
 
-    /// US-customary conversions to the family's base unit (grams for mass, milliliters for volume).
+    /// US-customary conversions to the family's base unit (grams for mass, milliliters for
+    /// volume). `.each` has no conversion — it represents countable items like "1 burger".
     var baseMultiplier: Double {
         switch self {
-        case .servings: 1
+        case .each: 1
         case .grams: 1
+        case .kilograms: 1_000
         case .ounces: 28.3495
+        case .pounds: 453.592
         case .milliliters: 1
         case .liters: 1_000
         case .fluidOunces: 29.5735
@@ -520,9 +537,11 @@ enum PortionUnit: String, CaseIterable, Identifiable {
     func displayName(quantity: Double) -> String {
         let plural = abs(quantity - 1) > 0.0001
         switch self {
-        case .servings: return plural ? "servings" : "serving"
+        case .each: return "ea"
         case .grams: return "g"
+        case .kilograms: return "kg"
         case .ounces: return "oz"
+        case .pounds: return "lb"
         case .milliliters: return "ml"
         case .liters: return "L"
         case .fluidOunces: return "fl oz"
@@ -536,7 +555,7 @@ enum PortionUnit: String, CaseIterable, Identifiable {
     /// the scalar that, multiplied by `caloriesPerServing` etc., gives the user-consumed totals.
     func servingFraction(amount: Double, for food: FoodSearchResult) -> Double {
         switch family {
-        case .servings:
+        case .each:
             return amount
         case .mass:
             guard let grams = food.servingSizeGrams, grams > 0 else { return amount }
@@ -547,15 +566,35 @@ enum PortionUnit: String, CaseIterable, Identifiable {
         }
     }
 
+    /// Picker options strictly scoped to the food's native family. A mass food only shows
+    /// mass units, volume only volume, each-only shows just `.each` (no cross-family math
+    /// is possible without density data).
     static func available(for food: FoodSearchResult) -> [PortionUnit] {
-        var units: [PortionUnit] = []
         if let g = food.servingSizeGrams, g > 0 {
-            units += [.grams, .ounces]
+            return [.grams, .kilograms, .ounces, .pounds]
         }
         if let ml = food.servingSizeMilliliters, ml > 0 {
-            units += [.milliliters, .liters, .fluidOunces, .cups, .tablespoons, .teaspoons]
+            return [.milliliters, .liters, .fluidOunces, .cups, .tablespoons, .teaspoons]
         }
-        units.append(.servings)
-        return units
+        return [.each]
+    }
+
+    /// Best-guess unit token match for a free-text serving description like "2 lb" → `.pounds`.
+    /// Used to seed the picker with the user's original unit when reopening a food.
+    static func inferred(from description: String) -> PortionUnit? {
+        let lower = description.lowercased()
+        // Order matters — match longer/more-specific tokens first.
+        if lower.range(of: #"\bfl\s*oz\b"#, options: .regularExpression) != nil { return .fluidOunces }
+        if lower.range(of: #"\btbsp\b|\btablespoons?\b"#, options: .regularExpression) != nil { return .tablespoons }
+        if lower.range(of: #"\btsp\b|\bteaspoons?\b"#, options: .regularExpression) != nil { return .teaspoons }
+        if lower.range(of: #"\bcups?\b"#, options: .regularExpression) != nil { return .cups }
+        if lower.range(of: #"\bml\b|\bmilliliters?\b"#, options: .regularExpression) != nil { return .milliliters }
+        if lower.range(of: #"\bl\b|\bliters?\b"#, options: .regularExpression) != nil { return .liters }
+        if lower.range(of: #"\bkg\b|\bkilograms?\b"#, options: .regularExpression) != nil { return .kilograms }
+        if lower.range(of: #"\blb\b|\bpounds?\b"#, options: .regularExpression) != nil { return .pounds }
+        if lower.range(of: #"\boz\b|\bounces?\b"#, options: .regularExpression) != nil { return .ounces }
+        if lower.range(of: #"\bg\b|\bgrams?\b"#, options: .regularExpression) != nil { return .grams }
+        if lower.range(of: #"\bea\b|\beach\b"#, options: .regularExpression) != nil { return .each }
+        return nil
     }
 }

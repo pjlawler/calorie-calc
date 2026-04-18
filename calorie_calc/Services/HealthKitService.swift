@@ -29,6 +29,12 @@ final class HealthKitService {
     private let store = HKHealthStore()
     #endif
 
+    /// Set once per process after a successful (or attempted) `requestAuthorization`. iOS
+    /// silently no-ops subsequent requests when the user has already granted access, so calling
+    /// this on every launch is cheap and keeps the HealthKit session warm — queries can
+    /// otherwise return empty data after periods of app inactivity.
+    private var didEnsureAuthorization = false
+
     var isAvailable: Bool {
         #if canImport(HealthKit) && os(iOS)
         return HKHealthStore.isHealthDataAvailable()
@@ -57,9 +63,22 @@ final class HealthKitService {
         ]
         try await store.requestAuthorization(toShare: [], read: readTypes)
         authorizationStatus = .authorized
+        didEnsureAuthorization = true
         #else
         authorizationStatus = .unavailable
         #endif
+    }
+
+    /// Fire-and-forget startup call — safe to invoke from `.task` on every app launch. Silently
+    /// swallows errors (a failed request still leaves queries working if access was granted
+    /// previously; the Settings screen surfaces real errors when the user taps Request access).
+    func ensureAuthorizationAtStartup() async {
+        guard !didEnsureAuthorization else { return }
+        do {
+            try await requestAuthorization()
+        } catch {
+            didEnsureAuthorization = true
+        }
     }
 
     /// Sum of active energy burned across recorded workouts for the day.
