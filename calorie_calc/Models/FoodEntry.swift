@@ -10,6 +10,7 @@ final class FoodEntry {
 
     var servingDescription: String
     var servingSizeGrams: Double?
+    var servingSizeMilliliters: Double?
 
     var quantity: Double
 
@@ -18,9 +19,21 @@ final class FoodEntry {
     var carbsPerServing: Double
     var fatPerServing: Double
 
+    var saturatedFatPerServing: Double?
+    var transFatPerServing: Double?
+    var monounsaturatedFatPerServing: Double?
+    var polyunsaturatedFatPerServing: Double?
+    var cholesterolPerServing: Double?
+    var sodiumPerServing: Double?
+    var fiberPerServing: Double?
+    var sugarsPerServing: Double?
+    var addedSugarsPerServing: Double?
+
     var mealType: MealType
     var source: FoodSource
     var externalId: String?
+
+    var notes: String?
 
     var timestamp: Date
 
@@ -32,14 +45,25 @@ final class FoodEntry {
         brand: String? = nil,
         servingDescription: String,
         servingSizeGrams: Double? = nil,
+        servingSizeMilliliters: Double? = nil,
         quantity: Double = 1,
         caloriesPerServing: Double,
         proteinPerServing: Double = 0,
         carbsPerServing: Double = 0,
         fatPerServing: Double = 0,
+        saturatedFatPerServing: Double? = nil,
+        transFatPerServing: Double? = nil,
+        monounsaturatedFatPerServing: Double? = nil,
+        polyunsaturatedFatPerServing: Double? = nil,
+        cholesterolPerServing: Double? = nil,
+        sodiumPerServing: Double? = nil,
+        fiberPerServing: Double? = nil,
+        sugarsPerServing: Double? = nil,
+        addedSugarsPerServing: Double? = nil,
         mealType: MealType,
         source: FoodSource,
         externalId: String? = nil,
+        notes: String? = nil,
         timestamp: Date = .now,
         dayLog: DayLog? = nil
     ) {
@@ -48,14 +72,25 @@ final class FoodEntry {
         self.brand = brand
         self.servingDescription = servingDescription
         self.servingSizeGrams = servingSizeGrams
+        self.servingSizeMilliliters = servingSizeMilliliters
         self.quantity = quantity
         self.caloriesPerServing = caloriesPerServing
         self.proteinPerServing = proteinPerServing
         self.carbsPerServing = carbsPerServing
         self.fatPerServing = fatPerServing
+        self.saturatedFatPerServing = saturatedFatPerServing
+        self.transFatPerServing = transFatPerServing
+        self.monounsaturatedFatPerServing = monounsaturatedFatPerServing
+        self.polyunsaturatedFatPerServing = polyunsaturatedFatPerServing
+        self.cholesterolPerServing = cholesterolPerServing
+        self.sodiumPerServing = sodiumPerServing
+        self.fiberPerServing = fiberPerServing
+        self.sugarsPerServing = sugarsPerServing
+        self.addedSugarsPerServing = addedSugarsPerServing
         self.mealType = mealType
         self.source = source
         self.externalId = externalId
+        self.notes = notes
         self.timestamp = timestamp
         self.dayLog = dayLog
     }

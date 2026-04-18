@@ -268,7 +268,7 @@ struct CalorieBankCalculatorTests {
         #expect(mondayBudget?.net == -500)
     }
 
-    @Test("Daily budgets: banking days show gross goal, off days show dynamic perOffDayBudget")
+    @Test("Daily budgets: banking days show gross goal, off days show static plannedPerOffDayBudget")
     func dailyBudgetGrossValues() {
         let days: [DayInput] = [
             banking(.monday, status: .future),
@@ -287,10 +287,10 @@ struct CalorieBankCalculatorTests {
         let sunday = result.dailyBudgets.first { $0.weekday == .sunday }
 
         #expect(monday?.grossBudget == 1_800)
-        // Saturday consumed 2,500 with 0 burn → bank shrinks → both off days reflect dynamic share.
-        #expect(saturday?.grossBudget == result.perOffDayBudget)
-        #expect(sunday?.grossBudget == result.perOffDayBudget)
-        // Sanity: plan-only figure unchanged.
+        // Saturday over-ate but the *displayed* off-day budget stays on the static plan figure
+        // (the live bank's response shows up in Net calories remaining instead).
+        #expect(saturday?.grossBudget == 2_850)
+        #expect(sunday?.grossBudget == 2_850)
         #expect(result.plannedPerOffDayBudget == 2_850)
     }
 }

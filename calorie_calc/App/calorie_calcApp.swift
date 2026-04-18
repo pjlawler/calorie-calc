@@ -7,6 +7,7 @@ struct calorie_calcApp: App {
     private let modelContainer: ModelContainer
     private let healthKitService: HealthKitService
     private let foodDataSource: FoodDataSourceEnvironment
+    private let foodRecognition: FoodRecognitionEnvironment
 
     init() {
         let schema = Schema([
@@ -26,10 +27,11 @@ struct calorie_calcApp: App {
 
         healthKitService = HealthKitService()
         let chained = ChainedFoodDataSource(sources: [
-            USDAFoodDataCentralService(),
             OpenFoodFactsService(),
+            USDAFoodDataCentralService(),
         ])
         foodDataSource = FoodDataSourceEnvironment(dataSource: chained)
+        foodRecognition = FoodRecognitionEnvironment(service: ClaudeFoodRecognitionService())
     }
 
     var body: some Scene {
@@ -37,6 +39,7 @@ struct calorie_calcApp: App {
             RootView()
                 .environment(healthKitService)
                 .environment(foodDataSource)
+                .environment(foodRecognition)
         }
         .modelContainer(modelContainer)
     }

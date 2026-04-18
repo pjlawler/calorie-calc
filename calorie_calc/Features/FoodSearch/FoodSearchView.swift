@@ -17,6 +17,8 @@ struct FoodSearchView: View {
     @State private var tab: Tab = .search
     @State private var showScanner = false
     @State private var showQuickAdd = false
+    @State private var showPhotoAnalyzer = false
+    @State private var showDescribe = false
     @State private var quickAddBarcode: String?
     @State private var portionTarget: FoodSearchResult?
 
@@ -42,23 +44,6 @@ struct FoodSearchView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showScanner = true
-                    } label: {
-                        Image(systemName: "barcode.viewfinder")
-                    }
-                    .accessibilityLabel("Scan barcode")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        quickAddBarcode = nil
-                        showQuickAdd = true
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                    }
-                    .accessibilityLabel("Quick add")
                 }
             }
             .task {
@@ -87,6 +72,16 @@ struct FoodSearchView: View {
                     dismiss()
                 }
             }
+            .sheet(isPresented: $showPhotoAnalyzer) {
+                FoodPhotoSheet(mealType: mealType, date: date) {
+                    dismiss()
+                }
+            }
+            .sheet(isPresented: $showDescribe) {
+                FoodDescribeSheet { result in
+                    portionTarget = result
+                }
+            }
         }
     }
 
@@ -107,35 +102,111 @@ struct FoodSearchView: View {
                 viewModel?.queryChanged(newValue)
             }
         )
+        let query = viewModel?.query.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cachedMatches = matchingCachedFoods(for: query)
+        let cachedIds = Set(cachedMatches.compactMap(\.externalId))
+        let apiResults = (viewModel?.results ?? []).filter { !cachedIds.contains($0.id) }
+
         return List {
+            if query.isEmpty {
+                Section {
+                    HStack(spacing: 10) {
+                        quickActionTile(title: "Scan", systemImage: "barcode.viewfinder") {
+                            showScanner = true
+                        }
+                        quickActionTile(title: "Photo", systemImage: "camera.fill") {
+                            showPhotoAnalyzer = true
+                        }
+                        quickActionTile(title: "Describe", systemImage: "sparkles") {
+                            showDescribe = true
+                        }
+                        quickActionTile(title: "Manual", systemImage: "square.and.pencil") {
+                            quickAddBarcode = nil
+                            showQuickAdd = true
+                        }
+                    }
+                    .listRowBackground(Color.clear)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    .listRowSeparator(.hidden)
+                }
+            }
             if let vm = viewModel, vm.isSearching {
-                HStack { ProgressView(); Text("Searching USDA…") }
+                HStack { ProgressView(); Text("Searching foods…") }
                     .foregroundStyle(.secondary)
             }
             if let error = viewModel?.errorMessage {
                 Text(error).font(.footnote).foregroundStyle(.red)
             }
-            ForEach(viewModel?.results ?? []) { result in
-                Button {
-                    portionTarget = result
-                } label: {
-                    FoodResultRow(result: result)
+            if !cachedMatches.isEmpty {
+                Section("Your foods") {
+                    ForEach(cachedMatches, id: \.id) { cached in
+                        cachedRow(cached)
+                    }
                 }
-                .buttonStyle(.plain)
+            }
+            if !apiResults.isEmpty {
+                Section(cachedMatches.isEmpty ? "" : "Food database") {
+                    ForEach(apiResults) { result in
+                        Button {
+                            portionTarget = result
+                        } label: {
+                            FoodResultRow(result: result)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
         }
-        .searchable(text: binding, prompt: "Search USDA foods")
+        .searchable(text: binding, prompt: "Search foods")
+    }
+
+    private func quickActionTile(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 6) {
+                Image(systemName: systemImage)
+                    .font(.title3)
+                    .foregroundStyle(.tint)
+                Text(title)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.primary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(.quaternary.opacity(0.4))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(0.15), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Cached foods (recents + favorites) whose name or brand contains the query string.
+    /// Favorites sort first, then by recency. Empty query returns `[]` so the recents/favorites
+    /// tabs remain the home for uncontextualized browsing.
+    private func matchingCachedFoods(for query: String) -> [CachedFood] {
+        guard !query.isEmpty else { return [] }
+        let lower = query.lowercased()
+        return cachedFoods
+            .filter { cached in
+                cached.name.lowercased().contains(lower)
+                    || (cached.brand?.lowercased().contains(lower) ?? false)
+            }
+            .sorted { lhs, rhs in
+                if lhs.isFavorite != rhs.isFavorite { return lhs.isFavorite }
+                return lhs.lastUsed > rhs.lastUsed
+            }
+            .prefix(20)
+            .map { $0 }
     }
 
     private var recentsTab: some View {
         List {
             ForEach(cachedFoods.sorted(by: { $0.lastUsed > $1.lastUsed }).prefix(50), id: \.id) { cached in
-                Button {
-                    portionTarget = cached.toSearchResult()
-                } label: {
-                    CachedFoodRow(cached: cached)
-                }
-                .buttonStyle(.plain)
+                cachedRow(cached)
             }
         }
     }
@@ -143,14 +214,21 @@ struct FoodSearchView: View {
     private var favoritesTab: some View {
         List {
             ForEach(cachedFoods.filter { $0.isFavorite }, id: \.id) { cached in
-                Button {
-                    portionTarget = cached.toSearchResult()
-                } label: {
-                    CachedFoodRow(cached: cached)
-                }
-                .buttonStyle(.plain)
+                cachedRow(cached)
             }
         }
+    }
+
+    private func cachedRow(_ cached: CachedFood) -> some View {
+        Button {
+            portionTarget = cached.toSearchResult()
+        } label: {
+            CachedFoodRow(cached: cached) {
+                cached.isFavorite.toggle()
+                try? modelContext.save()
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func handleScan(code: String) async {
@@ -189,10 +267,17 @@ private struct FoodResultRow: View {
 
 private struct CachedFoodRow: View {
     let cached: CachedFood
+    let onToggleFavorite: () -> Void
 
     var body: some View {
-        HStack {
-            if cached.isFavorite { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+        HStack(spacing: 10) {
+            Button(action: onToggleFavorite) {
+                Image(systemName: cached.isFavorite ? "star.fill" : "star")
+                    .foregroundStyle(cached.isFavorite ? Color.yellow : Color.secondary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(cached.isFavorite ? "Remove from favorites" : "Add to favorites")
+
             VStack(alignment: .leading, spacing: 2) {
                 Text(cached.name).lineLimit(1)
                 HStack(spacing: 6) {
@@ -217,10 +302,21 @@ extension CachedFood {
             brand: brand,
             servingDescription: defaultServingDescription,
             servingSizeGrams: defaultServingSizeGrams,
+            servingSizeMilliliters: defaultServingSizeMilliliters,
             caloriesPerServing: caloriesPerServing,
             proteinPerServing: proteinPerServing,
             carbsPerServing: carbsPerServing,
             fatPerServing: fatPerServing,
+            saturatedFatPerServing: saturatedFatPerServing,
+            transFatPerServing: transFatPerServing,
+            monounsaturatedFatPerServing: monounsaturatedFatPerServing,
+            polyunsaturatedFatPerServing: polyunsaturatedFatPerServing,
+            cholesterolPerServing: cholesterolPerServing,
+            sodiumPerServing: sodiumPerServing,
+            fiberPerServing: fiberPerServing,
+            sugarsPerServing: sugarsPerServing,
+            addedSugarsPerServing: addedSugarsPerServing,
+            notes: notes,
             source: source
         )
     }

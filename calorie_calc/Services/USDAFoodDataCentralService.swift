@@ -95,19 +95,48 @@ private struct FDCFood: Decodable {
         let carbs = FDCNutrient.firstValue(in: foodNutrients, ids: [1005, 205])
         let fat = FDCNutrient.firstValue(in: foodNutrients, ids: [1004, 204])
 
+        let saturated = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [1258, 606])
+        let trans = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [1257, 605])
+        let mono = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [1292, 645])
+        let poly = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [1293, 646])
+        let cholesterol = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [1253, 601])
+        let sodium = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [1093, 307])
+        let fiber = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [1079, 291])
+        let sugars = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [2000, 269])
+        let addedSugars = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [1235])
+
+        let normalizedUnit = servingSizeUnit?.lowercased()
+        var servingGrams: Double? = {
+            guard let normalizedUnit, let servingSize else { return nil }
+            switch normalizedUnit {
+            case "g", "gm": return servingSize
+            default: return nil
+            }
+        }()
+        let servingMilliliters: Double? = {
+            guard let normalizedUnit, let servingSize else { return nil }
+            switch normalizedUnit {
+            case "ml", "mlt": return servingSize
+            default: return nil
+            }
+        }()
+        // Foundation / SR Legacy foods (generic ingredients like "Eggs, raw") expose nutrients
+        // per 100 g and omit a native serving size. Default to 100 g so the picker shows mass
+        // units and the arithmetic stays 1:1 — user can retype any amount they actually ate.
+        if servingGrams == nil && servingMilliliters == nil {
+            servingGrams = 100
+        }
+
         let servingDescription: String
         if let household = householdServingFullText, !household.isEmpty {
             servingDescription = household
         } else if let size = servingSize, let unit = servingSizeUnit {
             servingDescription = "\(size.formatted(.number.precision(.fractionLength(0...1)))) \(unit)"
+        } else if let g = servingGrams {
+            servingDescription = "\(g.formatted(.number.precision(.fractionLength(0...1)))) g"
         } else {
             servingDescription = "1 serving"
         }
-
-        let servingGrams: Double? = {
-            guard let unit = servingSizeUnit?.lowercased(), unit == "g" else { return nil }
-            return servingSize
-        }()
 
         return FoodSearchResult(
             id: id,
@@ -115,10 +144,20 @@ private struct FDCFood: Decodable {
             brand: brandName ?? brandOwner,
             servingDescription: servingDescription,
             servingSizeGrams: servingGrams,
+            servingSizeMilliliters: servingMilliliters,
             caloriesPerServing: calories,
             proteinPerServing: protein,
             carbsPerServing: carbs,
             fatPerServing: fat,
+            saturatedFatPerServing: saturated,
+            transFatPerServing: trans,
+            monounsaturatedFatPerServing: mono,
+            polyunsaturatedFatPerServing: poly,
+            cholesterolPerServing: cholesterol,
+            sodiumPerServing: sodium,
+            fiberPerServing: fiber,
+            sugarsPerServing: sugars,
+            addedSugarsPerServing: addedSugars,
             source: .usdaFDC
         )
     }
@@ -135,7 +174,7 @@ private struct FDCFoodDetail: Decodable {
     let foodNutrients: [FDCDetailNutrient]
 
     func toSearchResult() -> FoodSearchResult {
-        let nutrients = foodNutrients.map { FDCNutrient(nutrientId: $0.nutrient.id, value: $0.amount ?? 0) }
+        let nutrients = foodNutrients.map { FDCNutrient(nutrientId: $0.nutrient.id, value: $0.amount) }
         let shim = FDCFood(
             fdcId: fdcId,
             description: description,
@@ -158,14 +197,22 @@ private struct FDCDetailNutrient: Decodable {
 
 private struct FDCNutrient: Decodable {
     let nutrientId: Int
-    let value: Double
+    let value: Double?
 
+    /// For macros we fall back to `0` — every food in USDA has calories/protein/carbs/fat, so a
+    /// missing value effectively means zero (e.g. zero fat in an apple).
     static func firstValue(in nutrients: [FDCNutrient], ids: [Int]) -> Double {
+        firstOptionalValue(in: nutrients, ids: ids) ?? 0
+    }
+
+    /// For non-macro nutrients we preserve nil so the UI can distinguish "source didn't report it"
+    /// from "explicitly zero" — Foundation foods rarely report trans fat or added sugars at all.
+    static func firstOptionalValue(in nutrients: [FDCNutrient], ids: [Int]) -> Double? {
         for id in ids {
             if let match = nutrients.first(where: { $0.nutrientId == id }) {
                 return match.value
             }
         }
-        return 0
+        return nil
     }
 }

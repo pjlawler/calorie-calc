@@ -6,6 +6,7 @@ struct MealSectionView: View {
     let mealType: MealType
     let entries: [FoodEntry]
     let onAdd: () -> Void
+    let onEdit: (FoodEntry) -> Void
     let onDelete: (FoodEntry) -> Void
 
     var body: some View {
@@ -23,14 +24,18 @@ struct MealSectionView: View {
                 }
             } else {
                 ForEach(entries) { entry in
-                    FoodEntryRow(entry: entry)
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                onDelete(entry)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
+                    Button { onEdit(entry) } label: {
+                        FoodEntryRow(entry: entry)
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            onDelete(entry)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
+                    }
                 }
                 Button(action: onAdd) {
                     Label("Add food", systemImage: "plus.circle")

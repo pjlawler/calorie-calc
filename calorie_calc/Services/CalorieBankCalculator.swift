@@ -74,6 +74,10 @@ nonisolated struct WeeklyCalculation: Sendable, Hashable {
     let daysWithLoggedData: Int
     /// Daily average of net calories across `daysWithLoggedData`. `nil` when nothing has been logged yet.
     let averageDailyNetActual: Double?
+    /// How the user is tracking against their plan across logged past+today days.
+    /// Positive = ahead of plan (ate less / burned more than planned). Negative = over plan.
+    /// `nil` when no past/today day has logged data yet.
+    let planVariance: Double?
     let dailyBudgets: [DailyBudget]
 }
 
@@ -173,9 +177,12 @@ nonisolated enum CalorieBankCalculator {
             return (atPlanAllowance - atPlanBanking) / Double(totalOffDaysInWeek)
         }()
 
+        // Off-day cell shows the static plan-only share — always the same value for a given
+        // week split so users see a stable daily target that doesn't shift with actuals on
+        // other days. The dynamic bank still drives `Net calories remaining` above the grid.
         let dailyBudgets = days.map { day -> DailyBudget in
             let net = day.consumedCalories - day.burnedCalories
-            let gross: Double? = day.isBankingDay ? grossGoal : perOffDayBudget
+            let gross: Double? = day.isBankingDay ? grossGoal : plannedPerOffDayBudget
             return DailyBudget(
                 weekday: day.weekday,
                 isBankingDay: day.isBankingDay,
@@ -193,6 +200,20 @@ nonisolated enum CalorieBankCalculator {
             ? runningWeeklyNetActual / Double(daysWithLoggedData)
             : nil
 
+        // Plan variance: compare actual net to plan net across logged past+today days.
+        // A banking day's plan net = grossGoal − workoutGoal.
+        // An off day's plan net = plannedPerOffDayBudget − workoutGoal (matches the weekly average).
+        let plannedOffNet = (plannedPerOffDayBudget ?? grossGoal) - workoutGoal
+        let plannedBankingNet = grossGoal - workoutGoal
+        let varianceDays = days.filter { $0.hasLoggedData && $0.status != .future }
+        let expectedNet = varianceDays.reduce(0.0) { acc, day in
+            acc + (day.isBankingDay ? plannedBankingNet : plannedOffNet)
+        }
+        let actualNetForVariance = varianceDays.reduce(0.0) { acc, day in
+            acc + (day.consumedCalories - day.burnedCalories)
+        }
+        let planVariance: Double? = varianceDays.isEmpty ? nil : expectedNet - actualNetForVariance
+
         return WeeklyCalculation(
             weeklyNetTarget: weeklyNetTarget,
             weeklyGrossAllowance: weeklyGrossAllowance,
@@ -201,10 +222,10 @@ nonisolated enum CalorieBankCalculator {
             offDayBank: offDayBank,
             totalOffDaysInWeek: totalOffDaysInWeek,
             perOffDayBudget: perOffDayBudget,
-            plannedPerOffDayBudget: plannedPerOffDayBudget,
-            runningWeeklyNetActual: runningWeeklyNetActual,
+            plannedPerOffDayBudget: plannedPerOffDayBudget,            runningWeeklyNetActual: runningWeeklyNetActual,
             daysWithLoggedData: daysWithLoggedData,
             averageDailyNetActual: averageDailyNetActual,
+            planVariance: planVariance,
             dailyBudgets: dailyBudgets
         )
     }

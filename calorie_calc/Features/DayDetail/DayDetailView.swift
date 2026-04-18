@@ -11,6 +11,7 @@ struct DayDetailView: View {
 
     @State private var viewModel: DayDetailViewModel?
     @State private var presentedMealSearch: MealType?
+    @State private var editingEntry: FoodEntry?
     @State private var showManualWorkout = false
 
     private var dayLog: DayLog? {
@@ -19,24 +20,17 @@ struct DayDetailView: View {
 
     var body: some View {
         List {
-            if let log = dayLog {
-                totalsSection(log: log)
-                mealsSections(log: log)
-                workoutsSection(log: log)
-            } else {
-                Section {
-                    Button {
-                        _ = ensureDayLog()
-                    } label: {
-                        Label("Start logging this day", systemImage: "plus")
-                    }
-                }
-            }
+            totalsSection(log: dayLog)
+            mealsSections(log: dayLog)
+            workoutsSection(log: dayLog)
         }
         .navigationTitle(date.formatted(.dateTime.weekday(.wide).month().day()))
         .navigationBarTitleDisplayMode(.inline)
         .sheet(item: $presentedMealSearch) { meal in
             FoodSearchView(mealType: meal, date: date)
+        }
+        .sheet(item: $editingEntry) { entry in
+            FoodPortionSheet(editing: entry) { editingEntry = nil }
         }
         .sheet(isPresented: $showManualWorkout) {
             ManualWorkoutSheet(date: date)
@@ -50,11 +44,11 @@ struct DayDetailView: View {
     }
 
     @ViewBuilder
-    private func totalsSection(log: DayLog) -> some View {
+    private func totalsSection(log: DayLog?) -> some View {
         let hkBurn = viewModel?.includedHealthKitActiveEnergy ?? 0
-        let manualBurn = log.totalManualBurned
+        let manualBurn = log?.totalManualBurned ?? 0
         let totalBurn = hkBurn + manualBurn
-        let consumed = log.totalConsumedCalories
+        let consumed = log?.totalConsumedCalories ?? 0
         let net = consumed - totalBurn
 
         Section {
@@ -66,7 +60,11 @@ struct DayDetailView: View {
                     Divider().frame(height: 36)
                     totalCell(title: "Net", value: CalorieFormatter.signed(net))
                 }
-                macroRow(log: log)
+                macroRow(
+                    protein: log?.totalProtein ?? 0,
+                    carbs: log?.totalCarbs ?? 0,
+                    fat: log?.totalFat ?? 0
+                )
             }
         }
         .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
@@ -84,11 +82,11 @@ struct DayDetailView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func macroRow(log: DayLog) -> some View {
+    private func macroRow(protein: Double, carbs: Double, fat: Double) -> some View {
         HStack(spacing: 16) {
-            macroPill(label: "P", value: log.totalProtein, tint: .accentColor)
-            macroPill(label: "C", value: log.totalCarbs, tint: .orange)
-            macroPill(label: "F", value: log.totalFat, tint: .pink)
+            macroPill(label: "P", value: protein, tint: .accentColor)
+            macroPill(label: "C", value: carbs, tint: .orange)
+            macroPill(label: "F", value: fat, tint: .pink)
         }
     }
 
@@ -104,19 +102,20 @@ struct DayDetailView: View {
     }
 
     @ViewBuilder
-    private func mealsSections(log: DayLog) -> some View {
+    private func mealsSections(log: DayLog?) -> some View {
         ForEach(MealType.allCases.sorted { $0.order < $1.order }, id: \.self) { meal in
             MealSectionView(
                 mealType: meal,
-                entries: log.entries(for: meal),
+                entries: log?.entries(for: meal) ?? [],
                 onAdd: { presentedMealSearch = meal },
+                onEdit: { entry in editingEntry = entry },
                 onDelete: { entry in delete(entry: entry) }
             )
         }
     }
 
     @ViewBuilder
-    private func workoutsSection(log: DayLog) -> some View {
+    private func workoutsSection(log: DayLog?) -> some View {
         Section {
             if let vm = viewModel {
                 ForEach(vm.healthKitWorkouts) { workout in
@@ -137,7 +136,7 @@ struct DayDetailView: View {
                     .font(.subheadline)
                 }
             }
-            ForEach(log.manualWorkouts) { workout in
+            ForEach(log?.manualWorkouts ?? []) { workout in
                 ManualWorkoutRow(workout: workout)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { delete(workout: workout) } label: {
@@ -154,14 +153,6 @@ struct DayDetailView: View {
             Label("Workouts", systemImage: "figure.run")
                 .font(.headline)
         }
-    }
-
-    private func ensureDayLog() -> DayLog {
-        if let log = dayLog { return log }
-        let new = DayLog(date: date)
-        modelContext.insert(new)
-        try? modelContext.save()
-        return new
     }
 
     private func delete(entry: FoodEntry) {

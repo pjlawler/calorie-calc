@@ -1,21 +1,21 @@
 import Foundation
 
 nonisolated enum AppTab: String, CaseIterable, Hashable, Identifiable, Sendable {
-    case dashboard
     case week
+    case dashboard
 
     var id: String { rawValue }
 
     var displayName: String {
         switch self {
-        case .dashboard: "Dashboard"
+        case .dashboard: "My Plan"
         case .week: "Week"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .dashboard: "square.grid.2x2.fill"
+        case .dashboard: "target"
         case .week: "calendar"
         }
     }

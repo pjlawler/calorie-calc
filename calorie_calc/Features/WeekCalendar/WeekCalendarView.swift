@@ -77,6 +77,22 @@ struct WeekCalendarView: View {
                 .accessibilityLabel("Next week")
             }
         }
+        ToolbarItem(placement: .topBarTrailing) {
+            if showCurrentWeekButton {
+                Button {
+                    viewModel?.jumpToCurrentWeek()
+                } label: {
+                    Image(systemName: "calendar.badge.clock")
+                }
+                .accessibilityLabel("Jump to current week")
+            }
+        }
+    }
+
+    private var showCurrentWeekButton: Bool {
+        guard let profile = profiles.first, let vm = viewModel else { return false }
+        let dates = vm.assembler(for: profile).weekDates
+        return !dates.contains { Calendar.current.isDate($0, inSameDayAs: .now) }
     }
 
     private func ensureBootstrap() async {
@@ -124,7 +140,6 @@ private struct WeekCalendarBody: View {
                         .buttonStyle(.plain)
                     }
                 }
-                BankingExplainerCard()
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
@@ -149,7 +164,7 @@ private struct WeekSummaryCard: View {
     var body: some View {
         VStack(spacing: 6) {
             row(label: "Net calories remaining", value: CalorieFormatter.whole(caloriesRemaining))
-            row(label: "Daily net calorie average", value: calculation.averageDailyNetActual.map(CalorieFormatter.whole) ?? "—")
+            varianceRow
         }
         .padding(14)
         .frame(maxWidth: .infinity)
@@ -163,6 +178,24 @@ private struct WeekSummaryCard: View {
         )
     }
 
+    private var varianceRow: some View {
+        HStack {
+            Text("Net calorie variance")
+                .font(.subheadline)
+            Spacer()
+            Text(calculation.planVariance.map(CalorieFormatter.signed) ?? "—")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(varianceColor)
+        }
+    }
+
+    private var varianceColor: Color {
+        guard let variance = calculation.planVariance else { return .primary }
+        if variance > 0 { return .green }
+        if variance < 0 { return .red }
+        return .primary
+    }
+
     private func row(label: String, value: String) -> some View {
         HStack {
             Text(label)
@@ -171,47 +204,6 @@ private struct WeekSummaryCard: View {
             Text(value)
                 .font(.subheadline.weight(.semibold).monospacedDigit())
         }
-    }
-}
-
-private struct BankingExplainerCard: View {
-    @AppStorage("weekly_log.explainer_expanded") private var expanded: Bool = true
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "sparkles")
-                        .foregroundStyle(.tint)
-                    Text("How calorie banking works")
-                        .font(.subheadline.weight(.semibold))
-                    Spacer()
-                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .buttonStyle(.plain)
-
-            if expanded {
-                Text("Your daily net goal is a weekly average, not a strict daily ceiling. Stick to plan days and the headroom carries over to your flex days — so you can enjoy a dinner out, a drink, or a little extra without blowing your weekly target.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.accentColor.opacity(0.15), lineWidth: 1)
-        )
     }
 }
 

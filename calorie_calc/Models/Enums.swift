@@ -39,6 +39,7 @@ nonisolated enum FoodSource: String, Codable, CaseIterable, Hashable, Sendable {
     case barcode
     case manual
     case cached
+    case photo
 }
 
 nonisolated enum BankSplit: String, Codable, CaseIterable, Hashable, Sendable {

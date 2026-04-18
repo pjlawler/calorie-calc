@@ -10,6 +10,7 @@ struct SettingsView: View {
     @Query private var profiles: [UserProfile]
 
     @AppStorage(AppTab.defaultTabStorageKey) private var defaultTabRaw: String = AppTab.week.rawValue
+    @AppStorage(AppAppearance.storageKey) private var appearanceRaw: String = AppAppearance.system.rawValue
 
     @State private var viewModel: SettingsViewModel?
 
@@ -17,7 +18,7 @@ struct SettingsView: View {
         NavigationStack {
             Group {
                 if let profile = profiles.first {
-                    SettingsForm(profile: profile, viewModel: viewModel, defaultTabRaw: $defaultTabRaw)
+                    SettingsForm(profile: profile, viewModel: viewModel, defaultTabRaw: $defaultTabRaw, appearanceRaw: $appearanceRaw)
                 } else {
                     ProgressView()
                 }
@@ -45,6 +46,7 @@ private struct SettingsForm: View {
     @Bindable var profile: UserProfile
     let viewModel: SettingsViewModel?
     @Binding var defaultTabRaw: String
+    @Binding var appearanceRaw: String
 
     private var defaultTab: AppTab {
         get { AppTab(rawValue: defaultTabRaw) ?? .week }
@@ -61,10 +63,21 @@ private struct SettingsForm: View {
                         Label(tab.displayName, systemImage: tab.systemImage).tag(tab)
                     }
                 }
+                Picker("Appearance", selection: Binding(
+                    get: { AppAppearance(rawValue: appearanceRaw) ?? .system },
+                    set: { newValue in
+                        appearanceRaw = newValue.rawValue
+                        AppAppearance.apply(newValue)
+                    }
+                )) {
+                    ForEach(AppAppearance.allCases) { mode in
+                        Text(mode.displayName).tag(mode)
+                    }
+                }
             } header: {
-                Text("Default view")
+                Text("Appearance")
             } footer: {
-                Text("Which tab to show when you open the app.")
+                Text("Launch tab and light/dark mode.")
             }
 
             Section("Calorie goals") {
@@ -117,7 +130,7 @@ private struct SettingsForm: View {
                         profile.startingWeightLoggedAt = nil
                     }
                 } else {
-                    Text("Log a weight on the Dashboard to set your starting weight.")
+                    Text("Log a weight on My Plan to set your starting weight.")
                         .foregroundStyle(.secondary)
                         .font(.footnote)
                 }
