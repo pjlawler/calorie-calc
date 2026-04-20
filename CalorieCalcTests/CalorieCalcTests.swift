@@ -1,13 +1,13 @@
 //
-//  calorie_calcTests.swift
-//  calorie_calcTests
+//  CalorieCalcTests.swift
+//  CalorieCalcTests
 //
 //  Created by Patrick Lawler on 4/17/26.
 //
 
 import Testing
 
-struct calorie_calcTests {
+struct CalorieCalcTests {
 
     @Test func example() async throws {
         // Write your test here and use APIs like `#expect(...)` to check expected conditions.

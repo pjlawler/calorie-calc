@@ -6,7 +6,7 @@ final class OpenFoodFactsService: FoodDataSource, Sendable {
     private let baseURL = URL(string: "https://world.openfoodfacts.org/api/v2")!
     // OFF rejects anonymous clients (503/rate-limit) and documents that every caller must send
     // a User-Agent identifying the app + platform + contact. Format per their API docs.
-    private let userAgent = "calorie_calc/1.0 (iOS; github.com/patricklawler/calorie_calc)"
+    private let userAgent = "CalorieCalc/1.0 (iOS; github.com/patricklawler/CalorieCalc)"
 
     init(session: URLSession = .shared) {
         self.session = session

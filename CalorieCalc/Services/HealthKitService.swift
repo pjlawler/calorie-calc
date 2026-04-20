@@ -94,6 +94,37 @@ final class HealthKitService {
         #endif
     }
 
+    /// Workout active-energy, bucketed by start-of-day, for a date range. One HK query
+    /// regardless of range length — avoids per-day round-trips when rendering monthly / yearly charts.
+    func dailyWorkoutBurn(
+        from startDate: Date,
+        through endDate: Date,
+        calendar: Calendar = .current
+    ) async throws -> [Date: Double] {
+        #if canImport(HealthKit) && os(iOS)
+        guard isAvailable else { return [:] }
+        let rangeStart = calendar.startOfDay(for: startDate)
+        guard let rangeEnd = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: endDate)) else { return [:] }
+        let predicate = HKQuery.predicateForSamples(withStart: rangeStart, end: rangeEnd, options: .strictStartDate)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.workout(predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate, order: .forward)]
+        )
+        let workouts = try await descriptor.result(for: store)
+        var buckets: [Date: Double] = [:]
+        for workout in workouts {
+            let day = calendar.startOfDay(for: workout.startDate)
+            let energy = workout.statistics(for: HKQuantityType(.activeEnergyBurned))?
+                .sumQuantity()?
+                .doubleValue(for: .kilocalorie()) ?? 0
+            buckets[day, default: 0] += energy
+        }
+        return buckets
+        #else
+        return [:]
+        #endif
+    }
+
     func workouts(on date: Date, calendar: Calendar = .current) async throws -> [HealthKitWorkout] {
         #if canImport(HealthKit) && os(iOS)
         guard isAvailable else { return [] }

@@ -1,6 +1,6 @@
-# calorie_calc
+# CalorieCalc
 
-An iOS 26 calorie tracker built around **calorie banking** — averaging targets across a weekly cycle so disciplined days fund social days, without the app nagging or color-coding. See [`calorie_calc/calorie_bank_app_prompt.md`](calorie_calc/calorie_bank_app_prompt.md) for the original product brief.
+An iOS 26 calorie tracker built around **calorie banking** — averaging targets across a weekly cycle so disciplined days fund social days, without the app nagging or color-coding. See [`CalorieCalc/calorie_bank_app_prompt.md`](CalorieCalc/calorie_bank_app_prompt.md) for the original product brief.
 
 > Status: early scaffolding. iOS-only, will likely grow a backend + web surface later.
 
@@ -18,7 +18,7 @@ An iOS 26 calorie tracker built around **calorie banking** — averaging targets
 ### 1. Open the project
 
 ```
-open calorie_calc.xcodeproj
+open CalorieCalc.xcodeproj
 ```
 
 ### 2. USDA FoodData Central API key
@@ -40,7 +40,7 @@ open calorie_calc.xcodeproj
 
 The entitlements file already declares HealthKit, but you need to enable the capability once in Xcode so your signing profile picks it up:
 
-1. Select the **calorie_calc** target → **Signing & Capabilities**
+1. Select the **CalorieCalc** target → **Signing & Capabilities**
 2. Verify **HealthKit** is present. If not, click **+ Capability** and add it.
 
 If you're not signed in to a developer team, HealthKit features will fail at runtime but the app will still build.
@@ -51,10 +51,10 @@ Pick an iOS 26 simulator or device and run. HealthKit requires a real device for
 
 ## Running Tests
 
-Swift Testing suite in `calorie_calcTests/CalorieBankCalculatorTests.swift` covers the banking math end to end:
+Swift Testing suite in `CalorieCalcTests/CalorieBankCalculatorTests.swift` covers the banking math end to end:
 
 ```
-xcodebuild test -project calorie_calc.xcodeproj -scheme calorie_calc -destination 'platform=iOS Simulator,name=iPhone 17'
+xcodebuild test -project CalorieCalc.xcodeproj -scheme CalorieCalc -destination 'platform=iOS Simulator,name=iPhone 17'
 ```
 
 Or just `⌘U` in Xcode.
@@ -74,7 +74,7 @@ Cases covered:
 ## Project layout
 
 ```
-calorie_calc/
+CalorieCalc/
 ├── App/                       # @main + root + service env
 ├── Models/                    # SwiftData @Model types + Enums
 ├── Services/                  # FoodDataSource, USDA, HealthKit, Barcode, Calculator, WeekAssembler
@@ -88,9 +88,9 @@ calorie_calc/
 ├── Shared/Extensions/         # Date/week helpers, formatters
 ├── Assets.xcassets
 ├── Info.plist
-└── calorie_calc.entitlements
-calorie_calcTests/
-├── calorie_calcTests.swift
+└── CalorieCalc.entitlements
+CalorieCalcTests/
+├── CalorieCalcTests.swift
 └── CalorieBankCalculatorTests.swift
 ```
 

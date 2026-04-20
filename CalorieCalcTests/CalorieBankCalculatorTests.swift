@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-@testable import calorie_calc
+@testable import CalorieCalc
 
 @Suite("CalorieBankCalculator")
 struct CalorieBankCalculatorTests {

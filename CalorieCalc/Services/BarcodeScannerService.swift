@@ -33,7 +33,7 @@ final class BarcodeScannerService: NSObject {
     weak var delegate: BarcodeScannerDelegate?
 
     let session = AVCaptureSession()
-    private let sessionQueue = DispatchQueue(label: "calorie_calc.barcode.session")
+    private let sessionQueue = DispatchQueue(label: "CalorieCalc.barcode.session")
     private let metadataOutput = AVCaptureMetadataOutput()
     private var hasEmitted = false
 

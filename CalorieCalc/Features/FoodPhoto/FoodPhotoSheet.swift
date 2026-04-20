@@ -19,7 +19,7 @@ struct FoodPhotoSheet: View {
     @State private var stage: Stage = .pickSource
     @State private var image: UIImage?
     @State private var imageData: Data?
-    @State private var hint: String = ""
+    @State private var description: String = ""
     @State private var pickerItem: PhotosPickerItem?
     @State private var errorMessage: String?
 
@@ -137,53 +137,55 @@ struct FoodPhotoSheet: View {
     // MARK: - Stage: ready
 
     private var readyView: some View {
-        VStack(spacing: 16) {
+        Form {
             if let image {
-                Image(uiImage: image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxHeight: 320)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .padding(.horizontal)
+                Section {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 240)
+                        .frame(maxWidth: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .listRowInsets(EdgeInsets())
+                }
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Optional hint")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                TextField("e.g. 'medium portion, no sour cream'", text: $hint)
-                    .textFieldStyle(.roundedBorder)
+            Section {
+                TextField("Describe the food in the photo", text: $description, axis: .vertical)
+                    .lineLimit(2...6)
+                    .textInputAutocapitalization(.sentences)
+            } header: {
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles").foregroundStyle(.tint)
+                    Text("AI description")
+                }
+            } footer: {
+                Text("Optional — add a description of what's in the photo to help the AI analyze the image and return a more accurate result.")
             }
-            .padding(.horizontal)
 
             if let errorMessage {
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .padding(.horizontal)
+                Section {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.red)
+                        .font(.footnote)
+                }
             }
 
-            Spacer()
-
-            VStack(spacing: 10) {
-                Button {
-                    Task { await analyze() }
-                } label: {
-                    Label("Analyze with Claude", systemImage: "sparkles")
+            Section {
+                Button { Task { await analyze() } } label: {
+                    Text("Analyze")
+                        .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
 
-                Button("Pick a different photo") {
-                    resetToPick()
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .font(.footnote)
+                Button("Pick a different photo") { resetToPick() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .font(.footnote)
+                    .frame(maxWidth: .infinity)
             }
-            .padding(.horizontal)
-            .padding(.bottom, 20)
         }
     }
 
@@ -328,7 +330,7 @@ struct FoodPhotoSheet: View {
         image = nil
         imageData = nil
         pickerItem = nil
-        hint = ""
+        description = ""
         errorMessage = nil
         stage = .pickSource
     }
@@ -340,7 +342,7 @@ struct FoodPhotoSheet: View {
         do {
             let meal = try await env.service.recognize(
                 imageData: imageData,
-                hint: hint.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
+                hint: description.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
             )
             prefill(from: meal)
             stage = .result

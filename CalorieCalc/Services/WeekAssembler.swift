@@ -32,7 +32,7 @@ struct WeekAssembler {
         dayLogs: [DayLog],
         healthKitBurn: [Date: Double]
     ) -> [DayInput] {
-        let today = calendar.startOfDay(for: referenceDate)
+        let today = calendar.startOfDay(for: .now)
         let logsByDate = Dictionary(uniqueKeysWithValues: dayLogs.map { (calendar.startOfDay(for: $0.date), $0) })
 
         return weekDates.map { date in

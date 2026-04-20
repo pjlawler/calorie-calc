@@ -12,51 +12,51 @@
 			containerPortal = 68C194182F92856D00E395C0 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 68C1941F2F92856D00E395C0;
-			remoteInfo = calorie_calc;
+			remoteInfo = CalorieCalc;
 		};
 		68C1943C2F92856E00E395C0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 68C194182F92856D00E395C0 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 68C1941F2F92856D00E395C0;
-			remoteInfo = calorie_calc;
+			remoteInfo = CalorieCalc;
 		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		68C194202F92856D00E395C0 /* calorie_calc.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = calorie_calc.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		68C194312F92856E00E395C0 /* calorie_calcTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = calorie_calcTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		68C1943B2F92856E00E395C0 /* calorie_calcUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = calorie_calcUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		68C194202F92856D00E395C0 /* CalorieCalc.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CalorieCalc.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		68C194312F92856E00E395C0 /* CalorieCalcTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CalorieCalcTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		68C1943B2F92856E00E395C0 /* CalorieCalcUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CalorieCalcUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA11223344556677889900AA /* Secrets.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Secrets.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		68C194432F92856E00E395C0 /* Exceptions for "calorie_calc" folder in "calorie_calc" target */ = {
+		68C194432F92856E00E395C0 /* Exceptions for "CalorieCalc" folder in "CalorieCalc" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				Info.plist,
 			);
-			target = 68C1941F2F92856D00E395C0 /* calorie_calc */;
+			target = 68C1941F2F92856D00E395C0 /* CalorieCalc */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		68C194222F92856D00E395C0 /* calorie_calc */ = {
+		68C194222F92856D00E395C0 /* CalorieCalc */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
-				68C194432F92856E00E395C0 /* Exceptions for "calorie_calc" folder in "calorie_calc" target */,
+				68C194432F92856E00E395C0 /* Exceptions for "CalorieCalc" folder in "CalorieCalc" target */,
 			);
-			path = calorie_calc;
+			path = CalorieCalc;
 			sourceTree = "<group>";
 		};
-		68C194342F92856E00E395C0 /* calorie_calcTests */ = {
+		68C194342F92856E00E395C0 /* CalorieCalcTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = calorie_calcTests;
+			path = CalorieCalcTests;
 			sourceTree = "<group>";
 		};
-		68C1943E2F92856E00E395C0 /* calorie_calcUITests */ = {
+		68C1943E2F92856E00E395C0 /* CalorieCalcUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = calorie_calcUITests;
+			path = CalorieCalcUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -90,9 +90,9 @@
 			isa = PBXGroup;
 			children = (
 				AA11223344556677889900AA /* Secrets.xcconfig */,
-				68C194222F92856D00E395C0 /* calorie_calc */,
-				68C194342F92856E00E395C0 /* calorie_calcTests */,
-				68C1943E2F92856E00E395C0 /* calorie_calcUITests */,
+				68C194222F92856D00E395C0 /* CalorieCalc */,
+				68C194342F92856E00E395C0 /* CalorieCalcTests */,
+				68C1943E2F92856E00E395C0 /* CalorieCalcUITests */,
 				68C194212F92856D00E395C0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -100,9 +100,9 @@
 		68C194212F92856D00E395C0 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				68C194202F92856D00E395C0 /* calorie_calc.app */,
-				68C194312F92856E00E395C0 /* calorie_calcTests.xctest */,
-				68C1943B2F92856E00E395C0 /* calorie_calcUITests.xctest */,
+				68C194202F92856D00E395C0 /* CalorieCalc.app */,
+				68C194312F92856E00E395C0 /* CalorieCalcTests.xctest */,
+				68C1943B2F92856E00E395C0 /* CalorieCalcUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -110,9 +110,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		68C1941F2F92856D00E395C0 /* calorie_calc */ = {
+		68C1941F2F92856D00E395C0 /* CalorieCalc */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 68C194442F92856E00E395C0 /* Build configuration list for PBXNativeTarget "calorie_calc" */;
+			buildConfigurationList = 68C194442F92856E00E395C0 /* Build configuration list for PBXNativeTarget "CalorieCalc" */;
 			buildPhases = (
 				68C1941C2F92856D00E395C0 /* Sources */,
 				68C1941D2F92856D00E395C0 /* Frameworks */,
@@ -123,18 +123,18 @@
 			dependencies = (
 			);
 			fileSystemSynchronizedGroups = (
-				68C194222F92856D00E395C0 /* calorie_calc */,
+				68C194222F92856D00E395C0 /* CalorieCalc */,
 			);
-			name = calorie_calc;
+			name = CalorieCalc;
 			packageProductDependencies = (
 			);
-			productName = calorie_calc;
-			productReference = 68C194202F92856D00E395C0 /* calorie_calc.app */;
+			productName = CalorieCalc;
+			productReference = 68C194202F92856D00E395C0 /* CalorieCalc.app */;
 			productType = "com.apple.product-type.application";
 		};
-		68C194302F92856E00E395C0 /* calorie_calcTests */ = {
+		68C194302F92856E00E395C0 /* CalorieCalcTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 68C194492F92856E00E395C0 /* Build configuration list for PBXNativeTarget "calorie_calcTests" */;
+			buildConfigurationList = 68C194492F92856E00E395C0 /* Build configuration list for PBXNativeTarget "CalorieCalcTests" */;
 			buildPhases = (
 				68C1942D2F92856E00E395C0 /* Sources */,
 				68C1942E2F92856E00E395C0 /* Frameworks */,
@@ -146,18 +146,18 @@
 				68C194332F92856E00E395C0 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				68C194342F92856E00E395C0 /* calorie_calcTests */,
+				68C194342F92856E00E395C0 /* CalorieCalcTests */,
 			);
-			name = calorie_calcTests;
+			name = CalorieCalcTests;
 			packageProductDependencies = (
 			);
-			productName = calorie_calcTests;
-			productReference = 68C194312F92856E00E395C0 /* calorie_calcTests.xctest */;
+			productName = CalorieCalcTests;
+			productReference = 68C194312F92856E00E395C0 /* CalorieCalcTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		68C1943A2F92856E00E395C0 /* calorie_calcUITests */ = {
+		68C1943A2F92856E00E395C0 /* CalorieCalcUITests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 68C1944C2F92856E00E395C0 /* Build configuration list for PBXNativeTarget "calorie_calcUITests" */;
+			buildConfigurationList = 68C1944C2F92856E00E395C0 /* Build configuration list for PBXNativeTarget "CalorieCalcUITests" */;
 			buildPhases = (
 				68C194372F92856E00E395C0 /* Sources */,
 				68C194382F92856E00E395C0 /* Frameworks */,
@@ -169,13 +169,13 @@
 				68C1943D2F92856E00E395C0 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				68C1943E2F92856E00E395C0 /* calorie_calcUITests */,
+				68C1943E2F92856E00E395C0 /* CalorieCalcUITests */,
 			);
-			name = calorie_calcUITests;
+			name = CalorieCalcUITests;
 			packageProductDependencies = (
 			);
-			productName = calorie_calcUITests;
-			productReference = 68C1943B2F92856E00E395C0 /* calorie_calcUITests.xctest */;
+			productName = CalorieCalcUITests;
+			productReference = 68C1943B2F92856E00E395C0 /* CalorieCalcUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
 /* End PBXNativeTarget section */
@@ -201,7 +201,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 68C1941B2F92856D00E395C0 /* Build configuration list for PBXProject "calorie_calc" */;
+			buildConfigurationList = 68C1941B2F92856D00E395C0 /* Build configuration list for PBXProject "CalorieCalc" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -215,9 +215,9 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				68C1941F2F92856D00E395C0 /* calorie_calc */,
-				68C194302F92856E00E395C0 /* calorie_calcTests */,
-				68C1943A2F92856E00E395C0 /* calorie_calcUITests */,
+				68C1941F2F92856D00E395C0 /* CalorieCalc */,
+				68C194302F92856E00E395C0 /* CalorieCalcTests */,
+				68C1943A2F92856E00E395C0 /* CalorieCalcUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -273,12 +273,12 @@
 /* Begin PBXTargetDependency section */
 		68C194332F92856E00E395C0 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 68C1941F2F92856D00E395C0 /* calorie_calc */;
+			target = 68C1941F2F92856D00E395C0 /* CalorieCalc */;
 			targetProxy = 68C194322F92856E00E395C0 /* PBXContainerItemProxy */;
 		};
 		68C1943D2F92856E00E395C0 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
-			target = 68C1941F2F92856D00E395C0 /* calorie_calc */;
+			target = 68C1941F2F92856D00E395C0 /* CalorieCalc */;
 			targetProxy = 68C1943C2F92856E00E395C0 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
@@ -290,7 +290,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = calorie_calc/calorie_calc.entitlements;
+				CODE_SIGN_ENTITLEMENTS = CalorieCalc/CalorieCalc.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = X8629DMYVG;
@@ -299,7 +299,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = calorie_calc/Info.plist;
+				INFOPLIST_FILE = CalorieCalc/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CalorieCalc;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSCameraUsageDescription = "CalorieBank uses the camera to scan product barcodes so you can quickly log packaged foods.";
@@ -342,7 +342,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
-				CODE_SIGN_ENTITLEMENTS = calorie_calc/calorie_calc.entitlements;
+				CODE_SIGN_ENTITLEMENTS = CalorieCalc/CalorieCalc.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = X8629DMYVG;
@@ -351,7 +351,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = calorie_calc/Info.plist;
+				INFOPLIST_FILE = CalorieCalc/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CalorieCalc;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSCameraUsageDescription = "CalorieBank uses the camera to scan product barcodes so you can quickly log packaged foods.";
@@ -525,7 +525,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/calorie_calc.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/calorie_calc";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CalorieCalc.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CalorieCalc";
 				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Debug;
@@ -551,7 +551,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/calorie_calc.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/calorie_calc";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CalorieCalc.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CalorieCalc";
 				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Release;
@@ -576,7 +576,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = calorie_calc;
+				TEST_TARGET_NAME = CalorieCalc;
 				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Debug;
@@ -601,7 +601,7 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 6.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
-				TEST_TARGET_NAME = calorie_calc;
+				TEST_TARGET_NAME = CalorieCalc;
 				XROS_DEPLOYMENT_TARGET = 26.4;
 			};
 			name = Release;
@@ -609,7 +609,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		68C1941B2F92856D00E395C0 /* Build configuration list for PBXProject "calorie_calc" */ = {
+		68C1941B2F92856D00E395C0 /* Build configuration list for PBXProject "CalorieCalc" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				68C194472F92856E00E395C0 /* Debug */,
@@ -618,7 +618,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		68C194442F92856E00E395C0 /* Build configuration list for PBXNativeTarget "calorie_calc" */ = {
+		68C194442F92856E00E395C0 /* Build configuration list for PBXNativeTarget "CalorieCalc" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				68C194452F92856E00E395C0 /* Debug */,
@@ -627,7 +627,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		68C194492F92856E00E395C0 /* Build configuration list for PBXNativeTarget "calorie_calcTests" */ = {
+		68C194492F92856E00E395C0 /* Build configuration list for PBXNativeTarget "CalorieCalcTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				68C1944A2F92856E00E395C0 /* Debug */,
@@ -636,7 +636,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		68C1944C2F92856E00E395C0 /* Build configuration list for PBXNativeTarget "calorie_calcUITests" */ = {
+		68C1944C2F92856E00E395C0 /* Build configuration list for PBXNativeTarget "CalorieCalcUITests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				68C1944D2F92856E00E395C0 /* Debug */,

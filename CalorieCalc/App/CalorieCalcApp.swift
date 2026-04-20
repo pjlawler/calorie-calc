@@ -2,7 +2,7 @@ import SwiftUI
 import SwiftData
 
 @main
-struct calorie_calcApp: App {
+struct CalorieCalcApp: App {
 
     private let modelContainer: ModelContainer
     private let healthKitService: HealthKitService
@@ -27,10 +27,12 @@ struct calorie_calcApp: App {
         }
 
         healthKitService = HealthKitService()
-        let chained = ChainedFoodDataSource(sources: [
-            OpenFoodFactsService(),
-            USDAFoodDataCentralService(),
-        ])
+        let openFoodFacts = OpenFoodFactsService()
+        let usda = USDAFoodDataCentralService()
+        let chained = ChainedFoodDataSource(
+            searchSources: [usda, openFoodFacts],
+            barcodeSources: [openFoodFacts, usda]
+        )
         foodDataSource = FoodDataSourceEnvironment(dataSource: chained)
         foodRecognition = FoodRecognitionEnvironment(service: ClaudeFoodRecognitionService())
     }

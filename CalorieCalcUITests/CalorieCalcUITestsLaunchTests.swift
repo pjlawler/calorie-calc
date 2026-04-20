@@ -1,13 +1,13 @@
 //
-//  calorie_calcUITestsLaunchTests.swift
-//  calorie_calcUITests
+//  CalorieCalcUITestsLaunchTests.swift
+//  CalorieCalcUITests
 //
 //  Created by Patrick Lawler on 4/17/26.
 //
 
 import XCTest
 
-final class calorie_calcUITestsLaunchTests: XCTestCase {
+final class CalorieCalcUITestsLaunchTests: XCTestCase {
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true
