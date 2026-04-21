@@ -3,6 +3,7 @@ import SwiftUI
 
 nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
     case calories
+    case net
     case protein
     case carbs
     case fat
@@ -13,6 +14,7 @@ nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
     var displayName: String {
         switch self {
         case .calories: "Calories"
+        case .net: "Net"
         case .protein: "Protein"
         case .carbs: "Carbs"
         case .fat: "Fat"
@@ -22,7 +24,7 @@ nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
 
     var unit: String {
         switch self {
-        case .calories, .exercise: "kCal"
+        case .calories, .net, .exercise: "kCal"
         case .protein, .carbs, .fat: "g"
         }
     }
@@ -30,6 +32,7 @@ nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
     var color: Color {
         switch self {
         case .calories: .accentColor
+        case .net: .indigo
         case .protein: .blue
         case .carbs: .orange
         case .fat: .pink
@@ -84,6 +87,7 @@ enum HistoryAggregator {
     struct Goals: Hashable {
         let dailyCalorieGoal: Double?
         let dailyWorkoutGoal: Double?
+        let dailyNetCalorieGoal: Double?
     }
 
     struct DailyTotals: Hashable {
@@ -185,8 +189,13 @@ enum HistoryAggregator {
         }()
 
         let total = buckets.reduce(0) { $0 + $1.value }
-        let nonZeroCount = max(1, buckets.filter { $0.value > 0 }.count)
-        let average = buckets.isEmpty ? 0 : total / Double(nonZeroCount)
+        let activeCount: Int = {
+            let predicate: (HistoryBucket) -> Bool = metric == .net
+                ? { $0.value != 0 }
+                : { $0.value > 0 }
+            return max(1, buckets.filter(predicate).count)
+        }()
+        let average = buckets.isEmpty ? 0 : total / Double(activeCount)
 
         let (goal, goalLabel) = goalFor(metric: metric, timeframe: timeframe, goals: goals)
 
@@ -215,6 +224,11 @@ enum HistoryAggregator {
             let value = dailyTotals[today]?.exercise ?? 0
             return [HistoryBucket(id: "exercise-today", label: "Today", date: today, value: value)]
         }
+        if metric == .net {
+            let totals = dailyTotals[today]
+            let value = (totals?.calories ?? 0) - (totals?.exercise ?? 0)
+            return [HistoryBucket(id: "net-today", label: "Today", date: today, value: value)]
+        }
         let todayLog = dayLogs.first { calendar.isDate($0.date, inSameDayAs: today) }
         let meals = MealType.allCases.sorted { $0.order < $1.order }
         var buckets: [HistoryBucket] = []
@@ -236,7 +250,7 @@ enum HistoryAggregator {
 
     private static func mealEntryValue(_ entry: FoodEntry, metric: HistoryMetric) -> Double {
         switch metric {
-        case .calories: entry.totalCalories
+        case .calories, .net: entry.totalCalories
         case .protein: entry.totalProtein
         case .carbs: entry.totalCarbs
         case .fat: entry.totalFat
@@ -291,17 +305,16 @@ enum HistoryAggregator {
                 if let totals = dailyTotals[day] {
                     let v = value(for: metric, totals: totals)
                     monthTotal += v
-                    if v > 0 { daysContributing += 1 }
+                    let contributes: Bool = metric == .net ? v != 0 : v > 0
+                    if contributes { daysContributing += 1 }
                 }
                 guard let next = calendar.date(byAdding: .day, value: 1, to: day) else { break }
                 day = next
             }
-            // Average per active day for calories/macros (more meaningful month-over-month);
-            // total for exercise (users usually want "how much I burned this month").
             let value: Double
             switch metric {
             case .exercise: value = monthTotal
-            case .calories, .protein, .carbs, .fat:
+            case .calories, .net, .protein, .carbs, .fat:
                 value = daysContributing > 0 ? monthTotal / Double(daysContributing) : 0
             }
             result.append(HistoryBucket(
@@ -319,6 +332,7 @@ enum HistoryAggregator {
         guard let totals else { return 0 }
         switch metric {
         case .calories: return totals.calories
+        case .net: return totals.calories - totals.exercise
         case .protein: return totals.protein
         case .carbs: return totals.carbs
         case .fat: return totals.fat
@@ -334,6 +348,7 @@ enum HistoryAggregator {
         let dailyValue: Double?
         switch metric {
         case .calories: dailyValue = goals.dailyCalorieGoal
+        case .net: dailyValue = goals.dailyNetCalorieGoal
         case .exercise: dailyValue = goals.dailyWorkoutGoal
         case .protein, .carbs, .fat: dailyValue = nil
         }
@@ -342,10 +357,9 @@ enum HistoryAggregator {
         case .day, .currentWeek, .rolling7, .month:
             return (daily, "Daily goal")
         case .year:
-            // Year view shows monthly aggregates; scale the goal to match (avg daily for calories/macros, monthly total for exercise).
             switch metric {
             case .exercise: return (daily * 30, "Monthly goal")
-            case .calories, .protein, .carbs, .fat: return (daily, "Daily goal")
+            case .calories, .net, .protein, .carbs, .fat: return (daily, "Daily goal")
             }
         }
     }

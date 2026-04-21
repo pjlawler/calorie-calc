@@ -11,7 +11,7 @@ nonisolated enum AppTab: String, CaseIterable, Hashable, Identifiable, Sendable 
     var displayName: String {
         switch self {
         case .dashboard: "My Plan"
-        case .week: "Week"
+        case .week: "Calc"
         case .history: "History"
         case .progress: "Progress"
         }
@@ -20,7 +20,7 @@ nonisolated enum AppTab: String, CaseIterable, Hashable, Identifiable, Sendable 
     var systemImage: String {
         switch self {
         case .dashboard: "target"
-        case .week: "calendar"
+        case .week: "flame"
         case .history: "chart.xyaxis.line"
         case .progress: "chart.line.uptrend.xyaxis"
         }

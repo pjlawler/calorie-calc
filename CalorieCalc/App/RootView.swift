@@ -4,6 +4,7 @@ struct RootView: View {
     @State private var selection: AppTab
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw: String = AppAppearance.system.rawValue
     @Environment(HealthKitService.self) private var healthKitService
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         let raw = UserDefaults.standard.string(forKey: AppTab.defaultTabStorageKey) ?? AppTab.week.rawValue
@@ -34,6 +35,11 @@ struct RootView: View {
         }
         .task {
             await healthKitService.ensureAuthorizationAtStartup()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                selection = .week
+            }
         }
     }
 }

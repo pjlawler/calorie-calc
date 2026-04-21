@@ -13,6 +13,7 @@ struct HistoryChartsView: View {
     @State private var timeframe: HistoryTimeframe = .currentWeek
     @State private var workoutBurnByDay: [Date: Double] = [:]
     @State private var isLoadingHealthKit = false
+    @State private var showSettings = false
 
     private var weekStart: Weekday { profiles.first?.weekStart ?? .monday }
     private var currentGoalPeriod: GoalPeriod? { GoalPeriod.current(in: goalPeriods) }
@@ -20,7 +21,8 @@ struct HistoryChartsView: View {
     private var goals: HistoryAggregator.Goals {
         HistoryAggregator.Goals(
             dailyCalorieGoal: currentGoalPeriod.map { Double($0.dailyGrossCalorieGoal) },
-            dailyWorkoutGoal: currentGoalPeriod.map { Double($0.dailyWorkoutCalorieGoal) }
+            dailyWorkoutGoal: currentGoalPeriod.map { Double($0.dailyWorkoutCalorieGoal) },
+            dailyNetCalorieGoal: currentGoalPeriod.map { Double($0.dailyNetCalorieGoal) }
         )
     }
 
@@ -56,6 +58,19 @@ struct HistoryChartsView: View {
             .scrollBounceBehavior(.basedOnSize)
             .navigationTitle("History")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
         }
         .task(id: timeframeRangeKey) { await loadHealthKit() }
     }

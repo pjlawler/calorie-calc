@@ -58,14 +58,6 @@ struct WeekCalendarView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarLeading) {
-            Button {
-                showSettings = true
-            } label: {
-                Image(systemName: "gearshape")
-            }
-            .accessibilityLabel("Settings")
-        }
         ToolbarItem(placement: .principal) {
             HStack(spacing: 8) {
                 Button { viewModel?.shiftWeek(by: -1) } label: {
@@ -95,6 +87,14 @@ struct WeekCalendarView: View {
                 }
                 .accessibilityLabel("Jump to current week")
             }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                showSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .accessibilityLabel("Settings")
         }
     }
 
@@ -137,18 +137,11 @@ private struct WeekCalendarBody: View {
         caloriesRemaining < 0 ? .red : .primary
     }
 
-    private var planColor: Color {
-        guard let variance = calculation.planVariance else { return .primary }
-        if variance > 0 { return .green }
-        if variance < 0 { return .red }
-        return .primary
-    }
-
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                Text("Week Calorie Log")
-                    .font(.title3.weight(.semibold))
+                Text("CalorieCalc")
+                    .font(.largeTitle.bold())
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(spacing: 8) {
@@ -180,9 +173,7 @@ private struct WeekCalendarBody: View {
 
     private var weeklySummary: some View {
         VStack(alignment: .leading, spacing: 20) {
-            if !hidePlanVariance {
-                planSummary
-            }
+            plannedRemainingTodaySummary
             remainingSummary
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -190,34 +181,95 @@ private struct WeekCalendarBody: View {
         .padding(.top, 4)
     }
 
-    private var hidePlanVariance: Bool {
-        guard let lastDay = weekDates.last else { return false }
-        let calendar = Calendar.current
-        return calendar.startOfDay(for: .now) >= calendar.startOfDay(for: lastDay)
+    private var plannedRemainingThroughToday: Double? {
+        guard let todayIndex = weekDates.firstIndex(where: {
+            Calendar.current.isDate($0, inSameDayAs: .now)
+        }) else { return nil }
+        let inclusive = calculation.dailyBudgets.prefix(todayIndex + 1)
+        let plannedSum = inclusive.reduce(0.0) { $0 + ($1.grossBudget ?? 0) }
+        let consumedSum = inclusive.reduce(0.0) { $0 + $1.consumed }
+        return plannedSum - consumedSum
+    }
+
+    private var daysRemainingAfterToday: Int? {
+        guard let todayIndex = weekDates.firstIndex(where: {
+            Calendar.current.isDate($0, inSameDayAs: .now)
+        }) else { return nil }
+        return weekDates.count - todayIndex - 1
+    }
+
+    @ViewBuilder
+    private var plannedRemainingTodaySummary: some View {
+        if let remaining = plannedRemainingThroughToday,
+           let daysLeft = daysRemainingAfterToday,
+           !(remaining < 0 && daysLeft == 0) {
+            let isOver = remaining < 0
+            let magnitude = CalorieFormatter.whole(abs(remaining))
+            let number = Text(magnitude)
+                .foregroundStyle(isOver ? .red : .green)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Plan progress")
+                    .font(.title2.weight(.semibold))
+                progressParagraph(isOver: isOver, number: number)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func progressParagraph(isOver: Bool, number: Text) -> Text {
+        let disclaimer = "This doesn't take into account your exercise progress."
+        if isOver {
+            let tail: String
+            switch weekPosition {
+            case .notCurrentWeek, .earlyWeek:
+                tail = "Plenty of week left — tighten things up over the next few days to bring this back in line."
+            case .midWeek:
+                tail = "A couple of lighter days between now and the weekend can close the gap."
+            case .lateWeek:
+                tail = "One day left — a lighter day tomorrow can help close the gap."
+            case .lastDay:
+                tail = ""
+            }
+            return Text("You're currently \(number) kCal over your planned eating goals. \(tail) \(disclaimer)")
+        } else {
+            let tail: String
+            switch weekPosition {
+            case .notCurrentWeek, .earlyWeek:
+                tail = "Plenty of week left to spend it."
+            case .midWeek:
+                tail = "Nice cushion heading into the back half."
+            case .lateWeek:
+                tail = "One day left — you've got room to eat well tomorrow."
+            case .lastDay:
+                tail = "Today's the last day — this is your remaining runway."
+            }
+            return Text("You have \(number) kCal remaining on your planned eating goals. \(tail) \(disclaimer)")
+        }
     }
 
     private var remainingSummary: some View {
         let isOver = caloriesRemaining < 0
         let magnitude = CalorieFormatter.whole(abs(caloriesRemaining))
-        let value = Text("\(CalorieFormatter.whole(caloriesRemaining)) kCal")
+        let number = Text(magnitude)
             .foregroundStyle(remainingColor)
         return VStack(alignment: .leading, spacing: 6) {
-            Text("Remaining: \(value)")
-                .font(.title2.monospacedDigit().weight(.semibold))
-            Text(remainingParagraph(isOver: isOver, magnitude: magnitude))
+            Text("Net calories remaining")
+                .font(.title2.weight(.semibold))
+            remainingParagraph(isOver: isOver, number: number)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
 
-    private func remainingParagraph(isOver: Bool, magnitude: String) -> String {
+    private func remainingParagraph(isOver: Bool, number: Text) -> Text {
         if isOver {
-            let core = "You're \(magnitude) kCal over your weekly budget."
             let tail: String
             switch weekPosition {
             case .notCurrentWeek:
-                return core
+                return Text("You're \(number) kCal over your weekly budget.")
             case .earlyWeek:
                 tail = "Don't be discouraged — the week is still young. Tighten things up over the next few days and you'll erase most of this."
             case .midWeek:
@@ -227,13 +279,12 @@ private struct WeekCalendarBody: View {
             case .lastDay:
                 tail = "Today's the last day, so this week is essentially locked in. Don't be discouraged — reset and get back on track next week."
             }
-            return "\(core) \(tail)"
+            return Text("You're \(number) kCal over your weekly budget. \(tail)")
         } else {
-            let core = "You have \(magnitude) kCal remaining to eat this week."
             let tail: String
             switch weekPosition {
             case .notCurrentWeek:
-                return core
+                return Text("You have \(number) kCal remaining to eat this week.")
             case .earlyWeek:
                 tail = "Plenty of week left to spend it — more workouts will earn you even more calories."
             case .midWeek:
@@ -243,56 +294,8 @@ private struct WeekCalendarBody: View {
             case .lastDay:
                 tail = "Today's the last day of the week, so this is your remaining runway. Any exercise today adds to it."
             }
-            return "\(core) \(tail)"
+            return Text("You have \(number) kCal remaining to eat this week. \(tail)")
         }
-    }
-
-    @ViewBuilder
-    private var planSummary: some View {
-        if let variance = calculation.planVariance {
-            let magnitude = CalorieFormatter.whole(abs(variance))
-            let value = Text("\(CalorieFormatter.signed(variance)) kCal")
-                .foregroundStyle(planColor)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Plan Variance: \(value)")
-                    .font(.title2.monospacedDigit().weight(.semibold))
-                Text(planParagraph(variance: variance, magnitude: magnitude))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    private func planParagraph(variance: Double, magnitude: String) -> String {
-        if variance == 0 {
-            return "You're right on plan for the week."
-        }
-        let direction = variance > 0 ? "under" : "over"
-        let core = "You're \(magnitude) calories \(direction) your plan."
-        let ahead = variance > 0
-        let tail: String
-        switch weekPosition {
-        case .notCurrentWeek:
-            return core
-        case .earlyWeek:
-            tail = ahead
-                ? "Plenty of week left — keep this rhythm and it'll be a great one."
-                : "The week just started, so there's plenty of room to dial it in from here."
-        case .midWeek:
-            tail = ahead
-                ? "You've built a solid cushion heading into the back half."
-                : "A few lighter days between now and the weekend will close the gap."
-        case .lateWeek:
-            tail = ahead
-                ? "Just one day left — a steady finish locks this in."
-                : "One day left to close the gap — a lighter day tomorrow makes the difference."
-        case .lastDay:
-            tail = ahead
-                ? "Last day of the week — bring it home today."
-                : "Today's the last day — eating a bit lighter will bring you closer to plan."
-        }
-        return "\(core) \(tail)"
     }
 
     private enum WeekPosition {

@@ -35,6 +35,7 @@ struct ProgressTrendView: View {
     @Query(sort: [SortDescriptor(\WeightEntry.timestamp, order: .forward)]) private var weightEntries: [WeightEntry]
 
     @State private var timeframe: ProgressTrendTimeframe = .days90
+    @State private var showSettings = false
 
     private var preferredUnit: WeightUnit {
         profiles.first?.weightUnit ?? .pounds
@@ -83,6 +84,19 @@ struct ProgressTrendView: View {
             .scrollBounceBehavior(.basedOnSize)
             .navigationTitle("Progress")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSettings = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .accessibilityLabel("Settings")
+                }
+            }
+            .sheet(isPresented: $showSettings) {
+                SettingsView()
+            }
         }
     }
 
