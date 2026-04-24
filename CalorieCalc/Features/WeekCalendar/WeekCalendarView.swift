@@ -181,7 +181,7 @@ private struct WeekCalendarBody: View {
         .padding(.top, 4)
     }
 
-    private var plannedRemainingThroughToday: Double? {
+    private var eatingRemainingThroughToday: Double? {
         guard let todayIndex = weekDates.firstIndex(where: {
             Calendar.current.isDate($0, inSameDayAs: .now)
         }) else { return nil }
@@ -191,62 +191,63 @@ private struct WeekCalendarBody: View {
         return plannedSum - consumedSum
     }
 
-    private var daysRemainingAfterToday: Int? {
+    private var workoutSurplusThroughToday: Double? {
         guard let todayIndex = weekDates.firstIndex(where: {
             Calendar.current.isDate($0, inSameDayAs: .now)
         }) else { return nil }
-        return weekDates.count - todayIndex - 1
+        let inclusive = calculation.dailyBudgets.prefix(todayIndex + 1)
+        let plannedSum = Double(period.dailyWorkoutCalorieGoal) * Double(todayIndex + 1)
+        let burnedSum = inclusive.reduce(0.0) { $0 + $1.burned }
+        return burnedSum - plannedSum
     }
 
     @ViewBuilder
     private var plannedRemainingTodaySummary: some View {
-        if let remaining = plannedRemainingThroughToday,
-           let daysLeft = daysRemainingAfterToday,
-           !(remaining < 0 && daysLeft == 0) {
-            let isOver = remaining < 0
-            let magnitude = CalorieFormatter.whole(abs(remaining))
-            let number = Text(magnitude)
-                .foregroundStyle(isOver ? .red : .green)
+        if let eatingRemaining = eatingRemainingThroughToday,
+           let workoutSurplus = workoutSurplusThroughToday {
+            let combined = eatingRemaining + workoutSurplus
+            let eatingUnderGoal = eatingRemaining >= 0
+            let workoutOverGoal = workoutSurplus >= 0
+            let aheadOfPlan = combined >= 0
+            let eatingNumber = Text(CalorieFormatter.whole(abs(eatingRemaining)))
+                .foregroundStyle(eatingUnderGoal ? .green : .red)
+            let workoutNumber = Text(CalorieFormatter.whole(abs(workoutSurplus)))
+                .foregroundStyle(workoutOverGoal ? .green : .red)
+            let combinedNumber = Text(CalorieFormatter.whole(abs(combined)))
+                .foregroundStyle(aheadOfPlan ? .green : .red)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Plan progress")
                     .font(.title2.weight(.semibold))
-                progressParagraph(isOver: isOver, number: number)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                progressParagraph(
+                    eatingUnderGoal: eatingUnderGoal,
+                    eatingNumber: eatingNumber,
+                    workoutOverGoal: workoutOverGoal,
+                    workoutNumber: workoutNumber,
+                    aheadOfPlan: aheadOfPlan,
+                    combinedNumber: combinedNumber
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
 
-    private func progressParagraph(isOver: Bool, number: Text) -> Text {
-        let disclaimer = "This doesn't take into account your exercise progress."
-        if isOver {
-            let tail: String
-            switch weekPosition {
-            case .notCurrentWeek, .earlyWeek:
-                tail = "Plenty of week left — tighten things up over the next few days to bring this back in line."
-            case .midWeek:
-                tail = "A couple of lighter days between now and the weekend can close the gap."
-            case .lateWeek:
-                tail = "One day left — a lighter day tomorrow can help close the gap."
-            case .lastDay:
-                tail = ""
-            }
-            return Text("You're currently \(number) kCal over your planned eating goals. \(tail) \(disclaimer)")
-        } else {
-            let tail: String
-            switch weekPosition {
-            case .notCurrentWeek, .earlyWeek:
-                tail = "Plenty of week left to spend it."
-            case .midWeek:
-                tail = "Nice cushion heading into the back half."
-            case .lateWeek:
-                tail = "One day left — you've got room to eat well tomorrow."
-            case .lastDay:
-                tail = "Today's the last day — this is your remaining runway."
-            }
-            return Text("You have \(number) kCal remaining on your planned eating goals. \(tail) \(disclaimer)")
-        }
+    private func progressParagraph(
+        eatingUnderGoal: Bool,
+        eatingNumber: Text,
+        workoutOverGoal: Bool,
+        workoutNumber: Text,
+        aheadOfPlan: Bool,
+        combinedNumber: Text
+    ) -> Text {
+        let eatingSide = eatingUnderGoal ? "under" : "over"
+        let workoutSide = workoutOverGoal ? "over" : "under"
+        let planSide = aheadOfPlan ? "ahead of" : "behind"
+        let encouragement = aheadOfPlan
+            ? "Keep up the great work!"
+            : "There's still time to turn it around."
+        return Text("So far you're \(eatingNumber) kCal \(eatingSide) your eating goal and \(workoutNumber) kCal \(workoutSide) your workout goal — that puts you \(combinedNumber) kCal \(planSide) your plan. \(encouragement)")
     }
 
     private var remainingSummary: some View {

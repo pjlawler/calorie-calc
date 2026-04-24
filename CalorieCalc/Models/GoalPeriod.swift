@@ -8,21 +8,21 @@ import SwiftData
 /// rewrite last month's plan variance.
 @Model
 final class GoalPeriod {
-    @Attribute(.unique) var id: UUID
+    var id: UUID = UUID()
 
     /// First day this period applies to, inclusive. Usually the first day of the week (per
     /// `weekStart`) the user made the change in, so the change applies to the full current week.
-    var startDate: Date
+    var startDate: Date = Date()
 
     /// First day of the NEXT period, exclusive. `nil` for the currently-active period.
     var endDate: Date?
 
-    var dailyNetCalorieGoal: Int
-    var dailyGrossCalorieGoal: Int
-    var dailyWorkoutCalorieGoal: Int
+    var dailyNetCalorieGoal: Int = 1_600
+    var dailyGrossCalorieGoal: Int = 1_800
+    var dailyWorkoutCalorieGoal: Int = 500
 
-    var bankSplit: BankSplit
-    var weekStart: Weekday
+    var bankSplit: BankSplit = BankSplit.fiveTwo
+    var weekStart: Weekday = Weekday.monday
 
     init(
         id: UUID = UUID(),

@@ -3,8 +3,8 @@ import SwiftData
 
 @Model
 final class DayLog {
-    @Attribute(.unique) var id: UUID
-    @Attribute(.unique) var date: Date
+    var id: UUID = UUID()
+    var date: Date = Date()
 
     @Relationship(deleteRule: .cascade, inverse: \FoodEntry.dayLog)
     var foodEntries: [FoodEntry] = []

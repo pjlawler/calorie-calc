@@ -3,21 +3,21 @@ import SwiftData
 
 @Model
 final class FoodEntry {
-    @Attribute(.unique) var id: UUID
+    var id: UUID = UUID()
 
-    var name: String
+    var name: String = ""
     var brand: String?
 
-    var servingDescription: String
+    var servingDescription: String = ""
     var servingSizeGrams: Double?
     var servingSizeMilliliters: Double?
 
-    var quantity: Double
+    var quantity: Double = 1
 
-    var caloriesPerServing: Double
-    var proteinPerServing: Double
-    var carbsPerServing: Double
-    var fatPerServing: Double
+    var caloriesPerServing: Double = 0
+    var proteinPerServing: Double = 0
+    var carbsPerServing: Double = 0
+    var fatPerServing: Double = 0
 
     var saturatedFatPerServing: Double?
     var transFatPerServing: Double?
@@ -29,13 +29,13 @@ final class FoodEntry {
     var sugarsPerServing: Double?
     var addedSugarsPerServing: Double?
 
-    var mealType: MealType
-    var source: FoodSource
+    var mealType: MealType = MealType.snack
+    var source: FoodSource = FoodSource.manual
     var externalId: String?
 
     var notes: String?
 
-    var timestamp: Date
+    var timestamp: Date = Date()
 
     var dayLog: DayLog?
 

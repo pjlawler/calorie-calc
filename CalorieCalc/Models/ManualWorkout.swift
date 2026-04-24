@@ -3,13 +3,13 @@ import SwiftData
 
 @Model
 final class ManualWorkout {
-    @Attribute(.unique) var id: UUID
+    var id: UUID = UUID()
 
-    var name: String
-    var durationSeconds: Int
-    var caloriesBurned: Double
+    var name: String = ""
+    var durationSeconds: Int = 0
+    var caloriesBurned: Double = 0
     var notes: String?
-    var timestamp: Date
+    var timestamp: Date = Date()
 
     var dayLog: DayLog?
 

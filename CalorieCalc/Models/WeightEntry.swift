@@ -3,11 +3,11 @@ import SwiftData
 
 @Model
 final class WeightEntry {
-    @Attribute(.unique) var id: UUID
+    var id: UUID = UUID()
 
-    var weight: Double
-    var unit: WeightUnit
-    var timestamp: Date
+    var weight: Double = 0
+    var unit: WeightUnit = WeightUnit.pounds
+    var timestamp: Date = Date()
     var notes: String?
 
     init(

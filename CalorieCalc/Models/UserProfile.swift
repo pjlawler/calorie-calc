@@ -3,27 +3,27 @@ import SwiftData
 
 @Model
 final class UserProfile {
-    @Attribute(.unique) var id: UUID
+    var id: UUID = UUID()
 
-    var dailyNetCalorieGoal: Int
-    var dailyGrossCalorieGoal: Int
-    var dailyWorkoutCalorieGoal: Int
+    var dailyNetCalorieGoal: Int = 1_600
+    var dailyGrossCalorieGoal: Int = 1_800
+    var dailyWorkoutCalorieGoal: Int = 500
 
-    var bankSplit: BankSplit
-    var weekStart: Weekday
+    var bankSplit: BankSplit = BankSplit.fiveTwo
+    var weekStart: Weekday = Weekday.monday
     /// Legacy storage. Banking days are now derived from `weekStart` + `bankSplit` on the fly,
     /// so this value is ignored. Kept as a field so existing SwiftData stores migrate without loss.
     var bankingWeekdayRawValues: [Int] = []
 
-    var weightUnit: WeightUnit
-    var energyUnit: EnergyUnit
+    var weightUnit: WeightUnit = WeightUnit.pounds
+    var energyUnit: EnergyUnit = EnergyUnit.kilocalories
 
     var startingWeight: Double?
     var startingWeightLoggedAt: Date?
     var goalWeight: Double?
 
-    var createdAt: Date
-    var updatedAt: Date
+    var createdAt: Date = Date()
+    var updatedAt: Date = Date()
 
     init(
         id: UUID = UUID(),

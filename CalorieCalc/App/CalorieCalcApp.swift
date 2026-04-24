@@ -10,7 +10,22 @@ struct CalorieCalcApp: App {
     private let foodRecognition: FoodRecognitionEnvironment
 
     init() {
-        let schema = Schema([
+        // Two-store layout: user data (food, workouts, goals, weight) lives in the default
+        // store and will sync via CloudKit once the iCloud capability is enabled. The food
+        // cache is per-device noise — it lives in a separate local-only store so iCloud
+        // isn't bloated with data that would just be re-fetched anyway.
+        let syncedSchema = Schema([
+            UserProfile.self,
+            GoalPeriod.self,
+            DayLog.self,
+            FoodEntry.self,
+            ManualWorkout.self,
+            WeightEntry.self,
+        ])
+        let cacheSchema = Schema([
+            CachedFood.self,
+        ])
+        let fullSchema = Schema([
             UserProfile.self,
             GoalPeriod.self,
             DayLog.self,
@@ -19,9 +34,12 @@ struct CalorieCalcApp: App {
             WeightEntry.self,
             CachedFood.self,
         ])
-        let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+        // Synced config keeps the default store URL so existing on-device data is preserved
+        // when this two-store split lands. CloudKit stays off until the capability is wired.
+        let syncedConfig = ModelConfiguration(schema: syncedSchema, isStoredInMemoryOnly: false)
+        let cacheConfig = ModelConfiguration("Cache", schema: cacheSchema, isStoredInMemoryOnly: false)
         do {
-            modelContainer = try ModelContainer(for: schema, configurations: [configuration])
+            modelContainer = try ModelContainer(for: fullSchema, configurations: syncedConfig, cacheConfig)
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
