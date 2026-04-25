@@ -9,12 +9,20 @@ struct SettingsView: View {
 
     @Query private var profiles: [UserProfile]
     @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
+    @Query(sort: \DayLog.date) private var dayLogs: [DayLog]
+    @Query(sort: \FoodEntry.timestamp) private var foodEntries: [FoodEntry]
+    @Query(sort: \ManualWorkout.timestamp) private var manualWorkouts: [ManualWorkout]
+    @Query(sort: \WeightEntry.timestamp) private var weightEntries: [WeightEntry]
+    @Query(sort: \CachedFood.lastUsed) private var cachedFoods: [CachedFood]
 
     @AppStorage(AppTab.defaultTabStorageKey) private var defaultTabRaw: String = AppTab.week.rawValue
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw: String = AppAppearance.system.rawValue
 
     @State private var viewModel: SettingsViewModel?
     @State private var draft: GoalDraft?
+    @State private var isExportingCSV = false
+    @State private var exportStatusMessage: String?
+    @State private var exportURL: URL?
 
     var body: some View {
         NavigationStack {
@@ -28,7 +36,11 @@ struct SettingsView: View {
                             set: { draft = $0 }
                         ),
                         defaultTabRaw: $defaultTabRaw,
-                        appearanceRaw: $appearanceRaw
+                        appearanceRaw: $appearanceRaw,
+                        onExportCSV: exportDatabaseCSV,
+                        isExportingCSV: isExportingCSV,
+                        exportStatusMessage: exportStatusMessage,
+                        exportURL: exportURL
                     )
                 } else {
                     ProgressView()
@@ -140,6 +152,103 @@ struct SettingsView: View {
         }
         draft.mirror(onto: profile)
     }
+
+    private func exportDatabaseCSV() {
+        guard !isExportingCSV else { return }
+        isExportingCSV = true
+        defer { isExportingCSV = false }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        func d(_ date: Date?) -> String {
+            guard let date else { return "" }
+            return formatter.string(from: date)
+        }
+
+        func csv(_ value: String) -> String {
+            if value.contains(",") || value.contains("\"") || value.contains("\n") {
+                return "\"\(value.replacingOccurrences(of: "\"", with: "\"\""))\""
+            }
+            return value
+        }
+
+        let header = [
+            "record_type", "id", "day_log_id", "timestamp", "date", "name", "brand",
+            "meal_type", "source", "calories", "protein", "carbs", "fat", "quantity",
+            "duration_seconds", "calories_burned", "weight", "unit", "daily_net_goal",
+            "daily_gross_goal", "daily_workout_goal", "bank_split", "week_start",
+            "start_date", "end_date", "notes"
+        ]
+
+        var rows: [[String]] = [header]
+
+        for profile in profiles {
+            rows.append([
+                "user_profile", profile.id.uuidString, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+                String(profile.dailyNetCalorieGoal), String(profile.dailyGrossCalorieGoal), String(profile.dailyWorkoutCalorieGoal),
+                profile.bankSplit.rawValue, "\(profile.weekStart.rawValue)", "", "", ""
+            ])
+        }
+
+        for period in goalPeriods {
+            rows.append([
+                "goal_period", period.id.uuidString, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
+                String(period.dailyNetCalorieGoal), String(period.dailyGrossCalorieGoal), String(period.dailyWorkoutCalorieGoal),
+                period.bankSplit.rawValue, "\(period.weekStart.rawValue)", d(period.startDate), d(period.endDate), ""
+            ])
+        }
+
+        for log in dayLogs {
+            rows.append([
+                "day_log", log.id.uuidString, "", "", d(log.date), "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""
+            ])
+        }
+
+        for entry in foodEntries {
+            rows.append([
+                "food_entry", entry.id.uuidString, entry.dayLog?.id.uuidString ?? "", d(entry.timestamp), "",
+                entry.name, entry.brand ?? "", entry.mealType.rawValue, entry.source.rawValue,
+                String(entry.caloriesPerServing), String(entry.proteinPerServing), String(entry.carbsPerServing),
+                String(entry.fatPerServing), String(entry.quantity), "", "", "", "", "", "", "", "", "", "", "", entry.notes ?? ""
+            ])
+        }
+
+        for workout in manualWorkouts {
+            rows.append([
+                "manual_workout", workout.id.uuidString, workout.dayLog?.id.uuidString ?? "", d(workout.timestamp), "",
+                workout.name, "", "", "", "", "", "", "", "",
+                String(workout.durationSeconds), String(workout.caloriesBurned), "", "", "", "", "", "", "", "", "", workout.notes ?? ""
+            ])
+        }
+
+        for weight in weightEntries {
+            rows.append([
+                "weight_entry", weight.id.uuidString, "", d(weight.timestamp), "", "", "", "", "", "", "", "", "", "", "", "",
+                String(weight.weight), weight.unit.rawValue, "", "", "", "", "", "", "", weight.notes ?? ""
+            ])
+        }
+
+        for cached in cachedFoods {
+            rows.append([
+                "cached_food", cached.id.uuidString, "", d(cached.lastUsed), "", cached.name, cached.brand ?? "", "", cached.source.rawValue,
+                String(cached.caloriesPerServing), String(cached.proteinPerServing), String(cached.carbsPerServing), String(cached.fatPerServing),
+                "", "", "", "", "", "", "", "", "", "", "", "", cached.notes ?? ""
+            ])
+        }
+
+        let text = rows.map { $0.map(csv).joined(separator: ",") }.joined(separator: "\n")
+        let url = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("CalorieCalc-export-\(Int(Date().timeIntervalSince1970)).csv")
+
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            exportURL = url
+            exportStatusMessage = "CSV generated. Tap Share CSV to save a copy."
+        } catch {
+            exportStatusMessage = "CSV export failed: \(error.localizedDescription)"
+        }
+    }
 }
 
 /// Transient copy of a `GoalPeriod`'s plan fields. The Settings sheet drives UI bindings against
@@ -196,6 +305,10 @@ private struct SettingsForm: View {
     @Binding var draft: GoalDraft
     @Binding var defaultTabRaw: String
     @Binding var appearanceRaw: String
+    let onExportCSV: () -> Void
+    let isExportingCSV: Bool
+    let exportStatusMessage: String?
+    let exportURL: URL?
 
     private var defaultTab: AppTab {
         get { AppTab(rawValue: defaultTabRaw) ?? .week }
@@ -313,6 +426,36 @@ private struct SettingsForm: View {
                     Text(error).font(.footnote).foregroundStyle(.red)
                 }
             }
+
+            #if DEBUG
+            Section {
+                Button {
+                    onExportCSV()
+                } label: {
+                    HStack {
+                        if isExportingCSV {
+                            ProgressView().controlSize(.small)
+                        }
+                        Text("Generate CSV export")
+                    }
+                }
+                .disabled(isExportingCSV)
+
+                if let exportURL {
+                    ShareLink("Share CSV", item: exportURL)
+                }
+
+                if let exportStatusMessage {
+                    Text(exportStatusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Debug")
+            } footer: {
+                Text("Visible only in debug builds.")
+            }
+            #endif
         }
     }
 

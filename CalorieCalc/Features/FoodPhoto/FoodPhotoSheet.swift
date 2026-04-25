@@ -34,6 +34,7 @@ struct FoodPhotoSheet: View {
     @State private var fatText: String = ""
     @State private var confidenceLabel: String?
     @State private var notesText: String?
+    @State private var recognizedServingGrams: Double?
 
     enum Stage: Equatable {
         case pickSource
@@ -331,6 +332,7 @@ struct FoodPhotoSheet: View {
         imageData = nil
         pickerItem = nil
         description = ""
+        recognizedServingGrams = nil
         errorMessage = nil
         stage = .pickSource
     }
@@ -355,6 +357,7 @@ struct FoodPhotoSheet: View {
     private func prefill(from meal: RecognizedMeal) {
         nameText = meal.name
         portionText = meal.portionDescription
+        recognizedServingGrams = meal.servingGrams
         caloriesText = String(Int(meal.caloriesPerServing.rounded()))
         proteinText = String(format: "%.1f", meal.proteinPerServing)
         carbsText = String(format: "%.1f", meal.carbsPerServing)
@@ -368,13 +371,18 @@ struct FoodPhotoSheet: View {
         let trimmedName = nameText.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else { return }
         let trimmedPortion = portionText.trimmingCharacters(in: .whitespaces)
+        let useEach = RecognizedMeal.shouldUseEachServing(
+            name: trimmedName,
+            portionDescription: trimmedPortion,
+            userText: description
+        )
         let log = ensureDayLog()
 
         let entry = FoodEntry(
             name: trimmedName,
             brand: nil,
-            servingDescription: trimmedPortion.isEmpty ? "1 serving" : trimmedPortion,
-            servingSizeGrams: nil,
+            servingDescription: trimmedPortion.isEmpty ? (useEach ? "1 each" : "1 serving") : trimmedPortion,
+            servingSizeGrams: useEach ? nil : recognizedServingGrams,
             quantity: 1,
             caloriesPerServing: cals,
             proteinPerServing: Double(proteinText) ?? 0,
@@ -394,7 +402,7 @@ struct FoodPhotoSheet: View {
 
     private func ensureDayLog() -> DayLog {
         let day = Calendar.current.startOfDay(for: date)
-        if let existing = dayLogs.first(where: { Calendar.current.isDate($0.date, inSameDayAs: day) }) {
+        if let existing = DayLog.preferredForDay(dayLogs, on: day) {
             return existing
         }
         let new = DayLog(date: day)

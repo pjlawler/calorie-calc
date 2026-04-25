@@ -68,7 +68,7 @@ struct ManualWorkoutSheet: View {
 
     private func ensureDayLog() -> DayLog {
         let day = Calendar.current.startOfDay(for: date)
-        if let existing = dayLogs.first(where: { Calendar.current.isDate($0.date, inSameDayAs: day) }) {
+        if let existing = DayLog.preferredForDay(dayLogs, on: day) {
             return existing
         }
         let new = DayLog(date: day)

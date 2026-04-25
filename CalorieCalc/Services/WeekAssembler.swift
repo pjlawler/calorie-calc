@@ -33,7 +33,9 @@ struct WeekAssembler {
         healthKitBurn: [Date: Double]
     ) -> [DayInput] {
         let today = calendar.startOfDay(for: .now)
-        let logsByDate = Dictionary(uniqueKeysWithValues: dayLogs.map { (calendar.startOfDay(for: $0.date), $0) })
+        let logsByDate = Dictionary(grouping: dayLogs) { log in
+            calendar.startOfDay(for: log.date)
+        }
 
         return weekDates.map { date in
             let weekday = date.weekday(in: calendar)
@@ -43,7 +45,7 @@ struct WeekAssembler {
                 return date < today ? .past : .future
             }()
 
-            let log = logsByDate[date]
+            let log = DayLog.preferredForDay(logsByDate[date] ?? [], on: date, calendar: calendar)
             let actualConsumed = log?.totalConsumedCalories ?? 0
             let hkBurn = healthKitBurn[date] ?? 0
             let manualBurn = log?.totalManualBurned ?? 0

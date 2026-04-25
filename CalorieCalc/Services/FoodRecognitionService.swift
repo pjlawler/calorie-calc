@@ -22,6 +22,41 @@ protocol FoodRecognitionService: Sendable {
     func estimate(description: String) async throws -> RecognizedMeal
 }
 
+extension RecognizedMeal {
+    /// Heuristic for default serving behavior in the portion UI:
+    /// - Composite or non-specific meal-like descriptions default to `.each`.
+    /// - Clear single-item foods can keep weight/volume serving data.
+    static func shouldUseEachServing(name: String, portionDescription: String, userText: String?) -> Bool {
+        let combined = [name, portionDescription, userText ?? ""]
+            .joined(separator: " ")
+            .lowercased()
+
+        let multiItemSignals = [
+            " and ",
+            " & ",
+            " + ",
+            " plus ",
+            " with side",
+            " side of "
+        ]
+        if multiItemSignals.contains(where: { combined.contains($0) }) {
+            return true
+        }
+
+        let nonSpecificSignals = [
+            "combo",
+            "meal",
+            "plate",
+            "platter",
+            "sampler",
+            "assorted",
+            "variety",
+            "mixed"
+        ]
+        return nonSpecificSignals.contains(where: { combined.contains($0) })
+    }
+}
+
 nonisolated enum FoodRecognitionError: LocalizedError, Sendable {
     case missingAPIKey
     case invalidResponse

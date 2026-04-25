@@ -120,12 +120,20 @@ struct WeekCalendarView: View {
 }
 
 private struct WeekCalendarBody: View {
+    @Query(
+        filter: #Predicate<CachedFood> { $0.isFavorite == true },
+        sort: [SortDescriptor(\CachedFood.lastUsed, order: .reverse)]
+    )
+    private var favoriteFoods: [CachedFood]
+
     let period: GoalPeriod
     let currentPeriod: GoalPeriod
     let calculation: WeeklyCalculation
     let dayLogs: [DayLog]
     @Binding var selectedDate: Date?
     let viewModel: WeekCalendarViewModel
+
+    @State private var showFavoriteQuickAdd = false
 
     private var weekDates: [Date] { viewModel.assembler(for: period).weekDates }
 
@@ -140,9 +148,21 @@ private struct WeekCalendarBody: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 12) {
-                Text("CalorieCalc")
-                    .font(.largeTitle.bold())
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .center) {
+                    Text("CalorieCalc")
+                        .font(.largeTitle.bold())
+                    Spacer()
+                    Button {
+                        showFavoriteQuickAdd = true
+                    } label: {
+                        Label("Add", systemImage: "star.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(favoriteFoods.isEmpty)
+                    .accessibilityLabel("Quick add favorite food")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(spacing: 8) {
                     ForEach(Array(zip(weekDates, calculation.dailyBudgets)), id: \.0) { date, budget in
@@ -169,6 +189,9 @@ private struct WeekCalendarBody: View {
             .padding(.vertical, 8)
         }
         .scrollBounceBehavior(.basedOnSize)
+        .sheet(isPresented: $showFavoriteQuickAdd) {
+            FavoriteQuickAddListSheet(favorites: favoriteFoods)
+        }
     }
 
     private var weeklySummary: some View {
@@ -319,9 +342,155 @@ private struct WeekCalendarBody: View {
         }
     }
 
-private func dayLog(for date: Date) -> DayLog? {
-        let day = Calendar.current.startOfDay(for: date)
-        return dayLogs.first { Calendar.current.isDate($0.date, inSameDayAs: day) }
+    private func dayLog(for date: Date) -> DayLog? {
+        DayLog.preferredForDay(dayLogs, on: date)
+    }
+}
+
+private struct FavoriteQuickAddListSheet: View {
+    let favorites: [CachedFood]
+
+    @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
+    @Query private var dayLogs: [DayLog]
+
+    @State private var selectedMeal: MealType = MealType.quickAddDefaultForCurrentTime()
+    @State private var selectedDate: Date = Calendar.current.startOfDay(for: .now)
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("Add to") {
+                    Picker("Meal", selection: $selectedMeal) {
+                        ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
+                            Text(meal.displayName).tag(meal)
+                        }
+                    }
+                    DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
+                }
+
+                Section("Favorites") {
+                    if favorites.isEmpty {
+                        Text("No favorites yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(favorites, id: \.id) { favorite in
+                            Button {
+                                addFavoriteToLog(favorite)
+                                dismiss()
+                            } label: {
+                                HStack(alignment: .firstTextBaseline) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(favorite.name)
+                                            .lineLimit(1)
+                                        HStack(spacing: 6) {
+                                            if let brand = favorite.brand {
+                                                Text(brand).lineLimit(1)
+                                            }
+                                            Text(favorite.defaultServingDescription).lineLimit(1)
+                                        }
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Text("\(CalorieFormatter.whole(favorite.caloriesPerServing)) kcal")
+                                        .font(.subheadline.monospacedDigit())
+                                }
+                                .padding(.vertical, 2)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Quick Add")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { dismiss() }
+                }
+            }
+        }
+    }
+    
+    private func addFavoriteToLog(_ food: CachedFood) {
+        let day = normalizedSelectedDay(from: selectedDate)
+        let dayLog = ensureDayLog(for: day)
+        let timestamp = defaultTimestamp(for: day)
+
+        let entry = FoodEntry(
+            name: food.name,
+            brand: food.brand,
+            servingDescription: food.defaultServingDescription,
+            servingSizeGrams: food.defaultServingSizeGrams,
+            servingSizeMilliliters: food.defaultServingSizeMilliliters,
+            quantity: 1,
+            caloriesPerServing: food.caloriesPerServing,
+            proteinPerServing: food.proteinPerServing,
+            carbsPerServing: food.carbsPerServing,
+            fatPerServing: food.fatPerServing,
+            saturatedFatPerServing: food.saturatedFatPerServing,
+            transFatPerServing: food.transFatPerServing,
+            monounsaturatedFatPerServing: food.monounsaturatedFatPerServing,
+            polyunsaturatedFatPerServing: food.polyunsaturatedFatPerServing,
+            cholesterolPerServing: food.cholesterolPerServing,
+            sodiumPerServing: food.sodiumPerServing,
+            fiberPerServing: food.fiberPerServing,
+            sugarsPerServing: food.sugarsPerServing,
+            addedSugarsPerServing: food.addedSugarsPerServing,
+            mealType: selectedMeal,
+            source: food.source,
+            externalId: food.externalId,
+            notes: food.notes,
+            timestamp: timestamp,
+            dayLog: dayLog
+        )
+        modelContext.insert(entry)
+        food.lastUsed = .now
+        food.useCount += 1
+        try? modelContext.save()
+    }
+
+    private func ensureDayLog(for day: Date) -> DayLog {
+        if let existing = DayLog.preferredForDay(dayLogs, on: day) {
+            return existing
+        }
+        let new = DayLog(date: day)
+        modelContext.insert(new)
+        return new
+    }
+
+    private func defaultTimestamp(for day: Date) -> Date {
+        if Calendar.current.isDateInToday(day) {
+            return .now
+        }
+        return Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
+    }
+
+    private func normalizedSelectedDay(from pickerDate: Date) -> Date {
+        // DatePicker(.date) may round-trip through GMT and shift a day for some locales.
+        // Read Y/M/D in UTC, then rebuild in local calendar to preserve the user's chosen date.
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let components = utc.dateComponents([.year, .month, .day], from: pickerDate)
+        let localDate = Calendar.current.date(from: components) ?? pickerDate
+        return Calendar.current.startOfDay(for: localDate)
+    }
+}
+
+private extension MealType {
+    static func quickAddDefaultForCurrentTime(date: Date = .now, calendar: Calendar = .current) -> MealType {
+        let hour = calendar.component(.hour, from: date)
+        switch hour {
+        case 5..<10:
+            return .breakfast
+        case 10..<15:
+            return .lunch
+        case 15..<20:
+            return .dinner
+        default:
+            return .snack
+        }
     }
 }
 

@@ -35,3 +35,33 @@ final class DayLog {
             .sorted { $0.timestamp < $1.timestamp }
     }
 }
+
+extension DayLog {
+    static func preferredForDay(
+        _ logs: [DayLog],
+        on date: Date,
+        calendar: Calendar = .current
+    ) -> DayLog? {
+        preferred(in: logs.filter { calendar.isDate($0.date, inSameDayAs: date) })
+    }
+
+    static func preferred(in logs: [DayLog]) -> DayLog? {
+        guard !logs.isEmpty else { return nil }
+        return logs.max { lhs, rhs in
+            if lhs.activityCount != rhs.activityCount {
+                return lhs.activityCount < rhs.activityCount
+            }
+            return lhs.latestActivityTimestamp < rhs.latestActivityTimestamp
+        }
+    }
+
+    var activityCount: Int {
+        foodEntries.count + manualWorkouts.count
+    }
+
+    var latestActivityTimestamp: Date {
+        let entryLatest = foodEntries.map(\.timestamp).max() ?? .distantPast
+        let workoutLatest = manualWorkouts.map(\.timestamp).max() ?? .distantPast
+        return max(entryLatest, workoutLatest)
+    }
+}

@@ -250,6 +250,7 @@ struct QuickAddForm: View {
             existing.lastUsed = .now
             existing.useCount += 1
             existing.notes = notes
+            trimRecents(limit: 100)
             return
         }
         let cached = CachedFood(
@@ -269,6 +270,20 @@ struct QuickAddForm: View {
             notes: notes
         )
         modelContext.insert(cached)
+        trimRecents(limit: 100)
+    }
+
+    private func trimRecents(limit: Int) {
+        let descriptor = FetchDescriptor<CachedFood>(
+            predicate: #Predicate<CachedFood> { $0.isFavorite == false },
+            sortBy: [SortDescriptor(\.lastUsed, order: .reverse)]
+        )
+        guard let recentNonFavorites = try? modelContext.fetch(descriptor),
+              recentNonFavorites.count > limit else { return }
+
+        for cached in recentNonFavorites.dropFirst(limit) {
+            modelContext.delete(cached)
+        }
     }
 
     private func formatAmount(_ value: Double) -> String {
@@ -279,7 +294,7 @@ struct QuickAddForm: View {
 
     private func ensureDayLog() -> DayLog {
         let day = Calendar.current.startOfDay(for: date)
-        if let existing = dayLogs.first(where: { Calendar.current.isDate($0.date, inSameDayAs: day) }) {
+        if let existing = DayLog.preferredForDay(dayLogs, on: day) {
             return existing
         }
         let new = DayLog(date: day)

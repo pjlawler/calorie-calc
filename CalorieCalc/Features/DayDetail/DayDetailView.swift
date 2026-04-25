@@ -15,7 +15,7 @@ struct DayDetailView: View {
     @State private var showManualWorkout = false
 
     private var dayLog: DayLog? {
-        allDayLogs.first { Calendar.current.isDate($0.date, inSameDayAs: date) }
+        DayLog.preferredForDay(allDayLogs, on: date)
     }
 
     var body: some View {
@@ -50,6 +50,10 @@ struct DayDetailView: View {
         let totalBurn = hkBurn + manualBurn
         let consumed = log?.totalConsumedCalories ?? 0
         let net = consumed - totalBurn
+        let roundedNet = net.rounded()
+        let netDisplay = roundedNet < 0
+            ? "(\(CalorieFormatter.whole(abs(roundedNet))))"
+            : CalorieFormatter.whole(roundedNet)
 
         Section {
             VStack(spacing: 12) {
@@ -58,7 +62,11 @@ struct DayDetailView: View {
                     Divider().frame(height: 36)
                     totalCell(title: "Burned", value: CalorieFormatter.whole(totalBurn))
                     Divider().frame(height: 36)
-                    totalCell(title: "Net", value: CalorieFormatter.signed(net))
+                    totalCell(
+                        title: "Net",
+                        value: netDisplay,
+                        valueColor: roundedNet < 0 ? .red : .primary
+                    )
                 }
                 macroRow(
                     protein: log?.totalProtein ?? 0,
@@ -70,7 +78,7 @@ struct DayDetailView: View {
         .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
     }
 
-    private func totalCell(title: String, value: String) -> some View {
+    private func totalCell(title: String, value: String, valueColor: Color = .primary) -> some View {
         VStack(spacing: 2) {
             Text(title)
                 .font(.caption.weight(.semibold))
@@ -78,6 +86,7 @@ struct DayDetailView: View {
                 .textCase(.uppercase)
             Text(value)
                 .font(.title3.weight(.bold).monospacedDigit())
+                .foregroundStyle(valueColor)
         }
         .frame(maxWidth: .infinity)
     }

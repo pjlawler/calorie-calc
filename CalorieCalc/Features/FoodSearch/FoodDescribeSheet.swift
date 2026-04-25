@@ -79,7 +79,7 @@ struct FoodDescribeSheet: View {
                 let meal = try await env.service.estimate(description: trimmed)
                 await MainActor.run {
                     isWorking = false
-                    let result = makeSearchResult(from: meal)
+                    let result = makeSearchResult(from: meal, userDescription: trimmed)
                     onEstimated(result)
                     dismiss()
                 }
@@ -95,15 +95,21 @@ struct FoodDescribeSheet: View {
     /// Bridges Claude's estimate into the normal search-result shape so the portion sheet can
     /// scale it just like a USDA or OFF lookup. Default to 100 g when Claude doesn't provide a
     /// serving weight so the picker still offers gram/ounce conversion.
-    private func makeSearchResult(from meal: RecognizedMeal) -> FoodSearchResult {
-        let servingGrams = meal.servingGrams ?? 100
+    private func makeSearchResult(from meal: RecognizedMeal, userDescription: String) -> FoodSearchResult {
+        let useEach = RecognizedMeal.shouldUseEachServing(
+            name: meal.name,
+            portionDescription: meal.portionDescription,
+            userText: userDescription
+        )
+        let servingGrams = useEach ? nil : (meal.servingGrams ?? 100)
+        let servingDescription = meal.portionDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let noteParts: [String?] = [meal.confidence.map { "AI estimate · \($0) confidence" }, meal.notes]
         let notes = noteParts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
         return FoodSearchResult(
             id: "ai:\(UUID().uuidString)",
             name: meal.name,
             brand: nil,
-            servingDescription: meal.portionDescription,
+            servingDescription: servingDescription.isEmpty ? (useEach ? "1 each" : "1 serving") : servingDescription,
             servingSizeGrams: servingGrams,
             servingSizeMilliliters: nil,
             caloriesPerServing: meal.caloriesPerServing,

@@ -205,9 +205,10 @@ struct FoodSearchView: View {
 
     private var recentsTab: some View {
         List {
-            ForEach(cachedFoods.sorted(by: { $0.lastUsed > $1.lastUsed }).prefix(50), id: \.id) { cached in
+            ForEach(recentFoods, id: \.id) { cached in
                 cachedRow(cached)
             }
+            .onDelete(perform: deleteRecentFoods)
         }
     }
 
@@ -225,10 +226,34 @@ struct FoodSearchView: View {
         } label: {
             CachedFoodRow(cached: cached) {
                 cached.isFavorite.toggle()
+                if !cached.isFavorite && cached.useCount == 0 {
+                    modelContext.delete(cached)
+                }
                 try? modelContext.save()
             }
         }
         .buttonStyle(.plain)
+    }
+
+    private var recentFoods: [CachedFood] {
+        cachedFoods
+            .filter { $0.useCount > 0 }
+            .sorted(by: { $0.lastUsed > $1.lastUsed })
+            .prefix(100)
+            .map { $0 }
+    }
+
+    private func deleteRecentFoods(at offsets: IndexSet) {
+        for index in offsets {
+            let cached = recentFoods[index]
+            if cached.isFavorite {
+                // Keep favorites available in the Favorites tab while removing from Recents.
+                cached.useCount = 0
+            } else {
+                modelContext.delete(cached)
+            }
+        }
+        try? modelContext.save()
     }
 
     private func handleScan(code: String) async {

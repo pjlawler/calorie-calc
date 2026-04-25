@@ -67,6 +67,9 @@ struct FoodPortionSheet: View {
     private func toggleFavorite() {
         if let existing = cachedFood {
             existing.isFavorite.toggle()
+            if !existing.isFavorite && existing.useCount == 0 {
+                modelContext.delete(existing)
+            }
         } else {
             // Favorite a food the user hasn't logged yet — upsert so it appears on the Favorites
             // tab even if they never hit Save on this sheet.
@@ -305,7 +308,7 @@ struct FoodPortionSheet: View {
 
     private func ensureDayLog(for date: Date) -> DayLog {
         let day = Calendar.current.startOfDay(for: date)
-        if let existing = dayLogs.first(where: { Calendar.current.isDate($0.date, inSameDayAs: day) }) {
+        if let existing = DayLog.preferredForDay(dayLogs, on: day) {
             return existing
         }
         let new = DayLog(date: day)
@@ -346,6 +349,20 @@ struct FoodPortionSheet: View {
                 notes: notes
             )
             modelContext.insert(cached)
+        }
+        trimRecents(limit: 100)
+    }
+
+    private func trimRecents(limit: Int) {
+        let descriptor = FetchDescriptor<CachedFood>(
+            predicate: #Predicate<CachedFood> { $0.isFavorite == false },
+            sortBy: [SortDescriptor(\.lastUsed, order: .reverse)]
+        )
+        guard let recentNonFavorites = try? modelContext.fetch(descriptor),
+              recentNonFavorites.count > limit else { return }
+
+        for cached in recentNonFavorites.dropFirst(limit) {
+            modelContext.delete(cached)
         }
     }
 }
