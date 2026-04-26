@@ -49,7 +49,7 @@ struct WeekCalendarView: View {
                 selectedDate: $selectedDate,
                 viewModel: vm
             )
-            .task(id: weekPeriod.id) { await vm.refreshHealthKit(for: weekPeriod) }
+            .task(id: vm.referenceDate) { await vm.refreshHealthKit(for: weekPeriod) }
             .refreshable { await vm.refreshHealthKit(for: weekPeriod) }
         } else {
             ProgressView().controlSize(.large)
@@ -134,16 +134,12 @@ private struct WeekCalendarBody: View {
     let viewModel: WeekCalendarViewModel
 
     @State private var showFavoriteQuickAdd = false
+    /// Last `MathCardData` we computed against fully-loaded HealthKit burns. Carried over
+    /// while a new week is fetching so the hero number can smoothly animate from the
+    /// previous week's value to the new one instead of flashing through `—`.
+    @State private var stableMathData: MathCardData?
 
     private var weekDates: [Date] { viewModel.assembler(for: period).weekDates }
-
-    private var caloriesRemaining: Double {
-        calculation.weeklyNetTarget - calculation.runningWeeklyNetActual
-    }
-
-    private var remainingColor: Color {
-        caloriesRemaining < 0 ? .red : .primary
-    }
 
     var body: some View {
         ScrollView {
@@ -192,154 +188,80 @@ private struct WeekCalendarBody: View {
         .sheet(isPresented: $showFavoriteQuickAdd) {
             FavoriteQuickAddListSheet(favorites: favoriteFoods)
         }
+        .onAppear { captureStableData() }
+        .onChange(of: mathCardData) { _, _ in captureStableData() }
+        .onChange(of: isHealthBurnLoaded) { _, _ in captureStableData() }
     }
 
     private var weeklySummary: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            plannedRemainingTodaySummary
-            remainingSummary
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
+        MathCard(
+            data: displayMathData,
+            isLastDayOrPast: isLastDayOrPast,
+            isLoading: showLoadingPlaceholder
+        )
         .padding(.top, 4)
+        .animation(.easeInOut(duration: 0.25), value: displayMathData)
     }
 
-    private var eatingRemainingThroughToday: Double? {
-        guard let todayIndex = weekDates.firstIndex(where: {
-            Calendar.current.isDate($0, inSameDayAs: .now)
-        }) else { return nil }
-        let inclusive = calculation.dailyBudgets.prefix(todayIndex + 1)
-        let plannedSum = inclusive.reduce(0.0) { $0 + ($1.grossBudget ?? 0) }
-        let consumedSum = inclusive.reduce(0.0) { $0 + $1.consumed }
-        return plannedSum - consumedSum
+    /// What we hand to MathCard. While HK is mid-fetch for the new week, fall back to the
+    /// last week we successfully calculated — keeps the hero stable instead of jumping to
+    /// nonsense values that would briefly compute from missing burn data.
+    private var displayMathData: MathCardData {
+        if isHealthBurnLoaded { return mathCardData }
+        return stableMathData ?? mathCardData
     }
 
-    private var workoutSurplusThroughToday: Double? {
-        guard let todayIndex = weekDates.firstIndex(where: {
-            Calendar.current.isDate($0, inSameDayAs: .now)
-        }) else { return nil }
-        let inclusive = calculation.dailyBudgets.prefix(todayIndex + 1)
-        let plannedSum = Double(period.dailyWorkoutCalorieGoal) * Double(todayIndex + 1)
-        let burnedSum = inclusive.reduce(0.0) { $0 + $1.burned }
-        return burnedSum - plannedSum
+    /// Only redact on the very first launch where we have no prior value to fall back to.
+    /// After that, week shifts cross-fade between known-good values.
+    private var showLoadingPlaceholder: Bool {
+        !isHealthBurnLoaded && stableMathData == nil
     }
 
-    @ViewBuilder
-    private var plannedRemainingTodaySummary: some View {
-        if let eatingRemaining = eatingRemainingThroughToday,
-           let workoutSurplus = workoutSurplusThroughToday {
-            let combined = eatingRemaining + workoutSurplus
-            let eatingUnderGoal = eatingRemaining >= 0
-            let workoutOverGoal = workoutSurplus >= 0
-            let aheadOfPlan = combined >= 0
-            let eatingNumber = Text(CalorieFormatter.whole(abs(eatingRemaining)))
-                .foregroundStyle(eatingUnderGoal ? .green : .red)
-            let workoutNumber = Text(CalorieFormatter.whole(abs(workoutSurplus)))
-                .foregroundStyle(workoutOverGoal ? .green : .red)
-            let combinedNumber = Text(CalorieFormatter.whole(abs(combined)))
-                .foregroundStyle(aheadOfPlan ? .green : .red)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Plan progress")
-                    .font(.title2.weight(.semibold))
-                progressParagraph(
-                    eatingUnderGoal: eatingUnderGoal,
-                    eatingNumber: eatingNumber,
-                    workoutOverGoal: workoutOverGoal,
-                    workoutNumber: workoutNumber,
-                    aheadOfPlan: aheadOfPlan,
-                    combinedNumber: combinedNumber
-                )
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-        }
+    private func captureStableData() {
+        guard isHealthBurnLoaded else { return }
+        stableMathData = mathCardData
     }
 
-    private func progressParagraph(
-        eatingUnderGoal: Bool,
-        eatingNumber: Text,
-        workoutOverGoal: Bool,
-        workoutNumber: Text,
-        aheadOfPlan: Bool,
-        combinedNumber: Text
-    ) -> Text {
-        let eatingSide = eatingUnderGoal ? "under" : "over"
-        let workoutSide = workoutOverGoal ? "over" : "under"
-        let planSide = aheadOfPlan ? "ahead of" : "behind"
-        let encouragement = aheadOfPlan
-            ? "Keep up the great work!"
-            : "There's still time to turn it around."
-        return Text("So far you're \(eatingNumber) kCal \(eatingSide) your eating goal and \(workoutNumber) kCal \(workoutSide) your workout goal — that puts you \(combinedNumber) kCal \(planSide) your plan. \(encouragement)")
+    /// `true` once `viewModel.healthKitBurn` contains an entry for every day of the
+    /// currently visible week. Re-visiting a previously loaded week reads from the cache
+    /// and stays `true`, so navigation back to a known week is instant.
+    private var isHealthBurnLoaded: Bool {
+        let calendar = Calendar.current
+        let normalized = weekDates.map { calendar.startOfDay(for: $0) }
+        return normalized.allSatisfy { viewModel.healthKitBurn.keys.contains($0) }
     }
 
-    private var remainingSummary: some View {
-        let isOver = caloriesRemaining < 0
-        let magnitude = CalorieFormatter.whole(abs(caloriesRemaining))
-        let number = Text(magnitude)
-            .foregroundStyle(remainingColor)
-        return VStack(alignment: .leading, spacing: 6) {
-            Text("Net calories remaining")
-                .font(.title2.weight(.semibold))
-            remainingParagraph(isOver: isOver, number: number)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
+    /// True when the visible week has no future days — i.e. today is the last day,
+    /// or the entire week has already finished.
+    private var isLastDayOrPast: Bool {
+        guard let lastStatus = calculation.dailyBudgets.last?.status else { return false }
+        return lastStatus != .future
     }
 
-    private func remainingParagraph(isOver: Bool, number: Text) -> Text {
-        if isOver {
-            let tail: String
-            switch weekPosition {
-            case .notCurrentWeek:
-                return Text("You're \(number) kCal over your weekly budget.")
-            case .earlyWeek:
-                tail = "Don't be discouraged — the week is still young. Tighten things up over the next few days and you'll erase most of this."
-            case .midWeek:
-                tail = "Don't be discouraged. A couple of lighter days between now and the weekend can bring this back in line."
-            case .lateWeek:
-                tail = "Only one day left — eating lighter tomorrow will help, and don't be discouraged if it doesn't fully close. Next week is a fresh start."
-            case .lastDay:
-                tail = "Today's the last day, so this week is essentially locked in. Don't be discouraged — reset and get back on track next week."
-            }
-            return Text("You're \(number) kCal over your weekly budget. \(tail)")
-        } else {
-            let tail: String
-            switch weekPosition {
-            case .notCurrentWeek:
-                return Text("You have \(number) kCal remaining to eat this week.")
-            case .earlyWeek:
-                tail = "Plenty of week left to spend it — more workouts will earn you even more calories."
-            case .midWeek:
-                tail = "Nice cushion heading into the back half. Future workouts will add even more."
-            case .lateWeek:
-                tail = "Just one day left — you've got room to eat well tomorrow. Any workout you log will add to the budget."
-            case .lastDay:
-                tail = "Today's the last day of the week, so this is your remaining runway. Any exercise today adds to it."
-            }
-            return Text("You have \(number) kCal remaining to eat this week. \(tail)")
-        }
+    private var nonFutureBudgets: ArraySlice<DailyBudget> {
+        calculation.dailyBudgets.prefix { $0.status != .future }
     }
 
-    private enum WeekPosition {
-        case notCurrentWeek
-        case earlyWeek
-        case midWeek
-        case lateWeek
-        case lastDay
+    private var futureBudgets: [DailyBudget] {
+        calculation.dailyBudgets.filter { $0.status == .future }
     }
 
-    private var weekPosition: WeekPosition {
-        guard let todayIndex = weekDates.firstIndex(where: { Calendar.current.isDate($0, inSameDayAs: .now) }) else {
-            return .notCurrentWeek
-        }
-        switch todayIndex {
-        case 0, 1: return .earlyWeek
-        case 2, 3, 4: return .midWeek
-        case 5: return .lateWeek
-        default: return .lastDay
-        }
+    private var eatenThisWeek: Double {
+        nonFutureBudgets.reduce(0) { $0 + $1.consumed }
+    }
+
+    private var workoutsCompleted: Double {
+        nonFutureBudgets.reduce(0) { $0 + $1.burned }
+    }
+
+    private var mathCardData: MathCardData {
+        MathCardData(
+            weeklyCalorieBudget: Int(calculation.weeklyNetTarget.rounded()),
+            alreadyEatenThisWeek: Int(eatenThisWeek.rounded()),
+            workoutsCompleted: Int(workoutsCompleted.rounded()),
+            plannedToWorkout: futureBudgets.count * period.dailyWorkoutCalorieGoal,
+            exerciseGoalSoFar: nonFutureBudgets.count * period.dailyWorkoutCalorieGoal
+        )
     }
 
     private func dayLog(for date: Date) -> DayLog? {

@@ -38,6 +38,14 @@
 			);
 			target = 68C1941F2F92856D00E395C0 /* CalorieCalc */;
 		};
+		68E837242F9D6742008FC02B /* Exceptions for "CalorieCalc" folder in "CalorieCalcTests" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				docs/PlanProgressCards_Prompt.md,
+				docs/two_cards.png,
+			);
+			target = 68C194302F92856E00E395C0 /* CalorieCalcTests */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -45,6 +53,7 @@
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				68C194432F92856E00E395C0 /* Exceptions for "CalorieCalc" folder in "CalorieCalc" target */,
+				68E837242F9D6742008FC02B /* Exceptions for "CalorieCalc" folder in "CalorieCalcTests" target */,
 			);
 			path = CalorieCalc;
 			sourceTree = "<group>";

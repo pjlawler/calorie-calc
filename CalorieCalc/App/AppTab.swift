@@ -21,7 +21,7 @@ nonisolated enum AppTab: String, CaseIterable, Hashable, Identifiable, Sendable 
         switch self {
         case .dashboard: "target"
         case .week: "flame"
-        case .history: "chart.xyaxis.line"
+        case .history: "clock.arrow.circlepath"
         case .progress: "chart.line.uptrend.xyaxis"
         }
     }

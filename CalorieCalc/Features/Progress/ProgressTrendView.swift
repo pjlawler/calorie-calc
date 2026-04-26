@@ -7,6 +7,7 @@ nonisolated enum ProgressTrendTimeframe: String, CaseIterable, Identifiable, Has
     case days90
     case days180
     case year
+    case custom
 
     var id: String { rawValue }
 
@@ -16,15 +17,18 @@ nonisolated enum ProgressTrendTimeframe: String, CaseIterable, Identifiable, Has
         case .days90: "90 Days"
         case .days180: "180 Days"
         case .year: "Year"
+        case .custom: "Custom"
         }
     }
 
-    var daysBack: Int {
+    /// `nil` for `.custom`, where the range comes from explicit start/end pickers.
+    var daysBack: Int? {
         switch self {
         case .month: 30
         case .days90: 90
         case .days180: 180
         case .year: 365
+        case .custom: nil
         }
     }
 }
@@ -35,6 +39,8 @@ struct ProgressTrendView: View {
     @Query(sort: [SortDescriptor(\WeightEntry.timestamp, order: .forward)]) private var weightEntries: [WeightEntry]
 
     @State private var timeframe: ProgressTrendTimeframe = .days90
+    @State private var customStart: Date = Calendar.current.date(byAdding: .day, value: -29, to: Calendar.current.startOfDay(for: .now)) ?? .now
+    @State private var customEnd: Date = Calendar.current.startOfDay(for: .now)
     @State private var showSettings = false
 
     private var preferredUnit: WeightUnit {
@@ -43,9 +49,19 @@ struct ProgressTrendView: View {
 
     private var range: (start: Date, end: Date) {
         let calendar = Calendar.current
+        if timeframe == .custom {
+            let s = calendar.startOfDay(for: customStart)
+            let e = calendar.startOfDay(for: customEnd)
+            return s <= e ? (s, e) : (e, s)
+        }
         let end = calendar.startOfDay(for: .now)
-        let start = calendar.date(byAdding: .day, value: -(timeframe.daysBack - 1), to: end) ?? end
+        let days = timeframe.daysBack ?? 30
+        let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
         return (start, end)
+    }
+
+    private var rangeDayCount: Int {
+        max(1, (Calendar.current.dateComponents([.day], from: range.start, to: range.end).day ?? 0) + 1)
     }
 
     private struct WeightPoint: Identifiable, Hashable {
@@ -75,6 +91,9 @@ struct ProgressTrendView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     timeframePicker
+                    if timeframe == .custom {
+                        customRangeEditor
+                    }
                     weightChartCard
                     summaryCard
                 }
@@ -101,12 +120,27 @@ struct ProgressTrendView: View {
     }
 
     private var timeframePicker: some View {
-        Picker("Timeframe", selection: $timeframe) {
-            ForEach(ProgressTrendTimeframe.allCases) { tf in
-                Text(tf.displayName).tag(tf)
+        HStack {
+            Picker("Timeframe", selection: $timeframe) {
+                ForEach(ProgressTrendTimeframe.allCases) { tf in
+                    Text(tf.displayName).tag(tf)
+                }
             }
+            .pickerStyle(.menu)
+            Spacer()
         }
-        .pickerStyle(.segmented)
+    }
+
+    private var customRangeEditor: some View {
+        HStack(spacing: 12) {
+            DatePicker("Start", selection: $customStart, in: ...customEnd, displayedComponents: .date)
+                .labelsHidden()
+            Image(systemName: "arrow.right")
+                .foregroundStyle(.secondary)
+            DatePicker("End", selection: $customEnd, in: customStart...Date(), displayedComponents: .date)
+                .labelsHidden()
+            Spacer()
+        }
     }
 
     private var weightChartCard: some View {
@@ -163,23 +197,23 @@ struct ProgressTrendView: View {
 
     @AxisContentBuilder
     private var weightXAxis: some AxisContent {
-        switch timeframe {
-        case .month:
-            AxisMarks(values: .stride(by: .day, count: 5)) { _ in
+        let days = rangeDayCount
+        if days <= 14 {
+            AxisMarks(values: .stride(by: .day, count: max(1, days / 4))) { _ in
                 AxisTick()
                 AxisValueLabel(format: .dateTime.month(.abbreviated).day())
             }
-        case .days90:
-            AxisMarks(values: .stride(by: .day, count: 14)) { _ in
+        } else if days <= 60 {
+            AxisMarks(values: .stride(by: .day, count: max(1, days / 6))) { _ in
                 AxisTick()
                 AxisValueLabel(format: .dateTime.month(.abbreviated).day())
             }
-        case .days180:
+        } else if days <= 200 {
             AxisMarks(values: .stride(by: .month, count: 1)) { _ in
                 AxisTick()
                 AxisValueLabel(format: .dateTime.month(.abbreviated))
             }
-        case .year:
+        } else {
             AxisMarks(values: .stride(by: .month, count: 2)) { _ in
                 AxisTick()
                 AxisValueLabel(format: .dateTime.month(.abbreviated))

@@ -32,7 +32,9 @@ final class WeekCalendarViewModel {
         isRefreshing = true
         defer { isRefreshing = false }
         let dates = assembler(for: period).weekDates
-        var burns: [Date: Double] = [:]
+        // Merge into the existing dict instead of replacing — re-visiting a previously
+        // loaded week then becomes instant (no flicker while HK re-fetches).
+        var burns = healthKitBurn
         for date in dates {
             let key = calendar.startOfDay(for: date)
             let value = (try? await healthKitService.workoutsEnergyBurned(on: date, calendar: calendar)) ?? 0

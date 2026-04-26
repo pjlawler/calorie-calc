@@ -21,7 +21,7 @@ struct RootView: View {
                 WeekCalendarView()
             }
             Tab(AppTab.history.displayName, systemImage: AppTab.history.systemImage, value: AppTab.history) {
-                HistoryChartsView()
+                HistoryView()
             }
             Tab(AppTab.progress.displayName, systemImage: AppTab.progress.systemImage, value: AppTab.progress) {
                 ProgressTrendView()
