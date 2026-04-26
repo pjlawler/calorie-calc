@@ -6,15 +6,27 @@ struct HistoryView: View {
     @Environment(HealthKitService.self) private var healthKitService
     @Query(sort: \DayLog.date) private var dayLogs: [DayLog]
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
+    @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
 
-    @State private var timeframe: HistoryTimeframe = .currentWeek
-    @State private var customStart: Date = Calendar.current.date(byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: .now)) ?? .now
-    @State private var customEnd: Date = Calendar.current.startOfDay(for: .now)
+    @AppStorage("history.timeframe") private var timeframe: HistoryTimeframe = .currentWeek
+    @AppStorage("history.customStart") private var customStartTS: Double = (Calendar.current.date(byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: .now)) ?? .now).timeIntervalSinceReferenceDate
+    @AppStorage("history.customEnd") private var customEndTS: Double = Calendar.current.startOfDay(for: .now).timeIntervalSinceReferenceDate
     @State private var workoutBurnByDay: [Date: Double] = [:]
     @State private var isLoadingHealthKit = false
     @State private var showSettings = false
+    @State private var showAnalysis = false
 
     private var weekStart: Weekday { profiles.first?.weekStart ?? .monday }
+    private var currentGoalPeriod: GoalPeriod? { GoalPeriod.current(in: goalPeriods) }
+
+    private var customStart: Date { Date(timeIntervalSinceReferenceDate: customStartTS) }
+    private var customEnd: Date { Date(timeIntervalSinceReferenceDate: customEndTS) }
+    private var customStartBinding: Binding<Date> {
+        Binding(get: { customStart }, set: { customStartTS = $0.timeIntervalSinceReferenceDate })
+    }
+    private var customEndBinding: Binding<Date> {
+        Binding(get: { customEnd }, set: { customEndTS = $0.timeIntervalSinceReferenceDate })
+    }
 
     private var range: (start: Date, end: Date) {
         HistoryAggregator.dateRange(
@@ -42,6 +54,8 @@ struct HistoryView: View {
                     ForEach(HistoryMetric.allCases) { metric in
                         metricSection(metric)
                     }
+                    analyzeButton
+                        .padding(.top, 8)
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 8)
@@ -62,8 +76,51 @@ struct HistoryView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView()
             }
+            .sheet(isPresented: $showAnalysis) {
+                NutritionAnalysisSheet(data: analysisInput)
+            }
         }
         .task(id: timeframeRangeKey) { await loadHealthKit() }
+    }
+
+    private var analyzeButton: some View {
+        Button {
+            showAnalysis = true
+        } label: {
+            Label("Analyze", systemImage: "sparkles")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
+    }
+
+    private var analysisInput: PeriodNutritionData {
+        let calories = HistoryAggregator.summary(metric: .calories, start: range.start, end: range.end, dailyTotals: totals)
+        let protein = HistoryAggregator.summary(metric: .protein, start: range.start, end: range.end, dailyTotals: totals)
+        let carbs = HistoryAggregator.summary(metric: .carbs, start: range.start, end: range.end, dailyTotals: totals)
+        let fat = HistoryAggregator.summary(metric: .fat, start: range.start, end: range.end, dailyTotals: totals)
+        let exercise = HistoryAggregator.summary(metric: .exercise, start: range.start, end: range.end, dailyTotals: totals)
+        let net = HistoryAggregator.summary(metric: .net, start: range.start, end: range.end, dailyTotals: totals)
+        let dayCount = max(1, (Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: range.start), to: Calendar.current.startOfDay(for: range.end)).day ?? 0) + 1)
+        return PeriodNutritionData(
+            periodLabel: "\(timeframe.displayName) — \(rangeText)",
+            dayCount: dayCount,
+            totalCalories: calories.total,
+            avgCalories: calories.dayAvg,
+            totalProtein: protein.total,
+            avgProtein: protein.dayAvg,
+            totalCarbs: carbs.total,
+            avgCarbs: carbs.dayAvg,
+            totalFat: fat.total,
+            avgFat: fat.dayAvg,
+            totalExercise: exercise.total,
+            avgExercise: exercise.dayAvg,
+            totalNetCalories: net.total,
+            avgNetCalories: net.dayAvg,
+            dailyCalorieGoal: currentGoalPeriod?.dailyGrossCalorieGoal,
+            dailyNetCalorieGoal: currentGoalPeriod?.dailyNetCalorieGoal,
+            dailyExerciseGoal: currentGoalPeriod?.dailyWorkoutCalorieGoal
+        )
     }
 
     // MARK: - Header / picker
@@ -85,11 +142,11 @@ struct HistoryView: View {
 
     private var customRangeEditor: some View {
         HStack(spacing: 12) {
-            DatePicker("Start", selection: $customStart, in: ...customEnd, displayedComponents: .date)
+            DatePicker("Start", selection: customStartBinding, in: ...customEnd, displayedComponents: .date)
                 .labelsHidden()
             Image(systemName: "arrow.right")
                 .foregroundStyle(.secondary)
-            DatePicker("End", selection: $customEnd, in: customStart...Date(), displayedComponents: .date)
+            DatePicker("End", selection: customEndBinding, in: customStart...Date(), displayedComponents: .date)
                 .labelsHidden()
             Spacer()
         }

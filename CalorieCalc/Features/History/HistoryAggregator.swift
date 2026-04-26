@@ -3,11 +3,11 @@ import SwiftUI
 
 nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
     case calories
+    case exercise
     case net
     case protein
     case carbs
     case fat
-    case exercise
 
     var id: String { rawValue }
 

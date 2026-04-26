@@ -38,13 +38,22 @@ struct ProgressTrendView: View {
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
     @Query(sort: [SortDescriptor(\WeightEntry.timestamp, order: .forward)]) private var weightEntries: [WeightEntry]
 
-    @State private var timeframe: ProgressTrendTimeframe = .days90
-    @State private var customStart: Date = Calendar.current.date(byAdding: .day, value: -29, to: Calendar.current.startOfDay(for: .now)) ?? .now
-    @State private var customEnd: Date = Calendar.current.startOfDay(for: .now)
+    @AppStorage("progress.timeframe") private var timeframe: ProgressTrendTimeframe = .days90
+    @AppStorage("progress.customStart") private var customStartTS: Double = (Calendar.current.date(byAdding: .day, value: -29, to: Calendar.current.startOfDay(for: .now)) ?? .now).timeIntervalSinceReferenceDate
+    @AppStorage("progress.customEnd") private var customEndTS: Double = Calendar.current.startOfDay(for: .now).timeIntervalSinceReferenceDate
     @State private var showSettings = false
 
     private var preferredUnit: WeightUnit {
         profiles.first?.weightUnit ?? .pounds
+    }
+
+    private var customStart: Date { Date(timeIntervalSinceReferenceDate: customStartTS) }
+    private var customEnd: Date { Date(timeIntervalSinceReferenceDate: customEndTS) }
+    private var customStartBinding: Binding<Date> {
+        Binding(get: { customStart }, set: { customStartTS = $0.timeIntervalSinceReferenceDate })
+    }
+    private var customEndBinding: Binding<Date> {
+        Binding(get: { customEnd }, set: { customEndTS = $0.timeIntervalSinceReferenceDate })
     }
 
     private var range: (start: Date, end: Date) {
@@ -133,11 +142,11 @@ struct ProgressTrendView: View {
 
     private var customRangeEditor: some View {
         HStack(spacing: 12) {
-            DatePicker("Start", selection: $customStart, in: ...customEnd, displayedComponents: .date)
+            DatePicker("Start", selection: customStartBinding, in: ...customEnd, displayedComponents: .date)
                 .labelsHidden()
             Image(systemName: "arrow.right")
                 .foregroundStyle(.secondary)
-            DatePicker("End", selection: $customEnd, in: customStart...Date(), displayedComponents: .date)
+            DatePicker("End", selection: customEndBinding, in: customStart...Date(), displayedComponents: .date)
                 .labelsHidden()
             Spacer()
         }
