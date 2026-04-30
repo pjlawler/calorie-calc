@@ -36,27 +36,31 @@ struct FoodPortionSheet: View {
     @Query private var dayLogs: [DayLog]
     @Query private var cachedFoods: [CachedFood]
 
-    @State private var servingSizeAmountText: String = "1"
-    @State private var servingSizeUnit: PortionUnit = .each
-    @State private var servingsCountText: String = "1"
+    @State private var selectedOptionId: String = "native"
+    @State private var amountText: String = "1"
     @State private var isNutritionFactsExpanded: Bool = true
     @State private var notesText: String = ""
+    @State private var nameText: String = ""
+    @State private var brandText: String = ""
 
-    private var availableUnits: [PortionUnit] { PortionUnit.available(for: result) }
-    private var servingSizeAmount: Double { parse(servingSizeAmountText) }
-    private var servingsCount: Double { parse(servingsCountText) }
-
-    /// Maps the user's custom "serving size" (amount + unit) to a multiple of the food's native
-    /// serving. `PortionUnit.servingFraction` handles the math and unit-family routing.
-    private var servingFraction: Double {
-        servingSizeUnit.servingFraction(amount: servingSizeAmount, for: result)
+    private var trimmedName: String { nameText.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedBrand: String? {
+        let v = brandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return v.isEmpty ? nil : v
     }
+    private var effectiveName: String { trimmedName.isEmpty ? result.name : trimmedName }
 
-    /// The scalar stored on FoodEntry.quantity — multiplied by every per-serving nutrient to get
-    /// totals. Combines "1 custom serving fraction" × "number of servings eaten".
-    private var quantity: Double { servingFraction * servingsCount }
+    private var servingOptions: [ServingOption] { result.servingOptions }
+    private var selectedOption: ServingOption {
+        servingOptions.first(where: { $0.id == selectedOptionId }) ?? servingOptions[0]
+    }
+    private var amount: Double { parse(amountText) }
 
-    private var isValid: Bool { servingSizeAmount > 0 && servingsCount > 0 }
+    /// FoodEntry.quantity — `amount × option` expressed as a multiple of the food's native
+    /// serving, the scalar that scales every per-serving nutrient to consumed totals.
+    private var quantity: Double { amount * selectedOption.servingsPerUnit }
+
+    private var isValid: Bool { amount > 0 }
 
     private var cachedFood: CachedFood? {
         cachedFoods.first { $0.externalId == result.id }
@@ -67,6 +71,11 @@ struct FoodPortionSheet: View {
     private func toggleFavorite() {
         if let existing = cachedFood {
             existing.isFavorite.toggle()
+            existing.name = effectiveName
+            existing.brand = trimmedBrand
+            if existing.isFavorite && existing.favoriteServingDescription == nil {
+                captureFavoriteSnapshot(into: existing)
+            }
             if !existing.isFavorite && existing.useCount == 0 {
                 modelContext.delete(existing)
             }
@@ -74,10 +83,11 @@ struct FoodPortionSheet: View {
             // Favorite a food the user hasn't logged yet — upsert so it appears on the Favorites
             // tab even if they never hit Save on this sheet.
             let trimmedNotes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let snap = effectiveSnapshot()
             let cached = CachedFood(
                 externalId: result.id,
-                name: result.name,
-                brand: result.brand,
+                name: effectiveName,
+                brand: trimmedBrand,
                 defaultServingDescription: result.servingDescription,
                 defaultServingSizeGrams: result.servingSizeGrams,
                 defaultServingSizeMilliliters: result.servingSizeMilliliters,
@@ -98,45 +108,102 @@ struct FoodPortionSheet: View {
                 isFavorite: true,
                 lastUsed: .now,
                 useCount: 0,
-                notes: trimmedNotes.isEmpty ? nil : trimmedNotes
+                notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+                favoriteServingDescription: snap.description,
+                favoriteServingSizeGrams: snap.grams,
+                favoriteServingSizeMilliliters: snap.ml,
+                favoriteCaloriesPerServing: snap.calories,
+                favoriteProteinPerServing: snap.protein,
+                favoriteCarbsPerServing: snap.carbs,
+                favoriteFatPerServing: snap.fat
             )
             modelContext.insert(cached)
         }
         try? modelContext.save()
     }
 
+    private func captureFavoriteSnapshot(into cached: CachedFood) {
+        let snap = effectiveSnapshot()
+        cached.favoriteServingDescription = snap.description
+        cached.favoriteServingSizeGrams = snap.grams
+        cached.favoriteServingSizeMilliliters = snap.ml
+        cached.favoriteCaloriesPerServing = snap.calories
+        cached.favoriteProteinPerServing = snap.protein
+        cached.favoriteCarbsPerServing = snap.carbs
+        cached.favoriteFatPerServing = snap.fat
+    }
+
+    /// Builds a "frozen serving" out of the user's current picker selection — `result`'s native
+    /// serving rescaled by `amount × option.servingsPerUnit` (== `quantity`). Used for the
+    /// recents default (rewritten each save) and the favorites snapshot (captured once on first
+    /// favorite).
+    private func effectiveSnapshot() -> (
+        description: String,
+        grams: Double?,
+        ml: Double?,
+        calories: Double,
+        protein: Double,
+        carbs: Double,
+        fat: Double
+    ) {
+        let factor = max(quantity, 0)
+        let amt = amount
+        let opt = selectedOption
+
+        let description: String
+        if opt.id == "native" {
+            description = renderNativeServing(label: opt.label, multiplier: amt)
+        } else {
+            description = "\(formatAmount(amt)) \(opt.label)"
+        }
+
+        return (
+            description: description,
+            grams: result.servingSizeGrams.map { $0 * factor },
+            ml: result.servingSizeMilliliters.map { $0 * factor },
+            calories: result.caloriesPerServing * factor,
+            protein: result.proteinPerServing * factor,
+            carbs: result.carbsPerServing * factor,
+            fat: result.fatPerServing * factor
+        )
+    }
+
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    Text(result.name).font(.headline)
-                    if let brand = result.brand, !brand.isEmpty {
-                        Text(brand).font(.subheadline).foregroundStyle(.secondary)
+                    if editingEntry == nil {
+                        TextField("Name", text: $nameText)
+                            .textInputAutocapitalization(.words)
+                            .font(.headline)
+                        TextField("Brand (optional)", text: $brandText)
+                            .textInputAutocapitalization(.words)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text(result.name).font(.headline)
+                        if let brand = result.brand, !brand.isEmpty {
+                            Text(brand).font(.subheadline).foregroundStyle(.secondary)
+                        }
                     }
                 }
 
                 Section {
-                    LabeledContent("Serving Size") {
+                    LabeledContent("Servings") {
                         HStack(spacing: 8) {
-                            TextField("Amount", text: $servingSizeAmountText)
+                            TextField("Count", text: $amountText)
                                 .keyboardType(.decimalPad)
                                 .multilineTextAlignment(.trailing)
                                 .monospacedDigit()
                                 .frame(minWidth: 60)
-                            Picker("Unit", selection: $servingSizeUnit) {
-                                ForEach(availableUnits) { unit in
-                                    Text(unit.displayName(quantity: servingSizeAmount)).tag(unit)
+                            Picker("Unit", selection: $selectedOptionId) {
+                                ForEach(servingOptions) { option in
+                                    Text(option.label).tag(option.id)
                                 }
                             }
                             .labelsHidden()
                             .pickerStyle(.menu)
                         }
-                    }
-                    LabeledContent("Number of Servings") {
-                        TextField("Servings", text: $servingsCountText)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing)
-                            .monospacedDigit()
                     }
                 }
 
@@ -198,45 +265,25 @@ struct FoodPortionSheet: View {
     }
 
     private func configureInitialState() {
-        // Prefer the unit the user originally typed if it matches the food's family — so
-        // "2 lb" reopens as "2 lb" instead of "907.18 g".
-        let inferred = PortionUnit.inferred(from: result.servingDescription)
+        // Default selection: the food's native serving with count=1 → exactly 1 serving's worth.
+        // User can switch the unit (to g/oz/cup/etc.) and adjust the count to scale.
+        selectedOptionId = "native"
+        amountText = "1"
 
-        if let g = result.servingSizeGrams, g > 0 {
-            if let inferred, inferred.family == .mass {
-                servingSizeUnit = inferred
-                servingSizeAmountText = formatAmount(g / inferred.baseMultiplier)
-            } else {
-                servingSizeUnit = .grams
-                servingSizeAmountText = formatAmount(g)
-            }
-        } else if let ml = result.servingSizeMilliliters, ml > 0 {
-            if let inferred, inferred.family == .volume {
-                servingSizeUnit = inferred
-                servingSizeAmountText = formatAmount(ml / inferred.baseMultiplier)
-            } else {
-                servingSizeUnit = .milliliters
-                servingSizeAmountText = formatAmount(ml)
-            }
-        } else {
-            servingSizeUnit = .each
-            servingSizeAmountText = "1"
-        }
-        if !availableUnits.contains(servingSizeUnit) {
-            servingSizeUnit = availableUnits.first ?? .each
-        }
-        // When editing, the stored quantity is a scalar multiple of the native serving — seed the
-        // "Number of Servings" row with it so "1 × 100 g" reopens as "1 × 100 g" rather than
-        // resetting to 1. The user's original unit choice isn't stored, so we always display in
-        // the food's native unit (grams / ml) which is equivalent math-wise.
+        // When editing, the stored `quantity` is a scalar multiple of the native serving — seed
+        // the count with it so "1.92 × 1 bar" reopens at the same total. Original unit choice
+        // isn't stored on the entry; we display in the food's native unit (math-equivalent).
         if let entry = editingEntry {
-            servingsCountText = formatAmount(entry.quantity)
+            amountText = formatAmount(entry.quantity)
             // Prefer entry-level notes (user might've added per-log detail); fall back to the
             // cached food's notes so templates carry forward to new logs.
             notesText = entry.notes ?? cachedFood?.notes ?? ""
+            nameText = entry.name
+            brandText = entry.brand ?? ""
         } else {
-            servingsCountText = "1"
             notesText = result.notes ?? cachedFood?.notes ?? ""
+            nameText = result.name
+            brandText = result.brand ?? ""
         }
     }
 
@@ -258,32 +305,54 @@ struct FoodPortionSheet: View {
         // "food template" users see across Recents/Favorites and all future log entries.
         propagateNotesToCache(storedNotes)
 
+        // FoodEntry stores the consumed portion as-is (quantity always 1, per-serving fields are
+        // the rescaled effective values). That way the row display can show "200 g" / "2 bars"
+        // straight from `servingDescription` without re-doing arithmetic at render time.
+        let snap = effectiveSnapshot()
+        let factor = max(quantity, 0)
+
         if let entry = editingEntry {
-            entry.quantity = quantity
+            entry.servingDescription = snap.description
+            entry.servingSizeGrams = snap.grams
+            entry.servingSizeMilliliters = snap.ml
+            entry.caloriesPerServing = snap.calories
+            entry.proteinPerServing = snap.protein
+            entry.carbsPerServing = snap.carbs
+            entry.fatPerServing = snap.fat
+            entry.saturatedFatPerServing = result.saturatedFatPerServing.map { $0 * factor }
+            entry.transFatPerServing = result.transFatPerServing.map { $0 * factor }
+            entry.monounsaturatedFatPerServing = result.monounsaturatedFatPerServing.map { $0 * factor }
+            entry.polyunsaturatedFatPerServing = result.polyunsaturatedFatPerServing.map { $0 * factor }
+            entry.cholesterolPerServing = result.cholesterolPerServing.map { $0 * factor }
+            entry.sodiumPerServing = result.sodiumPerServing.map { $0 * factor }
+            entry.fiberPerServing = result.fiberPerServing.map { $0 * factor }
+            entry.sugarsPerServing = result.sugarsPerServing.map { $0 * factor }
+            entry.addedSugarsPerServing = result.addedSugarsPerServing.map { $0 * factor }
+            entry.quantity = 1.0
             entry.notes = storedNotes
             try? modelContext.save()
         } else {
             let log = ensureDayLog(for: date)
             let entry = FoodEntry(
-                name: result.name,
-                brand: result.brand,
-                servingDescription: result.servingDescription,
-                servingSizeGrams: result.servingSizeGrams,
-                servingSizeMilliliters: result.servingSizeMilliliters,
-                quantity: quantity,
-                caloriesPerServing: result.caloriesPerServing,
-                proteinPerServing: result.proteinPerServing,
-                carbsPerServing: result.carbsPerServing,
-                fatPerServing: result.fatPerServing,
-                saturatedFatPerServing: result.saturatedFatPerServing,
-                transFatPerServing: result.transFatPerServing,
-                monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,
-                polyunsaturatedFatPerServing: result.polyunsaturatedFatPerServing,
-                cholesterolPerServing: result.cholesterolPerServing,
-                sodiumPerServing: result.sodiumPerServing,
-                fiberPerServing: result.fiberPerServing,
-                sugarsPerServing: result.sugarsPerServing,
-                addedSugarsPerServing: result.addedSugarsPerServing,
+                name: effectiveName,
+                brand: trimmedBrand,
+                servingDescription: snap.description,
+                servingSizeGrams: snap.grams,
+                servingSizeMilliliters: snap.ml,
+                quantity: 1.0,
+                caloriesPerServing: snap.calories,
+                proteinPerServing: snap.protein,
+                carbsPerServing: snap.carbs,
+                fatPerServing: snap.fat,
+                saturatedFatPerServing: result.saturatedFatPerServing.map { $0 * factor },
+                transFatPerServing: result.transFatPerServing.map { $0 * factor },
+                monounsaturatedFatPerServing: result.monounsaturatedFatPerServing.map { $0 * factor },
+                polyunsaturatedFatPerServing: result.polyunsaturatedFatPerServing.map { $0 * factor },
+                cholesterolPerServing: result.cholesterolPerServing.map { $0 * factor },
+                sodiumPerServing: result.sodiumPerServing.map { $0 * factor },
+                fiberPerServing: result.fiberPerServing.map { $0 * factor },
+                sugarsPerServing: result.sugarsPerServing.map { $0 * factor },
+                addedSugarsPerServing: result.addedSugarsPerServing.map { $0 * factor },
                 mealType: mealType,
                 source: result.source,
                 externalId: result.id,
@@ -292,7 +361,7 @@ struct FoodPortionSheet: View {
                 dayLog: log
             )
             modelContext.insert(entry)
-            upsertCached(from: result, notes: storedNotes)
+            upsertCached(from: result, name: effectiveName, brand: trimmedBrand, notes: storedNotes)
             try? modelContext.save()
         }
         dismiss()
@@ -316,24 +385,36 @@ struct FoodPortionSheet: View {
         return new
     }
 
-    private func upsertCached(from result: FoodSearchResult, notes: String?) {
+    private func upsertCached(from result: FoodSearchResult, name: String, brand: String?, notes: String?) {
         let id = result.id
+        let snap = effectiveSnapshot()
         if let existing = cachedFoods.first(where: { $0.externalId == id }) {
             existing.lastUsed = .now
             existing.useCount += 1
             existing.notes = notes
+            existing.name = name
+            existing.brand = brand
+            // Recents reflect the latest log: rewrite the default serving + macros to whatever
+            // the user just picked. Favorite snapshot fields are intentionally untouched.
+            existing.defaultServingDescription = snap.description
+            existing.defaultServingSizeGrams = snap.grams
+            existing.defaultServingSizeMilliliters = snap.ml
+            existing.caloriesPerServing = snap.calories
+            existing.proteinPerServing = snap.protein
+            existing.carbsPerServing = snap.carbs
+            existing.fatPerServing = snap.fat
         } else {
             let cached = CachedFood(
                 externalId: id,
-                name: result.name,
-                brand: result.brand,
-                defaultServingDescription: result.servingDescription,
-                defaultServingSizeGrams: result.servingSizeGrams,
-                defaultServingSizeMilliliters: result.servingSizeMilliliters,
-                caloriesPerServing: result.caloriesPerServing,
-                proteinPerServing: result.proteinPerServing,
-                carbsPerServing: result.carbsPerServing,
-                fatPerServing: result.fatPerServing,
+                name: name,
+                brand: brand,
+                defaultServingDescription: snap.description,
+                defaultServingSizeGrams: snap.grams,
+                defaultServingSizeMilliliters: snap.ml,
+                caloriesPerServing: snap.calories,
+                proteinPerServing: snap.protein,
+                carbsPerServing: snap.carbs,
+                fatPerServing: snap.fat,
                 saturatedFatPerServing: result.saturatedFatPerServing,
                 transFatPerServing: result.transFatPerServing,
                 monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,

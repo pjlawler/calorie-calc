@@ -13,6 +13,7 @@ struct DayDetailView: View {
     @State private var presentedMealSearch: MealType?
     @State private var editingEntry: FoodEntry?
     @State private var showManualWorkout = false
+    @AppStorage("settings.showSteps") private var showSteps: Bool = true
 
     private var dayLog: DayLog? {
         DayLog.preferredForDay(allDayLogs, on: date)
@@ -23,6 +24,9 @@ struct DayDetailView: View {
             totalsSection(log: dayLog)
             mealsSections(log: dayLog)
             workoutsSection(log: dayLog)
+            if showSteps {
+                stepsSection
+            }
         }
         .navigationTitle(date.formatted(.dateTime.weekday(.wide).month().day()))
         .navigationBarTitleDisplayMode(.inline)
@@ -161,6 +165,32 @@ struct DayDetailView: View {
         } header: {
             Label("Workouts", systemImage: "figure.run")
                 .font(.headline)
+        }
+    }
+
+    /// Reference-only daily step count. Sits below the Workouts section. Steps are NOT folded
+    /// into burned-calorie math (Apple's activeEnergyBurned already accounts for them, so any
+    /// per-step formula here would double-count workouts that involve walking).
+    @ViewBuilder
+    private var stepsSection: some View {
+        let steps = Int((viewModel?.dailySteps ?? 0).rounded())
+        Section {
+            HStack {
+                Image(systemName: "figure.walk")
+                    .foregroundStyle(.teal)
+                Text("Steps")
+                Spacer()
+                Text(steps.formatted(.number))
+                    .monospacedDigit()
+            }
+            .font(.subheadline)
+        } header: {
+            Label("Steps", systemImage: "figure.walk")
+                .font(.headline)
+        } footer: {
+            Text("Reference only — Apple Health step count for the day. Doesn't contribute to burned calories.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 

@@ -158,8 +158,8 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
 
         Estimate a single-serving nutritional profile:
         • A short, clean name (e.g. "Five Guys Cheeseburger").
-        • A plain-language portion description for one serving (e.g. "1 burger", "1 medium bowl").
-        • The estimated weight in grams of one serving, when it makes sense (e.g. ~200 g for a burger). Omit for liquid-only items or when a gram weight would be misleading.
+        • A plain-language portion description for one serving — use the food's natural unit ("1 bar", "1 burger", "0.67 cup", "1 medium bowl"). If the natural unit is countable (a bar / a burger / a slice / a patty / a cookie / a piece), keep the count in the description.
+        • serving_grams — REQUIRED for any food with a meaningful weight (essentially everything that isn't a pure liquid). Provide it even when the natural unit isn't grams: an RX Bar's portion is "1 bar" but its serving_grams is ~52. Only omit for items where mass really isn't meaningful (pure liquids by volume, small drinks, "1 small coffee").
         • Calories, protein (g), carbs (g), and fat (g) for one serving.
         • Confidence — "high" for well-known menu items or canonical recipes; "medium" for ambiguous descriptions; "low" when the input is too vague to estimate safely.
         • A short caveat note if there's meaningful uncertainty (e.g. customization, size ambiguity).
@@ -175,7 +175,8 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
 
         Estimate:
         • A short descriptive name of the primary food/meal.
-        • A plain-language portion description for what's visible (e.g. "1 medium bowl", "2 tacos").
+        • A plain-language portion description for what's visible — use the natural unit ("1 medium bowl", "2 tacos", "1 burger", "1 slice").
+        • serving_grams — REQUIRED for any food with a meaningful weight (essentially every solid food and most plates). Provide it even when the natural unit isn't grams: a burger photo's portion is "1 burger" but serving_grams is ~200. Only omit for pure liquids where mass isn't meaningful.
         • Total calories, protein (g), carbs (g), and fat (g) for that portion.
         • Your confidence — "high" for clear, well-known dishes in clear portions; "medium" for ambiguous portions or partially hidden food; "low" for unclear images.
         • A short caveat note if there's uncertainty (hidden sauces, portion ambiguity, multiple items).

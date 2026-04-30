@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(UIKit)
 import UIKit
+#endif
 
 nonisolated enum AppAppearance: String, CaseIterable, Hashable, Identifiable, Sendable {
     case system
@@ -24,6 +26,9 @@ nonisolated enum AppAppearance: String, CaseIterable, Hashable, Identifiable, Se
         }
     }
 
+    static let storageKey = "app.appearance"
+
+    #if canImport(UIKit)
     var uiInterfaceStyle: UIUserInterfaceStyle {
         switch self {
         case .system: .unspecified
@@ -31,8 +36,6 @@ nonisolated enum AppAppearance: String, CaseIterable, Hashable, Identifiable, Se
         case .dark: .dark
         }
     }
-
-    static let storageKey = "app.appearance"
 
     /// Pushes the chosen style to every connected window AND every presented view controller in
     /// their stacks. Setting `overrideUserInterfaceStyle` only on the window sometimes fails to
@@ -53,4 +56,10 @@ nonisolated enum AppAppearance: String, CaseIterable, Hashable, Identifiable, Se
             }
         }
     }
+    #else
+    /// macOS native uses SwiftUI's `.preferredColorScheme` end-to-end, so no UIKit override is
+    /// needed. SwiftUI re-renders sheets correctly without the workaround required on iOS.
+    @MainActor
+    static func apply(_ appearance: AppAppearance) {}
+    #endif
 }

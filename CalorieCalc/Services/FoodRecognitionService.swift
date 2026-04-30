@@ -23,6 +23,17 @@ protocol FoodRecognitionService: Sendable {
 }
 
 extension RecognizedMeal {
+    /// True when the AI's portion text reads as a recipe explanation (commas, multiple clauses,
+    /// long phrasing) rather than a clean unit label like "1 bar" or "0.67 cup". Used to push
+    /// the description into the entry's Notes field and use a generic "1 serving" label instead.
+    static func looksLikeRecipeExplanation(_ portionDescription: String) -> Bool {
+        let trimmed = portionDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return false }
+        if trimmed.contains(",") { return true }
+        let wordCount = trimmed.split(separator: " ").count
+        return wordCount > 4
+    }
+
     /// Heuristic for default serving behavior in the portion UI:
     /// - Composite or non-specific meal-like descriptions default to `.each`.
     /// - Clear single-item foods can keep weight/volume serving data.

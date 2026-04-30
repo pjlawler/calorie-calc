@@ -260,7 +260,8 @@ private struct WeekCalendarBody: View {
             alreadyEatenThisWeek: Int(eatenThisWeek.rounded()),
             workoutsCompleted: Int(workoutsCompleted.rounded()),
             plannedToWorkout: futureBudgets.count * period.dailyWorkoutCalorieGoal,
-            exerciseGoalSoFar: nonFutureBudgets.count * period.dailyWorkoutCalorieGoal
+            exerciseGoalSoFar: nonFutureBudgets.count * period.dailyWorkoutCalorieGoal,
+            consumeGoalSoFar: nonFutureBudgets.count * period.dailyGrossCalorieGoal
         )
     }
 

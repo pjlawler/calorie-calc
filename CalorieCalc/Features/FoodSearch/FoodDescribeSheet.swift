@@ -102,14 +102,36 @@ struct FoodDescribeSheet: View {
             userText: userDescription
         )
         let servingGrams = useEach ? nil : (meal.servingGrams ?? 100)
-        let servingDescription = meal.portionDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        let noteParts: [String?] = [meal.confidence.map { "AI estimate · \($0) confidence" }, meal.notes]
+        let portionRaw = meal.portionDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // For recipe-like portions ("1 large bowl with chicken, rice, and beans"), the verbose
+        // text belongs in Notes, not in the serving label. Keep the serving generic and prepend
+        // the explanation to the notes so the user can still see it on the entry.
+        let isRecipe = RecognizedMeal.looksLikeRecipeExplanation(portionRaw)
+        let servingDescription: String
+        let recipeNote: String?
+        if isRecipe {
+            servingDescription = "1 serving"
+            recipeNote = portionRaw
+        } else if !portionRaw.isEmpty {
+            servingDescription = portionRaw
+            recipeNote = nil
+        } else {
+            servingDescription = useEach ? "1 each" : "1 serving"
+            recipeNote = nil
+        }
+
+        let noteParts: [String?] = [
+            recipeNote,
+            meal.confidence.map { "AI estimate · \($0) confidence" },
+            meal.notes
+        ]
         let notes = noteParts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
         return FoodSearchResult(
             id: "ai:\(UUID().uuidString)",
             name: meal.name,
             brand: nil,
-            servingDescription: servingDescription.isEmpty ? (useEach ? "1 each" : "1 serving") : servingDescription,
+            servingDescription: servingDescription,
             servingSizeGrams: servingGrams,
             servingSizeMilliliters: nil,
             caloriesPerServing: meal.caloriesPerServing,

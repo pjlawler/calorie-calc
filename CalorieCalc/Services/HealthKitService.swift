@@ -59,6 +59,7 @@ final class HealthKitService {
         }
         let readTypes: Set<HKObjectType> = [
             HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!,
+            HKObjectType.quantityType(forIdentifier: .stepCount)!,
             HKObjectType.workoutType(),
         ]
         try await store.requestAuthorization(toShare: [], read: readTypes)
@@ -118,6 +119,52 @@ final class HealthKitService {
                 .sumQuantity()?
                 .doubleValue(for: .kilocalorie()) ?? 0
             buckets[day, default: 0] += energy
+        }
+        return buckets
+        #else
+        return [:]
+        #endif
+    }
+
+    /// Sum of step samples for the day. Apple already deduplicates step sources (phone, watch,
+     /// third-party) so this is a single canonical number — display-only, never folded into burn.
+    func dailySteps(on date: Date, calendar: Calendar = .current) async throws -> Double {
+        #if canImport(HealthKit) && os(iOS)
+        guard isAvailable else { return 0 }
+        let start = calendar.startOfDay(for: date)
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return 0 }
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
+        let descriptor = HKStatisticsQueryDescriptor(
+            predicate: HKSamplePredicate.quantitySample(type: HKQuantityType(.stepCount), predicate: predicate),
+            options: .cumulativeSum
+        )
+        let stats = try await descriptor.result(for: store)
+        return stats?.sumQuantity()?.doubleValue(for: .count()) ?? 0
+        #else
+        return 0
+        #endif
+    }
+
+    /// Per-day step totals over a date range. One HK query — same shape as `dailyWorkoutBurn`.
+    func dailyStepsByDay(
+        from startDate: Date,
+        through endDate: Date,
+        calendar: Calendar = .current
+    ) async throws -> [Date: Double] {
+        #if canImport(HealthKit) && os(iOS)
+        guard isAvailable else { return [:] }
+        let rangeStart = calendar.startOfDay(for: startDate)
+        guard let rangeEnd = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: endDate)) else { return [:] }
+        let predicate = HKQuery.predicateForSamples(withStart: rangeStart, end: rangeEnd, options: .strictStartDate)
+        let descriptor = HKSampleQueryDescriptor(
+            predicates: [.quantitySample(type: HKQuantityType(.stepCount), predicate: predicate)],
+            sortDescriptors: [SortDescriptor(\.startDate, order: .forward)]
+        )
+        let samples = try await descriptor.result(for: store)
+        var buckets: [Date: Double] = [:]
+        for sample in samples {
+            let day = calendar.startOfDay(for: sample.startDate)
+            buckets[day, default: 0] += sample.quantity.doubleValue(for: .count())
         }
         return buckets
         #else

@@ -15,6 +15,7 @@ struct FoodPhotoSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(FoodRecognitionEnvironment.self) private var env
     @Query private var dayLogs: [DayLog]
+    @Query private var cachedFoods: [CachedFood]
 
     @State private var stage: Stage = .pickSource
     @State private var image: UIImage?
@@ -27,6 +28,7 @@ struct FoodPhotoSheet: View {
 
     // Editable recognized fields
     @State private var nameText: String = ""
+    @State private var brandText: String = ""
     @State private var portionText: String = ""
     @State private var caloriesText: String = ""
     @State private var proteinText: String = ""
@@ -250,6 +252,8 @@ struct FoodPhotoSheet: View {
             Section {
                 TextField("Name", text: $nameText)
                     .textInputAutocapitalization(.words)
+                TextField("Brand (optional)", text: $brandText)
+                    .textInputAutocapitalization(.words)
                 TextField("Portion", text: $portionText)
             } footer: {
                 Text("Edit anything that looks off before logging.")
@@ -356,20 +360,33 @@ struct FoodPhotoSheet: View {
 
     private func prefill(from meal: RecognizedMeal) {
         nameText = meal.name
-        portionText = meal.portionDescription
+        brandText = ""
         recognizedServingGrams = meal.servingGrams
         caloriesText = String(Int(meal.caloriesPerServing.rounded()))
         proteinText = String(format: "%.1f", meal.proteinPerServing)
         carbsText = String(format: "%.1f", meal.carbsPerServing)
         fatText = String(format: "%.1f", meal.fatPerServing)
         confidenceLabel = meal.confidence.flatMap { $0.isEmpty ? nil : $0 }
-        notesText = meal.notes.flatMap { $0.isEmpty ? nil : $0 }
+
+        // Recipe-like portions belong in Notes, not in the serving label — keep the serving
+        // generic so the row reads "1 serving" while the full description is preserved below.
+        let portionRaw = meal.portionDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let aiCaveat = meal.notes.flatMap { $0.isEmpty ? nil : $0 }
+        if RecognizedMeal.looksLikeRecipeExplanation(portionRaw) {
+            portionText = "1 serving"
+            notesText = [portionRaw, aiCaveat].compactMap { $0 }.joined(separator: "\n")
+        } else {
+            portionText = portionRaw
+            notesText = aiCaveat
+        }
     }
 
     private func save() {
         guard let cals = Double(caloriesText), cals > 0 else { return }
         let trimmedName = nameText.trimmingCharacters(in: .whitespaces)
         guard !trimmedName.isEmpty else { return }
+        let trimmedBrandRaw = brandText.trimmingCharacters(in: .whitespaces)
+        let trimmedBrand: String? = trimmedBrandRaw.isEmpty ? nil : trimmedBrandRaw
         let trimmedPortion = portionText.trimmingCharacters(in: .whitespaces)
         let useEach = RecognizedMeal.shouldUseEachServing(
             name: trimmedName,
@@ -378,26 +395,94 @@ struct FoodPhotoSheet: View {
         )
         let log = ensureDayLog()
 
+        let servingDescription = trimmedPortion.isEmpty ? (useEach ? "1 each" : "1 serving") : trimmedPortion
+        let servingGrams: Double? = useEach ? nil : recognizedServingGrams
+        let protein = Double(proteinText) ?? 0
+        let carbs = Double(carbsText) ?? 0
+        let fat = Double(fatText) ?? 0
+        let externalId = "photo:\(UUID().uuidString)"
+        let storedNotes: String? = notesText.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+
         let entry = FoodEntry(
             name: trimmedName,
-            brand: nil,
-            servingDescription: trimmedPortion.isEmpty ? (useEach ? "1 each" : "1 serving") : trimmedPortion,
-            servingSizeGrams: useEach ? nil : recognizedServingGrams,
+            brand: trimmedBrand,
+            servingDescription: servingDescription,
+            servingSizeGrams: servingGrams,
             quantity: 1,
             caloriesPerServing: cals,
-            proteinPerServing: Double(proteinText) ?? 0,
-            carbsPerServing: Double(carbsText) ?? 0,
-            fatPerServing: Double(fatText) ?? 0,
+            proteinPerServing: protein,
+            carbsPerServing: carbs,
+            fatPerServing: fat,
             mealType: mealType,
             source: .photo,
-            externalId: nil,
+            externalId: externalId,
+            notes: storedNotes,
             timestamp: Date(),
             dayLog: log
         )
         modelContext.insert(entry)
+        upsertCached(
+            externalId: externalId,
+            name: trimmedName,
+            brand: trimmedBrand,
+            servingDescription: servingDescription,
+            servingSizeGrams: servingGrams,
+            calories: cals,
+            protein: protein,
+            carbs: carbs,
+            fat: fat
+        )
         try? modelContext.save()
         dismiss()
         onLogged()
+    }
+
+    private func upsertCached(
+        externalId: String,
+        name: String,
+        brand: String?,
+        servingDescription: String,
+        servingSizeGrams: Double?,
+        calories: Double,
+        protein: Double,
+        carbs: Double,
+        fat: Double
+    ) {
+        if let existing = cachedFoods.first(where: { $0.externalId == externalId }) {
+            existing.lastUsed = .now
+            existing.useCount += 1
+        } else {
+            let cached = CachedFood(
+                externalId: externalId,
+                name: name,
+                brand: brand,
+                defaultServingDescription: servingDescription,
+                defaultServingSizeGrams: servingSizeGrams,
+                defaultServingSizeMilliliters: nil,
+                caloriesPerServing: calories,
+                proteinPerServing: protein,
+                carbsPerServing: carbs,
+                fatPerServing: fat,
+                source: .photo,
+                lastUsed: .now,
+                useCount: 1
+            )
+            modelContext.insert(cached)
+        }
+        trimRecents(limit: 100)
+    }
+
+    private func trimRecents(limit: Int) {
+        let descriptor = FetchDescriptor<CachedFood>(
+            predicate: #Predicate<CachedFood> { $0.isFavorite == false },
+            sortBy: [SortDescriptor(\.lastUsed, order: .reverse)]
+        )
+        guard let recentNonFavorites = try? modelContext.fetch(descriptor),
+              recentNonFavorites.count > limit else { return }
+
+        for cached in recentNonFavorites.dropFirst(limit) {
+            modelContext.delete(cached)
+        }
     }
 
     private func ensureDayLog() -> DayLog {

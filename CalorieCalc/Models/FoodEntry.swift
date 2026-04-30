@@ -99,4 +99,17 @@ final class FoodEntry {
     var totalProtein: Double { proteinPerServing * quantity }
     var totalCarbs: Double { carbsPerServing * quantity }
     var totalFat: Double { fatPerServing * quantity }
+
+    /// Human-readable consumed serving — "2 bars", "200 g", "517 g", "1.34 cups". New entries
+    /// (saved with the effective-serving model) have quantity≈1 and pass `servingDescription`
+    /// through unchanged; legacy entries get the multiplication applied at render time, with
+    /// fallbacks to total mass/volume when the description doesn't parse cleanly.
+    var consumedDisplay: String {
+        renderConsumedServing(
+            description: servingDescription,
+            quantity: quantity,
+            grams: servingSizeGrams,
+            milliliters: servingSizeMilliliters
+        )
+    }
 }

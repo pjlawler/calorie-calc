@@ -1,6 +1,6 @@
 import Foundation
 #if canImport(AVFoundation) && os(iOS)
-import AVFoundation
+@preconcurrency import AVFoundation
 import Vision
 import UIKit
 #endif

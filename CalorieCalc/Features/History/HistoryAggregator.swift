@@ -4,6 +4,7 @@ import SwiftUI
 nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
     case calories
     case exercise
+    case steps
     case net
     case protein
     case carbs
@@ -19,6 +20,7 @@ nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
         case .carbs: "Carbs"
         case .fat: "Fat"
         case .exercise: "Exercise"
+        case .steps: "Steps"
         }
     }
 
@@ -26,6 +28,7 @@ nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .calories, .net, .exercise: "kCal"
         case .protein, .carbs, .fat: "g"
+        case .steps: "steps"
         }
     }
 
@@ -37,6 +40,7 @@ nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
         case .carbs: .orange
         case .fat: .pink
         case .exercise: .green
+        case .steps: .teal
         }
     }
 }
@@ -82,12 +86,14 @@ enum HistoryAggregator {
         let carbs: Double
         let fat: Double
         let exercise: Double
+        let steps: Double
     }
 
-    /// Collapse DayLogs + HK burn into per-day totals keyed by startOfDay.
+    /// Collapse DayLogs + HK burn + HK steps into per-day totals keyed by startOfDay.
     static func dailyTotals(
         dayLogs: [DayLog],
         workoutBurnByDay: [Date: Double],
+        stepsByDay: [Date: Double] = [:],
         calendar: Calendar = .current
     ) -> [Date: DailyTotals] {
         var result: [Date: DailyTotals] = [:]
@@ -101,18 +107,21 @@ enum HistoryAggregator {
                 protein: log.totalProtein,
                 carbs: log.totalCarbs,
                 fat: log.totalFat,
-                exercise: manualBurn + hkBurn
+                exercise: manualBurn + hkBurn,
+                steps: stepsByDay[day] ?? 0
             )
         }
-        // Any HK-only days (burn without food logs) should still contribute to exercise totals.
-        for (day, burn) in workoutBurnByDay where result[day] == nil {
+        // HK-only days (burn or steps without a food log) should still contribute to totals.
+        let extraDays = Set(workoutBurnByDay.keys).union(stepsByDay.keys).subtracting(result.keys)
+        for day in extraDays {
             result[day] = DailyTotals(
                 date: day,
                 calories: 0,
                 protein: 0,
                 carbs: 0,
                 fat: 0,
-                exercise: burn
+                exercise: workoutBurnByDay[day] ?? 0,
+                steps: stepsByDay[day] ?? 0
             )
         }
         return result
@@ -161,33 +170,47 @@ enum HistoryAggregator {
 
     /// Total + per-day / per-week / per-month averages over the inclusive `[start, end]` range
     /// for one metric. Averages divide by the calendar span (days × 7 etc.), not just active days,
-    /// so a week with two zero days still divides by seven.
+    /// so a week with two zero days still divides by seven. Pass `averageEnd` to clamp the
+    /// averaging window (e.g. to exclude today's incomplete data); the total stays full-range.
     static func summary(
         metric: HistoryMetric,
         start: Date,
         end: Date,
         dailyTotals: [Date: DailyTotals],
+        averageEnd: Date? = nil,
         calendar: Calendar = .current
     ) -> HistorySummary {
         let startDay = calendar.startOfDay(for: start)
         let endDay = calendar.startOfDay(for: end)
-        var total = 0.0
-        var cursor = startDay
-        while cursor <= endDay {
-            if let totals = dailyTotals[cursor] {
-                total += value(for: metric, totals: totals)
+
+        func sum(through limit: Date) -> Double {
+            var running = 0.0
+            var cursor = startDay
+            while cursor <= limit {
+                if let totals = dailyTotals[cursor] {
+                    running += value(for: metric, totals: totals)
+                }
+                guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
+                cursor = next
             }
-            guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
-            cursor = next
+            return running
         }
-        let dayCount = max(1, (calendar.dateComponents([.day], from: startDay, to: endDay).day ?? 0) + 1)
-        let weeks = max(1.0, Double(dayCount) / 7.0)
-        let months = max(1.0, Double(dayCount) / 30.0)
+
+        let total = sum(through: endDay)
+
+        let avgEndDay = averageEnd.map { min(endDay, calendar.startOfDay(for: $0)) } ?? endDay
+        let hasAverageRange = avgEndDay >= startDay
+        let avgSum = hasAverageRange ? sum(through: avgEndDay) : 0
+        let avgDayCount = hasAverageRange
+            ? max(1, (calendar.dateComponents([.day], from: startDay, to: avgEndDay).day ?? 0) + 1)
+            : 1
+        let weeks = max(1.0, Double(avgDayCount) / 7.0)
+        let months = max(1.0, Double(avgDayCount) / 30.0)
         return HistorySummary(
             total: total,
-            dayAvg: total / Double(dayCount),
-            weekAvg: total / weeks,
-            monthAvg: total / months
+            dayAvg: avgSum / Double(avgDayCount),
+            weekAvg: avgSum / weeks,
+            monthAvg: avgSum / months
         )
     }
 
@@ -200,6 +223,7 @@ enum HistoryAggregator {
         case .carbs: return totals.carbs
         case .fat: return totals.fat
         case .exercise: return totals.exercise
+        case .steps: return totals.steps
         }
     }
 }

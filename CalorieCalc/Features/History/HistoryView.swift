@@ -9,9 +9,11 @@ struct HistoryView: View {
     @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
 
     @AppStorage("history.timeframe") private var timeframe: HistoryTimeframe = .currentWeek
+    @AppStorage("settings.showSteps") private var showSteps: Bool = true
     @AppStorage("history.customStart") private var customStartTS: Double = (Calendar.current.date(byAdding: .day, value: -6, to: Calendar.current.startOfDay(for: .now)) ?? .now).timeIntervalSinceReferenceDate
     @AppStorage("history.customEnd") private var customEndTS: Double = Calendar.current.startOfDay(for: .now).timeIntervalSinceReferenceDate
     @State private var workoutBurnByDay: [Date: Double] = [:]
+    @State private var stepsByDay: [Date: Double] = [:]
     @State private var isLoadingHealthKit = false
     @State private var showSettings = false
     @State private var showAnalysis = false
@@ -38,8 +40,24 @@ struct HistoryView: View {
         )
     }
 
+    /// For the in-progress week, average only over days that have already ended so today's
+    /// partial intake doesn't drag the daily average down.
+    private var averageEnd: Date? {
+        guard timeframe == .currentWeek else { return nil }
+        let calendar = Calendar.current
+        return calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: .now))
+    }
+
+    private var visibleMetrics: [HistoryMetric] {
+        HistoryMetric.allCases.filter { showSteps || $0 != .steps }
+    }
+
     private var totals: [Date: HistoryAggregator.DailyTotals] {
-        HistoryAggregator.dailyTotals(dayLogs: dayLogs, workoutBurnByDay: workoutBurnByDay)
+        HistoryAggregator.dailyTotals(
+            dayLogs: dayLogs,
+            workoutBurnByDay: workoutBurnByDay,
+            stepsByDay: stepsByDay
+        )
     }
 
     var body: some View {
@@ -51,7 +69,7 @@ struct HistoryView: View {
                         customRangeEditor
                     }
                     rangeLabel
-                    ForEach(HistoryMetric.allCases) { metric in
+                    ForEach(visibleMetrics) { metric in
                         metricSection(metric)
                     }
                     analyzeButton
@@ -95,12 +113,13 @@ struct HistoryView: View {
     }
 
     private var analysisInput: PeriodNutritionData {
-        let calories = HistoryAggregator.summary(metric: .calories, start: range.start, end: range.end, dailyTotals: totals)
-        let protein = HistoryAggregator.summary(metric: .protein, start: range.start, end: range.end, dailyTotals: totals)
-        let carbs = HistoryAggregator.summary(metric: .carbs, start: range.start, end: range.end, dailyTotals: totals)
-        let fat = HistoryAggregator.summary(metric: .fat, start: range.start, end: range.end, dailyTotals: totals)
-        let exercise = HistoryAggregator.summary(metric: .exercise, start: range.start, end: range.end, dailyTotals: totals)
-        let net = HistoryAggregator.summary(metric: .net, start: range.start, end: range.end, dailyTotals: totals)
+        let avgEnd = averageEnd
+        let calories = HistoryAggregator.summary(metric: .calories, start: range.start, end: range.end, dailyTotals: totals, averageEnd: avgEnd)
+        let protein = HistoryAggregator.summary(metric: .protein, start: range.start, end: range.end, dailyTotals: totals, averageEnd: avgEnd)
+        let carbs = HistoryAggregator.summary(metric: .carbs, start: range.start, end: range.end, dailyTotals: totals, averageEnd: avgEnd)
+        let fat = HistoryAggregator.summary(metric: .fat, start: range.start, end: range.end, dailyTotals: totals, averageEnd: avgEnd)
+        let exercise = HistoryAggregator.summary(metric: .exercise, start: range.start, end: range.end, dailyTotals: totals, averageEnd: avgEnd)
+        let net = HistoryAggregator.summary(metric: .net, start: range.start, end: range.end, dailyTotals: totals, averageEnd: avgEnd)
         let dayCount = max(1, (Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: range.start), to: Calendar.current.startOfDay(for: range.end)).day ?? 0) + 1)
         return PeriodNutritionData(
             periodLabel: "\(timeframe.displayName) — \(rangeText)",
@@ -173,7 +192,8 @@ struct HistoryView: View {
             metric: metric,
             start: range.start,
             end: range.end,
-            dailyTotals: totals
+            dailyTotals: totals,
+            averageEnd: averageEnd
         )
         let cards = cardsFor(metric: metric, summary: summary)
 
@@ -264,6 +284,8 @@ struct HistoryView: View {
         switch metric {
         case .protein, .carbs, .fat:
             return CalorieFormatter.macro(value)
+        case .steps:
+            return Int(value.rounded()).formatted(.number)
         default:
             return CalorieFormatter.whole(value)
         }
@@ -278,15 +300,10 @@ struct HistoryView: View {
     private func loadHealthKit() async {
         isLoadingHealthKit = true
         defer { isLoadingHealthKit = false }
-        do {
-            let result = try await healthKitService.dailyWorkoutBurn(
-                from: range.start,
-                through: range.end
-            )
-            workoutBurnByDay = result
-        } catch {
-            workoutBurnByDay = [:]
-        }
+        async let burnTask = healthKitService.dailyWorkoutBurn(from: range.start, through: range.end)
+        async let stepsTask = healthKitService.dailyStepsByDay(from: range.start, through: range.end)
+        workoutBurnByDay = (try? await burnTask) ?? [:]
+        stepsByDay = (try? await stepsTask) ?? [:]
     }
 }
 

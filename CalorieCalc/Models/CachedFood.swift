@@ -34,6 +34,17 @@ final class CachedFood {
     var useCount: Int
     var notes: String?
 
+    // Locked favorite snapshot — captured the first time the user favorites this food and never
+    // overwritten by subsequent logs. Recents (the `default*` fields above) reflect the latest
+    // log; the favorite snapshot reflects "the way the user originally saved it".
+    var favoriteServingDescription: String?
+    var favoriteServingSizeGrams: Double?
+    var favoriteServingSizeMilliliters: Double?
+    var favoriteCaloriesPerServing: Double?
+    var favoriteProteinPerServing: Double?
+    var favoriteCarbsPerServing: Double?
+    var favoriteFatPerServing: Double?
+
     init(
         id: UUID = UUID(),
         externalId: String? = nil,
@@ -59,7 +70,14 @@ final class CachedFood {
         isFavorite: Bool = false,
         lastUsed: Date = .now,
         useCount: Int = 0,
-        notes: String? = nil
+        notes: String? = nil,
+        favoriteServingDescription: String? = nil,
+        favoriteServingSizeGrams: Double? = nil,
+        favoriteServingSizeMilliliters: Double? = nil,
+        favoriteCaloriesPerServing: Double? = nil,
+        favoriteProteinPerServing: Double? = nil,
+        favoriteCarbsPerServing: Double? = nil,
+        favoriteFatPerServing: Double? = nil
     ) {
         self.id = id
         self.externalId = externalId
@@ -86,5 +104,12 @@ final class CachedFood {
         self.lastUsed = lastUsed
         self.useCount = useCount
         self.notes = notes
+        self.favoriteServingDescription = favoriteServingDescription
+        self.favoriteServingSizeGrams = favoriteServingSizeGrams
+        self.favoriteServingSizeMilliliters = favoriteServingSizeMilliliters
+        self.favoriteCaloriesPerServing = favoriteCaloriesPerServing
+        self.favoriteProteinPerServing = favoriteProteinPerServing
+        self.favoriteCarbsPerServing = favoriteCarbsPerServing
+        self.favoriteFatPerServing = favoriteFatPerServing
     }
 }

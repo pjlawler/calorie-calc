@@ -17,6 +17,7 @@ struct SettingsView: View {
 
     @AppStorage(AppTab.defaultTabStorageKey) private var defaultTabRaw: String = AppTab.week.rawValue
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw: String = AppAppearance.system.rawValue
+    @AppStorage("settings.showSteps") private var showSteps: Bool = true
 
     @State private var viewModel: SettingsViewModel?
     @State private var draft: GoalDraft?
@@ -37,6 +38,7 @@ struct SettingsView: View {
                         ),
                         defaultTabRaw: $defaultTabRaw,
                         appearanceRaw: $appearanceRaw,
+                        showSteps: $showSteps,
                         onExportCSV: exportDatabaseCSV,
                         isExportingCSV: isExportingCSV,
                         exportStatusMessage: exportStatusMessage,
@@ -305,6 +307,7 @@ private struct SettingsForm: View {
     @Binding var draft: GoalDraft
     @Binding var defaultTabRaw: String
     @Binding var appearanceRaw: String
+    @Binding var showSteps: Bool
     let onExportCSV: () -> Void
     let isExportingCSV: Bool
     let exportStatusMessage: String?
@@ -425,6 +428,8 @@ private struct SettingsForm: View {
                 if let error = viewModel?.healthKitError {
                     Text(error).font(.footnote).foregroundStyle(.red)
                 }
+
+                Toggle("Show step count", isOn: $showSteps)
             }
 
             #if DEBUG

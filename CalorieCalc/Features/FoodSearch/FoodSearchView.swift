@@ -206,7 +206,7 @@ struct FoodSearchView: View {
     private var recentsTab: some View {
         List {
             ForEach(recentFoods, id: \.id) { cached in
-                cachedRow(cached)
+                cachedRow(cached, forFavorites: false)
             }
             .onDelete(perform: deleteRecentFoods)
         }
@@ -215,14 +215,14 @@ struct FoodSearchView: View {
     private var favoritesTab: some View {
         List {
             ForEach(cachedFoods.filter { $0.isFavorite }, id: \.id) { cached in
-                cachedRow(cached)
+                cachedRow(cached, forFavorites: true)
             }
         }
     }
 
-    private func cachedRow(_ cached: CachedFood) -> some View {
+    private func cachedRow(_ cached: CachedFood, forFavorites: Bool = false) -> some View {
         Button {
-            portionTarget = cached.toSearchResult()
+            portionTarget = cached.toSearchResult(forFavorites: forFavorites)
         } label: {
             CachedFoodRow(cached: cached) {
                 cached.isFavorite.toggle()
@@ -320,18 +320,23 @@ private struct CachedFoodRow: View {
 }
 
 extension CachedFood {
-    func toSearchResult() -> FoodSearchResult {
-        FoodSearchResult(
+    /// `forFavorites: true` substitutes the locked favorite snapshot for the live default fields
+    /// so the Favorites tab opens the food with the serving the user originally favorited, even
+    /// if their last log used a different size. Falls back to the live fields when no snapshot
+    /// has been captured yet.
+    func toSearchResult(forFavorites: Bool = false) -> FoodSearchResult {
+        let useFav = forFavorites && favoriteServingDescription != nil
+        return FoodSearchResult(
             id: externalId ?? id.uuidString,
             name: name,
             brand: brand,
-            servingDescription: defaultServingDescription,
-            servingSizeGrams: defaultServingSizeGrams,
-            servingSizeMilliliters: defaultServingSizeMilliliters,
-            caloriesPerServing: caloriesPerServing,
-            proteinPerServing: proteinPerServing,
-            carbsPerServing: carbsPerServing,
-            fatPerServing: fatPerServing,
+            servingDescription: useFav ? (favoriteServingDescription ?? defaultServingDescription) : defaultServingDescription,
+            servingSizeGrams: useFav ? favoriteServingSizeGrams : defaultServingSizeGrams,
+            servingSizeMilliliters: useFav ? favoriteServingSizeMilliliters : defaultServingSizeMilliliters,
+            caloriesPerServing: useFav ? (favoriteCaloriesPerServing ?? caloriesPerServing) : caloriesPerServing,
+            proteinPerServing: useFav ? (favoriteProteinPerServing ?? proteinPerServing) : proteinPerServing,
+            carbsPerServing: useFav ? (favoriteCarbsPerServing ?? carbsPerServing) : carbsPerServing,
+            fatPerServing: useFav ? (favoriteFatPerServing ?? fatPerServing) : fatPerServing,
             saturatedFatPerServing: saturatedFatPerServing,
             transFatPerServing: transFatPerServing,
             monounsaturatedFatPerServing: monounsaturatedFatPerServing,

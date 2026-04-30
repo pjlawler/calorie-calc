@@ -62,29 +62,26 @@ private struct FoodEntryRow: View {
     let entry: FoodEntry
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
+        HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.name)
                     .font(.body)
                     .lineLimit(1)
-                HStack(spacing: 6) {
-                    if let brand = entry.brand, !brand.isEmpty {
-                        Text(brand)
-                            .lineLimit(1)
-                    }
-                    Text(servingLine)
+                if let brand = entry.brand, !brand.isEmpty {
+                    Text(brand)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
             Spacer()
-            Text("\(CalorieFormatter.whole(entry.totalCalories)) kcal")
-                .font(.subheadline.monospacedDigit())
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(CalorieFormatter.whole(entry.totalCalories)) kcal")
+                    .font(.subheadline.monospacedDigit())
+                Text(entry.consumedDisplay)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
-    }
-
-    private var servingLine: String {
-        let qty = entry.quantity.formatted(.number.precision(.fractionLength(0...2)))
-        return "\(qty) × \(entry.servingDescription)"
     }
 }

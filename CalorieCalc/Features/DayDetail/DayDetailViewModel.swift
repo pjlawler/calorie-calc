@@ -9,6 +9,7 @@ final class DayDetailViewModel {
     var healthKitWorkouts: [HealthKitWorkout] = []
     var healthKitActiveEnergy: Double = 0
     var excludedHealthKitWorkoutIDs: Set<UUID> = []
+    var dailySteps: Double = 0
 
     private let healthKitService: HealthKitService
     private let calendar: Calendar
@@ -20,8 +21,11 @@ final class DayDetailViewModel {
     }
 
     func refresh() async {
-        healthKitWorkouts = (try? await healthKitService.workouts(on: date, calendar: calendar)) ?? []
+        async let workoutsTask = healthKitService.workouts(on: date, calendar: calendar)
+        async let stepsTask = healthKitService.dailySteps(on: date, calendar: calendar)
+        healthKitWorkouts = (try? await workoutsTask) ?? []
         healthKitActiveEnergy = healthKitWorkouts.reduce(0) { $0 + $1.activeEnergyBurned }
+        dailySteps = (try? await stepsTask) ?? 0
     }
 
     func toggleExclude(_ workoutID: UUID) {
