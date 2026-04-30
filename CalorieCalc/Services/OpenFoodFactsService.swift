@@ -130,61 +130,140 @@ private struct OFFProduct: Decodable {
         // unit only disambiguated via the free-text `serving_size`. We look for an "ml"/"l" token
         // there to decide which family the food belongs to; absent a hint we default to grams.
         let isVolume = servingSize.map(Self.looksLikeVolume) ?? false
-        var servingGrams = isVolume ? nil : quantity
-        var servingMilliliters = isVolume ? quantity : nil
-        // Many OFF entries omit `serving_quantity`. Fall back to 100 g (or 100 ml) so the UI
-        // still has a sensible native serving and the `_100g` scale math resolves to 1×.
-        if servingGrams == nil && servingMilliliters == nil {
-            if isVolume { servingMilliliters = 100 } else { servingGrams = 100 }
+        var servingMassGrams = isVolume ? nil : quantity
+        var servingMassMl = isVolume ? quantity : nil
+        if servingMassGrams == nil && servingMassMl == nil {
+            if isVolume { servingMassMl = 100 } else { servingMassGrams = 100 }
         }
 
-        let servingDescription: String = {
-            if let raw = servingSize, !raw.isEmpty { return raw }
-            if let g = servingGrams { return "\(g.formatted(.number.precision(.fractionLength(0...1)))) g" }
-            if let ml = servingMilliliters { return "\(ml.formatted(.number.precision(.fractionLength(0...1)))) ml" }
-            return "1 serving"
-        }()
+        let perServingBasis = servingMassGrams ?? servingMassMl
+        // OFF's `_serving` fields are per *one* OFF serving (`servingMassGrams`/`servingMassMl`).
+        let caloriesPerServing = nutriments?.perServing(servingKey: \.energyKcalServing, per100gKey: \.energyKcal100g, servingBasis: perServingBasis) ?? 0
+        let proteinPerServing = nutriments?.perServing(servingKey: \.proteinsServing, per100gKey: \.proteins100g, servingBasis: perServingBasis) ?? 0
+        let carbsPerServing = nutriments?.perServing(servingKey: \.carbsServing, per100gKey: \.carbs100g, servingBasis: perServingBasis) ?? 0
+        let fatPerServing = nutriments?.perServing(servingKey: \.fatServing, per100gKey: \.fat100g, servingBasis: perServingBasis) ?? 0
+        let satPerServing = nutriments?.optionalPerServing(servingKey: \.saturatedFatServing, per100gKey: \.saturatedFat100g, servingBasis: perServingBasis)
+        let transPerServing = nutriments?.optionalPerServing(servingKey: \.transFatServing, per100gKey: \.transFat100g, servingBasis: perServingBasis)
+        let monoPerServing = nutriments?.optionalPerServing(servingKey: \.monoFatServing, per100gKey: \.monoFat100g, servingBasis: perServingBasis)
+        let polyPerServing = nutriments?.optionalPerServing(servingKey: \.polyFatServing, per100gKey: \.polyFat100g, servingBasis: perServingBasis)
+        // OFF stores cholesterol/sodium in grams per serving; rest of the app uses mg.
+        let cholPerServing = nutriments?.optionalPerServing(servingKey: \.cholesterolServing, per100gKey: \.cholesterol100g, servingBasis: perServingBasis).map { $0 * 1_000 }
+        let sodiumPerServing = nutriments?.optionalPerServing(servingKey: \.sodiumServing, per100gKey: \.sodium100g, servingBasis: perServingBasis).map { $0 * 1_000 }
+        let fiberPerServing = nutriments?.optionalPerServing(servingKey: \.fiberServing, per100gKey: \.fiber100g, servingBasis: perServingBasis)
+        let sugarsPerServing = nutriments?.optionalPerServing(servingKey: \.sugarsServing, per100gKey: \.sugars100g, servingBasis: perServingBasis)
+        let addedSugarsPerServing = nutriments?.optionalPerServing(servingKey: \.addedSugarsServing, per100gKey: \.addedSugars100g, servingBasis: perServingBasis)
 
-        // The `_serving` fields come pre-scaled by OFF; the `_100g` fields are per 100 g / 100 ml
-        // and need a per-serving scale factor. We scale using whichever native basis is in play.
-        let perServingBasis = servingGrams ?? servingMilliliters
-        let calories = nutriments?.perServing(servingKey: \.energyKcalServing, per100gKey: \.energyKcal100g, servingBasis: perServingBasis) ?? 0
-        let protein = nutriments?.perServing(servingKey: \.proteinsServing, per100gKey: \.proteins100g, servingBasis: perServingBasis) ?? 0
-        let carbs = nutriments?.perServing(servingKey: \.carbsServing, per100gKey: \.carbs100g, servingBasis: perServingBasis) ?? 0
-        let fat = nutriments?.perServing(servingKey: \.fatServing, per100gKey: \.fat100g, servingBasis: perServingBasis) ?? 0
+        // Try to extract a countable native unit from the free-text serving description.
+        var nativeUnit: String = "ea"
+        var nativeUnitGrams: Double? = nil
+        var nativeUnitMilliliters: Double? = nil
+        var caloriesPerNative = caloriesPerServing
+        var proteinPerNative = proteinPerServing
+        var carbsPerNative = carbsPerServing
+        var fatPerNative = fatPerServing
+        var satPerNative = satPerServing
+        var transPerNative = transPerServing
+        var monoPerNative = monoPerServing
+        var polyPerNative = polyPerServing
+        var cholPerNative = cholPerServing
+        var sodiumPerNative = sodiumPerServing
+        var fiberPerNative = fiberPerServing
+        var sugarsPerNative = sugarsPerServing
+        var addedSugarsPerNative = addedSugarsPerServing
+        var initialSelectedUnit: String = "ea"
+        var initialSelectedQuantity: Double = 1
 
-        let saturated = nutriments?.optionalPerServing(servingKey: \.saturatedFatServing, per100gKey: \.saturatedFat100g, servingBasis: perServingBasis)
-        let trans = nutriments?.optionalPerServing(servingKey: \.transFatServing, per100gKey: \.transFat100g, servingBasis: perServingBasis)
-        let mono = nutriments?.optionalPerServing(servingKey: \.monoFatServing, per100gKey: \.monoFat100g, servingBasis: perServingBasis)
-        let poly = nutriments?.optionalPerServing(servingKey: \.polyFatServing, per100gKey: \.polyFat100g, servingBasis: perServingBasis)
-        // OFF stores cholesterol/sodium in grams per serving; the rest of our app treats them as
-        // milligrams (USDA convention, nutrition-label convention) — scale once at the boundary.
-        let cholesterol = nutriments?.optionalPerServing(servingKey: \.cholesterolServing, per100gKey: \.cholesterol100g, servingBasis: perServingBasis).map { $0 * 1_000 }
-        let sodium = nutriments?.optionalPerServing(servingKey: \.sodiumServing, per100gKey: \.sodium100g, servingBasis: perServingBasis).map { $0 * 1_000 }
-        let fiber = nutriments?.optionalPerServing(servingKey: \.fiberServing, per100gKey: \.fiber100g, servingBasis: perServingBasis)
-        let sugars = nutriments?.optionalPerServing(servingKey: \.sugarsServing, per100gKey: \.sugars100g, servingBasis: perServingBasis)
-        let addedSugars = nutriments?.optionalPerServing(servingKey: \.addedSugarsServing, per100gKey: \.addedSugars100g, servingBasis: perServingBasis)
+        if let raw = servingSize,
+           let parsed = ServingMath.parseServingDescription(raw),
+           parsed.count > 0,
+           !parsed.unit.isEmpty {
+            let token = ServingMath.normalizeUnitToken(parsed.unit)
+            if !token.isEmpty && !ServingMath.isMeasurementUnit(token) {
+                nativeUnit = token
+                if let g = servingMassGrams { nativeUnitGrams = g / parsed.count }
+                if let ml = servingMassMl { nativeUnitMilliliters = ml / parsed.count }
+                caloriesPerNative = caloriesPerServing / parsed.count
+                proteinPerNative = proteinPerServing / parsed.count
+                carbsPerNative = carbsPerServing / parsed.count
+                fatPerNative = fatPerServing / parsed.count
+                satPerNative = satPerServing.map { $0 / parsed.count }
+                transPerNative = transPerServing.map { $0 / parsed.count }
+                monoPerNative = monoPerServing.map { $0 / parsed.count }
+                polyPerNative = polyPerServing.map { $0 / parsed.count }
+                cholPerNative = cholPerServing.map { $0 / parsed.count }
+                sodiumPerNative = sodiumPerServing.map { $0 / parsed.count }
+                fiberPerNative = fiberPerServing.map { $0 / parsed.count }
+                sugarsPerNative = sugarsPerServing.map { $0 / parsed.count }
+                addedSugarsPerNative = addedSugarsPerServing.map { $0 / parsed.count }
+                initialSelectedUnit = token
+                initialSelectedQuantity = 1
+            }
+        }
+
+        if nativeUnit == "ea" {
+            if let mass = servingMassGrams, mass > 0 {
+                nativeUnit = "g"
+                nativeUnitGrams = 1
+                let factor = mass
+                caloriesPerNative = caloriesPerServing / factor
+                proteinPerNative = proteinPerServing / factor
+                carbsPerNative = carbsPerServing / factor
+                fatPerNative = fatPerServing / factor
+                satPerNative = satPerServing.map { $0 / factor }
+                transPerNative = transPerServing.map { $0 / factor }
+                monoPerNative = monoPerServing.map { $0 / factor }
+                polyPerNative = polyPerServing.map { $0 / factor }
+                cholPerNative = cholPerServing.map { $0 / factor }
+                sodiumPerNative = sodiumPerServing.map { $0 / factor }
+                fiberPerNative = fiberPerServing.map { $0 / factor }
+                sugarsPerNative = sugarsPerServing.map { $0 / factor }
+                addedSugarsPerNative = addedSugarsPerServing.map { $0 / factor }
+                initialSelectedUnit = "g"
+                initialSelectedQuantity = mass
+            } else if let vol = servingMassMl, vol > 0 {
+                nativeUnit = "ml"
+                nativeUnitMilliliters = 1
+                let factor = vol
+                caloriesPerNative = caloriesPerServing / factor
+                proteinPerNative = proteinPerServing / factor
+                carbsPerNative = carbsPerServing / factor
+                fatPerNative = fatPerServing / factor
+                satPerNative = satPerServing.map { $0 / factor }
+                transPerNative = transPerServing.map { $0 / factor }
+                monoPerNative = monoPerServing.map { $0 / factor }
+                polyPerNative = polyPerServing.map { $0 / factor }
+                cholPerNative = cholPerServing.map { $0 / factor }
+                sodiumPerNative = sodiumPerServing.map { $0 / factor }
+                fiberPerNative = fiberPerServing.map { $0 / factor }
+                sugarsPerNative = sugarsPerServing.map { $0 / factor }
+                addedSugarsPerNative = addedSugarsPerServing.map { $0 / factor }
+                initialSelectedUnit = "ml"
+                initialSelectedQuantity = vol
+            }
+        }
 
         return FoodSearchResult(
             id: "off:\(barcode)",
             name: name,
             brand: brands,
-            servingDescription: servingDescription,
-            servingSizeGrams: servingGrams,
-            servingSizeMilliliters: servingMilliliters,
-            caloriesPerServing: calories,
-            proteinPerServing: protein,
-            carbsPerServing: carbs,
-            fatPerServing: fat,
-            saturatedFatPerServing: saturated,
-            transFatPerServing: trans,
-            monounsaturatedFatPerServing: mono,
-            polyunsaturatedFatPerServing: poly,
-            cholesterolPerServing: cholesterol,
-            sodiumPerServing: sodium,
-            fiberPerServing: fiber,
-            sugarsPerServing: sugars,
-            addedSugarsPerServing: addedSugars,
+            nativeUnit: nativeUnit,
+            nativeUnitGrams: nativeUnitGrams,
+            nativeUnitMilliliters: nativeUnitMilliliters,
+            initialSelectedUnit: initialSelectedUnit,
+            initialSelectedQuantity: initialSelectedQuantity,
+            caloriesPerServing: caloriesPerNative,
+            proteinPerServing: proteinPerNative,
+            carbsPerServing: carbsPerNative,
+            fatPerServing: fatPerNative,
+            saturatedFatPerServing: satPerNative,
+            transFatPerServing: transPerNative,
+            monounsaturatedFatPerServing: monoPerNative,
+            polyunsaturatedFatPerServing: polyPerNative,
+            cholesterolPerServing: cholPerNative,
+            sodiumPerServing: sodiumPerNative,
+            fiberPerServing: fiberPerNative,
+            sugarsPerServing: sugarsPerNative,
+            addedSugarsPerServing: addedSugarsPerNative,
             source: .barcode
         )
     }

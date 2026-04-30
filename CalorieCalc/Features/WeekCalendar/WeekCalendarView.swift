@@ -310,7 +310,7 @@ private struct FavoriteQuickAddListSheet: View {
                                             if let brand = favorite.brand {
                                                 Text(brand).lineLimit(1)
                                             }
-                                            Text(favorite.defaultServingDescription).lineLimit(1)
+                                            Text(favorite.rowCaption).lineLimit(1)
                                         }
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -341,13 +341,18 @@ private struct FavoriteQuickAddListSheet: View {
         let dayLog = ensureDayLog(for: day)
         let timestamp = defaultTimestamp(for: day)
 
+        // Quick-add from favorites uses the favorite preset when present, else last-used, else
+        // 1 native unit.
+        let initialUnit = food.favoriteSelectedUnit ?? food.lastSelectedUnit ?? food.nativeUnit
+        let initialQty = food.favoriteSelectedQuantity ?? food.lastSelectedQuantity ?? 1
         let entry = FoodEntry(
             name: food.name,
             brand: food.brand,
-            servingDescription: food.defaultServingDescription,
-            servingSizeGrams: food.defaultServingSizeGrams,
-            servingSizeMilliliters: food.defaultServingSizeMilliliters,
-            quantity: 1,
+            nativeUnit: food.nativeUnit,
+            nativeUnitGrams: food.nativeUnitGrams,
+            nativeUnitMilliliters: food.nativeUnitMilliliters,
+            selectedUnit: initialUnit,
+            quantity: initialQty,
             caloriesPerServing: food.caloriesPerServing,
             proteinPerServing: food.proteinPerServing,
             carbsPerServing: food.carbsPerServing,

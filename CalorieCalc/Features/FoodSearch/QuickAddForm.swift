@@ -45,39 +45,37 @@ struct QuickAddForm: View {
     @State private var proteinText: String = ""
     @State private var carbsText: String = ""
     @State private var fatText: String = ""
-    @State private var servingAmountText: String = "100"
-    @State private var servingUnit: PortionUnit = .grams
+    @State private var quantityText: String = "100"
+    @State private var unit: String = "g"
     @State private var notesText: String = ""
 
-    /// Units offered on the Quick Add serving-size picker. Groups match the portion-sheet
-    /// picker so a food the user creates in `lb` later shows up alongside `kg/g/oz` only.
-    private let unitOptions: [PortionUnit] = [
-        .each,
-        .grams, .kilograms, .ounces, .pounds,
-        .milliliters, .liters, .fluidOunces, .cups, .tablespoons, .teaspoons,
+    /// Units offered on the Quick Add picker. Mirrors the portion-sheet picker so a food the
+    /// user creates as "g" later gives g/oz/lb conversions, "ml" gives the volume ladder, and
+    /// custom names ("bar", "bowl") become countable natives with no conversion.
+    private let unitOptions: [String] = [
+        "g", "oz", "lb", "kg",
+        "ml", "fl oz", "cup", "tbsp", "tsp", "l",
+        "ea", "bar", "slice", "piece", "bowl",
     ]
 
     private var calories: Double? { Double(caloriesText) }
-    private var servingAmount: Double? {
-        Double(servingAmountText.replacingOccurrences(of: ",", with: "."))
+    private var quantity: Double? {
+        Double(quantityText.replacingOccurrences(of: ",", with: "."))
     }
     private var canSave: Bool {
         guard let cals = calories, cals > 0 else { return false }
-        guard let amount = servingAmount, amount > 0 else { return false }
+        guard let amount = quantity, amount > 0 else { return false }
         return true
     }
 
-    private var servingFooter: String {
-        let amountText = servingAmountText.isEmpty ? "0" : servingAmountText
-        let unitName = servingUnit.displayName(quantity: servingAmount ?? 1)
-        switch servingUnit.family {
-        case .mass:
-            return "Enter the nutrition values for one \(amountText) \(unitName) serving. You can log partial or multiple servings later and convert to g / kg / oz / lb."
-        case .volume:
-            return "Enter the nutrition values for one \(amountText) \(unitName) serving. You can log partial or multiple servings later and convert to ml / L / fl oz / cups / tbsp / tsp."
-        case .each:
-            return "Enter the nutrition values for one \(unitName) of this item. Non-convertible — log in whole or partial units."
+    private var quantityFooter: String {
+        if ServingMath.isMassUnit(unit) {
+            return "Enter the nutrition values for one \(quantityText.isEmpty ? "0" : quantityText) \(unit) serving. You'll be able to convert between g / oz / lb / kg later."
         }
+        if ServingMath.isVolumeUnit(unit) {
+            return "Enter the nutrition values for one \(quantityText.isEmpty ? "0" : quantityText) \(unit) serving. You'll be able to convert between ml / fl oz / cup / tbsp / tsp / L later."
+        }
+        return "Enter the nutrition values for one \(unit). You can log multiple or partial \(unit)s later."
     }
 
     var body: some View {
@@ -101,16 +99,16 @@ struct QuickAddForm: View {
             Section {
                 TextField("Name", text: $name)
                     .textInputAutocapitalization(.words)
-                LabeledContent("Serving Size") {
+                LabeledContent("Serving") {
                     HStack(spacing: 8) {
-                        TextField("Amount", text: $servingAmountText)
+                        TextField("Amount", text: $quantityText)
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .monospacedDigit()
                             .frame(minWidth: 60)
-                        Picker("Unit", selection: $servingUnit) {
-                            ForEach(unitOptions) { unit in
-                                Text(unit.displayName(quantity: servingAmount ?? 1)).tag(unit)
+                        Picker("Unit", selection: $unit) {
+                            ForEach(unitOptions, id: \.self) { option in
+                                Text(option).tag(option)
                             }
                         }
                         .labelsHidden()
@@ -118,7 +116,7 @@ struct QuickAddForm: View {
                     }
                 }
             } footer: {
-                Text(servingFooter)
+                Text(quantityFooter)
             }
 
             Section("Nutrition") {
@@ -165,47 +163,80 @@ struct QuickAddForm: View {
 
     private func save() {
         guard let cals = calories, cals > 0 else { return }
-        guard let amount = servingAmount, amount > 0 else { return }
+        guard let amount = quantity, amount > 0 else { return }
         let log = ensureDayLog()
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedName = trimmedName.isEmpty ? "Quick entry" : trimmedName
         let trimmedNotes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
         let storedNotes: String? = trimmedNotes.isEmpty ? nil : trimmedNotes
 
-        // Stable ID for the underlying "food" so Recents / Favorites / future edits all refer
-        // back to the same CachedFood regardless of how many times the user logs it.
         let externalId: String = scannedBarcode ?? "manual:\(UUID().uuidString)"
-        let unitName = servingUnit.displayName(quantity: amount)
-        let servingDescription = "\(formatAmount(amount)) \(unitName)"
+        let protein = Double(proteinText) ?? 0
+        let carbs = Double(carbsText) ?? 0
+        let fat = Double(fatText) ?? 0
 
-        // Convert the user's (amount + unit) into the family's base unit so future logs can
-        // be re-expressed in any compatible unit. `.each` has no base unit — both gram/ml
-        // fields stay nil and the portion sheet will only show `.each` in the picker.
-        let servingGrams: Double?
-        let servingMilliliters: Double?
-        switch servingUnit.family {
-        case .mass:
-            servingGrams = amount * servingUnit.baseMultiplier
-            servingMilliliters = nil
-        case .volume:
-            servingGrams = nil
-            servingMilliliters = amount * servingUnit.baseMultiplier
-        case .each:
-            servingGrams = nil
-            servingMilliliters = nil
+        // Map the user's (amount + unit) into the food's identity.
+        // - Mass unit (g/oz/...): native = "g", per-native = per-gram. amount is in those mass
+        //   units; we convert to grams for the per-native scale factor.
+        // - Volume unit: native = "ml", per-native = per-ml.
+        // - Countable (bar/slice/ea): native = unit, per-native = per-bar; amount stays.
+        let nativeUnit: String
+        let nativeUnitGrams: Double?
+        let nativeUnitMilliliters: Double?
+        let calsPerNative: Double
+        let proteinPerNative: Double
+        let carbsPerNative: Double
+        let fatPerNative: Double
+        let initialSelectedUnit: String
+        let initialSelectedQuantity: Double
+
+        if ServingMath.isMassUnit(unit) {
+            let totalGrams = (ServingMath.grams(forSelectedUnit: unit, quantity: amount)) ?? amount
+            nativeUnit = "g"
+            nativeUnitGrams = 1
+            nativeUnitMilliliters = nil
+            calsPerNative = cals / totalGrams
+            proteinPerNative = protein / totalGrams
+            carbsPerNative = carbs / totalGrams
+            fatPerNative = fat / totalGrams
+            initialSelectedUnit = unit
+            initialSelectedQuantity = amount
+        } else if ServingMath.isVolumeUnit(unit) {
+            let totalMl = (ServingMath.milliliters(forSelectedUnit: unit, quantity: amount)) ?? amount
+            nativeUnit = "ml"
+            nativeUnitGrams = nil
+            nativeUnitMilliliters = 1
+            calsPerNative = cals / totalMl
+            proteinPerNative = protein / totalMl
+            carbsPerNative = carbs / totalMl
+            fatPerNative = fat / totalMl
+            initialSelectedUnit = unit
+            initialSelectedQuantity = amount
+        } else {
+            // Countable native — amount is the count of one named unit (1 bar / 2 slice).
+            nativeUnit = unit
+            nativeUnitGrams = nil
+            nativeUnitMilliliters = nil
+            calsPerNative = cals / amount
+            proteinPerNative = protein / amount
+            carbsPerNative = carbs / amount
+            fatPerNative = fat / amount
+            initialSelectedUnit = unit
+            initialSelectedQuantity = amount
         }
 
         let entry = FoodEntry(
             name: resolvedName,
             brand: nil,
-            servingDescription: servingDescription,
-            servingSizeGrams: servingGrams,
-            servingSizeMilliliters: servingMilliliters,
-            quantity: 1,
-            caloriesPerServing: cals,
-            proteinPerServing: Double(proteinText) ?? 0,
-            carbsPerServing: Double(carbsText) ?? 0,
-            fatPerServing: Double(fatText) ?? 0,
+            nativeUnit: nativeUnit,
+            nativeUnitGrams: nativeUnitGrams,
+            nativeUnitMilliliters: nativeUnitMilliliters,
+            selectedUnit: initialSelectedUnit,
+            quantity: initialSelectedQuantity,
+            caloriesPerServing: calsPerNative,
+            proteinPerServing: proteinPerNative,
+            carbsPerServing: carbsPerNative,
+            fatPerServing: fatPerNative,
             mealType: mealType,
             source: scannedBarcode != nil ? .barcode : .manual,
             externalId: externalId,
@@ -217,13 +248,15 @@ struct QuickAddForm: View {
         upsertCached(
             externalId: externalId,
             name: resolvedName,
-            servingDescription: servingDescription,
-            servingSizeGrams: servingGrams,
-            servingSizeMilliliters: servingMilliliters,
-            calories: cals,
-            protein: Double(proteinText) ?? 0,
-            carbs: Double(carbsText) ?? 0,
-            fat: Double(fatText) ?? 0,
+            nativeUnit: nativeUnit,
+            nativeUnitGrams: nativeUnitGrams,
+            nativeUnitMilliliters: nativeUnitMilliliters,
+            initialSelectedUnit: initialSelectedUnit,
+            initialSelectedQuantity: initialSelectedQuantity,
+            calsPerNative: calsPerNative,
+            proteinPerNative: proteinPerNative,
+            carbsPerNative: carbsPerNative,
+            fatPerNative: fatPerNative,
             notes: storedNotes,
             source: entry.source
         )
@@ -236,13 +269,15 @@ struct QuickAddForm: View {
     private func upsertCached(
         externalId: String,
         name: String,
-        servingDescription: String,
-        servingSizeGrams: Double?,
-        servingSizeMilliliters: Double?,
-        calories: Double,
-        protein: Double,
-        carbs: Double,
-        fat: Double,
+        nativeUnit: String,
+        nativeUnitGrams: Double?,
+        nativeUnitMilliliters: Double?,
+        initialSelectedUnit: String,
+        initialSelectedQuantity: Double,
+        calsPerNative: Double,
+        proteinPerNative: Double,
+        carbsPerNative: Double,
+        fatPerNative: Double,
         notes: String?,
         source: FoodSource
     ) {
@@ -250,6 +285,8 @@ struct QuickAddForm: View {
             existing.lastUsed = .now
             existing.useCount += 1
             existing.notes = notes
+            existing.lastSelectedUnit = initialSelectedUnit
+            existing.lastSelectedQuantity = initialSelectedQuantity
             trimRecents(limit: 100)
             return
         }
@@ -257,13 +294,15 @@ struct QuickAddForm: View {
             externalId: externalId,
             name: name,
             brand: nil,
-            defaultServingDescription: servingDescription,
-            defaultServingSizeGrams: servingSizeGrams,
-            defaultServingSizeMilliliters: servingSizeMilliliters,
-            caloriesPerServing: calories,
-            proteinPerServing: protein,
-            carbsPerServing: carbs,
-            fatPerServing: fat,
+            nativeUnit: nativeUnit,
+            nativeUnitGrams: nativeUnitGrams,
+            nativeUnitMilliliters: nativeUnitMilliliters,
+            lastSelectedUnit: initialSelectedUnit,
+            lastSelectedQuantity: initialSelectedQuantity,
+            caloriesPerServing: calsPerNative,
+            proteinPerServing: proteinPerNative,
+            carbsPerServing: carbsPerNative,
+            fatPerServing: fatPerNative,
             source: source,
             lastUsed: .now,
             useCount: 1,
@@ -284,12 +323,6 @@ struct QuickAddForm: View {
         for cached in recentNonFavorites.dropFirst(limit) {
             modelContext.delete(cached)
         }
-    }
-
-    private func formatAmount(_ value: Double) -> String {
-        value.truncatingRemainder(dividingBy: 1) == 0
-            ? String(Int(value))
-            : value.formatted(.number.precision(.fractionLength(0...2)))
     }
 
     private func ensureDayLog() -> DayLog {

@@ -105,59 +105,161 @@ private struct FDCFood: Decodable {
         let sugars = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [2000, 269])
         let addedSugars = FDCNutrient.firstOptionalValue(in: foodNutrients, ids: [1235])
 
-        let normalizedUnit = servingSizeUnit?.lowercased()
-        var servingGrams: Double? = {
-            guard let normalizedUnit, let servingSize else { return nil }
-            switch normalizedUnit {
+        // USDA returns nutrients in two shapes:
+        //   - Branded: per *one* serving (e.g. "1 bar = 57g, 200 kcal/serving"). caloriesPerServing
+        //     here is per native unit directly.
+        //   - Foundation / SR Legacy: per 100 g (raw eggs, flour). No countable native — we treat
+        //     these as loose mass. Per-native = per-gram = total / 100.
+        let normalizedSizeUnit = servingSizeUnit?.lowercased()
+        let servingMassGrams: Double? = {
+            guard let normalizedSizeUnit, let servingSize else { return nil }
+            switch normalizedSizeUnit {
             case "g", "gm": return servingSize
             default: return nil
             }
         }()
-        let servingMilliliters: Double? = {
-            guard let normalizedUnit, let servingSize else { return nil }
-            switch normalizedUnit {
+        let servingMassMl: Double? = {
+            guard let normalizedSizeUnit, let servingSize else { return nil }
+            switch normalizedSizeUnit {
             case "ml", "mlt": return servingSize
             default: return nil
             }
         }()
-        // Foundation / SR Legacy foods (generic ingredients like "Eggs, raw") expose nutrients
-        // per 100 g and omit a native serving size. Default to 100 g so the picker shows mass
-        // units and the arithmetic stays 1:1 — user can retype any amount they actually ate.
-        if servingGrams == nil && servingMilliliters == nil {
-            servingGrams = 100
+
+        // Try to extract a countable native unit ("bar"/"cup") from `householdServingFullText`.
+        // Failing that, treat as loose mass/volume per the API's serving size.
+        var nativeUnit: String = "ea"
+        var nativeUnitGrams: Double? = nil
+        var nativeUnitMilliliters: Double? = nil
+        var caloriesPerNative = calories
+        var proteinPerNative = protein
+        var carbsPerNative = carbs
+        var fatPerNative = fat
+        var satPerNative = saturated
+        var transPerNative = trans
+        var monoPerNative = mono
+        var polyPerNative = poly
+        var cholPerNative = cholesterol
+        var sodiumPerNative = sodium
+        var fiberPerNative = fiber
+        var sugarsPerNative = sugars
+        var addedSugarsPerNative = addedSugars
+        var initialSelectedUnit: String = "ea"
+        var initialSelectedQuantity: Double = 1
+
+        if let household = householdServingFullText, !household.isEmpty,
+           let parsed = ServingMath.parseServingDescription(household),
+           parsed.count > 0,
+           !parsed.unit.isEmpty {
+            let token = ServingMath.normalizeUnitToken(parsed.unit)
+            if !token.isEmpty && !ServingMath.isMeasurementUnit(token) {
+                // Countable native unit. Servings nutrients are already per *household serving*,
+                // which equals `parsed.count` of native. Divide to get per-native.
+                nativeUnit = token
+                if let g = servingMassGrams { nativeUnitGrams = g / parsed.count }
+                if let ml = servingMassMl { nativeUnitMilliliters = ml / parsed.count }
+                caloriesPerNative = calories / parsed.count
+                proteinPerNative = protein / parsed.count
+                carbsPerNative = carbs / parsed.count
+                fatPerNative = fat / parsed.count
+                satPerNative = saturated.map { $0 / parsed.count }
+                transPerNative = trans.map { $0 / parsed.count }
+                monoPerNative = mono.map { $0 / parsed.count }
+                polyPerNative = poly.map { $0 / parsed.count }
+                cholPerNative = cholesterol.map { $0 / parsed.count }
+                sodiumPerNative = sodium.map { $0 / parsed.count }
+                fiberPerNative = fiber.map { $0 / parsed.count }
+                sugarsPerNative = sugars.map { $0 / parsed.count }
+                addedSugarsPerNative = addedSugars.map { $0 / parsed.count }
+                initialSelectedUnit = token
+                initialSelectedQuantity = 1
+            }
         }
 
-        let servingDescription: String
-        if let household = householdServingFullText, !household.isEmpty {
-            servingDescription = household
-        } else if let size = servingSize, let unit = servingSizeUnit {
-            servingDescription = "\(size.formatted(.number.precision(.fractionLength(0...1)))) \(unit)"
-        } else if let g = servingGrams {
-            servingDescription = "\(g.formatted(.number.precision(.fractionLength(0...1)))) g"
-        } else {
-            servingDescription = "1 serving"
+        if nativeUnit == "ea" {
+            // No countable native parsed. Fall back to loose mass/volume.
+            if let mass = servingMassGrams, mass > 0 {
+                nativeUnit = "g"
+                nativeUnitGrams = 1
+                let factor = mass
+                caloriesPerNative = calories / factor
+                proteinPerNative = protein / factor
+                carbsPerNative = carbs / factor
+                fatPerNative = fat / factor
+                satPerNative = saturated.map { $0 / factor }
+                transPerNative = trans.map { $0 / factor }
+                monoPerNative = mono.map { $0 / factor }
+                polyPerNative = poly.map { $0 / factor }
+                cholPerNative = cholesterol.map { $0 / factor }
+                sodiumPerNative = sodium.map { $0 / factor }
+                fiberPerNative = fiber.map { $0 / factor }
+                sugarsPerNative = sugars.map { $0 / factor }
+                addedSugarsPerNative = addedSugars.map { $0 / factor }
+                initialSelectedUnit = "g"
+                initialSelectedQuantity = mass
+            } else if let vol = servingMassMl, vol > 0 {
+                nativeUnit = "ml"
+                nativeUnitMilliliters = 1
+                let factor = vol
+                caloriesPerNative = calories / factor
+                proteinPerNative = protein / factor
+                carbsPerNative = carbs / factor
+                fatPerNative = fat / factor
+                satPerNative = saturated.map { $0 / factor }
+                transPerNative = trans.map { $0 / factor }
+                monoPerNative = mono.map { $0 / factor }
+                polyPerNative = poly.map { $0 / factor }
+                cholPerNative = cholesterol.map { $0 / factor }
+                sodiumPerNative = sodium.map { $0 / factor }
+                fiberPerNative = fiber.map { $0 / factor }
+                sugarsPerNative = sugars.map { $0 / factor }
+                addedSugarsPerNative = addedSugars.map { $0 / factor }
+                initialSelectedUnit = "ml"
+                initialSelectedQuantity = vol
+            } else {
+                // Foundation foods with no serving info — assume per-100g convention.
+                nativeUnit = "g"
+                nativeUnitGrams = 1
+                caloriesPerNative = calories / 100
+                proteinPerNative = protein / 100
+                carbsPerNative = carbs / 100
+                fatPerNative = fat / 100
+                satPerNative = saturated.map { $0 / 100 }
+                transPerNative = trans.map { $0 / 100 }
+                monoPerNative = mono.map { $0 / 100 }
+                polyPerNative = poly.map { $0 / 100 }
+                cholPerNative = cholesterol.map { $0 / 100 }
+                sodiumPerNative = sodium.map { $0 / 100 }
+                fiberPerNative = fiber.map { $0 / 100 }
+                sugarsPerNative = sugars.map { $0 / 100 }
+                addedSugarsPerNative = addedSugars.map { $0 / 100 }
+                initialSelectedUnit = "g"
+                initialSelectedQuantity = 100
+            }
         }
 
         return FoodSearchResult(
             id: id,
             name: description.capitalized,
             brand: brandName ?? brandOwner,
-            servingDescription: servingDescription,
-            servingSizeGrams: servingGrams,
-            servingSizeMilliliters: servingMilliliters,
-            caloriesPerServing: calories,
-            proteinPerServing: protein,
-            carbsPerServing: carbs,
-            fatPerServing: fat,
-            saturatedFatPerServing: saturated,
-            transFatPerServing: trans,
-            monounsaturatedFatPerServing: mono,
-            polyunsaturatedFatPerServing: poly,
-            cholesterolPerServing: cholesterol,
-            sodiumPerServing: sodium,
-            fiberPerServing: fiber,
-            sugarsPerServing: sugars,
-            addedSugarsPerServing: addedSugars,
+            nativeUnit: nativeUnit,
+            nativeUnitGrams: nativeUnitGrams,
+            nativeUnitMilliliters: nativeUnitMilliliters,
+            initialSelectedUnit: initialSelectedUnit,
+            initialSelectedQuantity: initialSelectedQuantity,
+            caloriesPerServing: caloriesPerNative,
+            proteinPerServing: proteinPerNative,
+            carbsPerServing: carbsPerNative,
+            fatPerServing: fatPerNative,
+            saturatedFatPerServing: satPerNative,
+            transFatPerServing: transPerNative,
+            monounsaturatedFatPerServing: monoPerNative,
+            polyunsaturatedFatPerServing: polyPerNative,
+            cholesterolPerServing: cholPerNative,
+            sodiumPerServing: sodiumPerNative,
+            fiberPerServing: fiberPerNative,
+            sugarsPerServing: sugarsPerNative,
+            addedSugarsPerServing: addedSugarsPerNative,
             source: .usdaFDC
         )
     }

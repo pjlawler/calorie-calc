@@ -2,11 +2,16 @@ import Foundation
 
 nonisolated struct RecognizedMeal: Sendable, Hashable {
     let name: String
+    /// AI-supplied portion description like "1 bar", "1 burger", "1 medium bowl with chicken".
+    /// Used by the bridge layer to extract a `nativeUnit` and surface the verbose portion text
+    /// in Notes when it's recipe-like.
     let portionDescription: String
-    /// Estimated grams in one serving, when applicable (e.g. `200` for a cheeseburger). `nil` for
-    /// items where a gram weight doesn't make sense (e.g. "1 small coffee") or when Claude can't
-    /// estimate it confidently.
+    /// Estimated grams of one *whole portion* — i.e. the mass of one "1 bar" / "1 burger". `nil`
+    /// for items where a gram weight doesn't make sense (e.g. "1 small coffee") or when Claude
+    /// can't estimate it confidently.
     let servingGrams: Double?
+    /// Calories for the *whole portion* (e.g. for a 1-bar portion, this is total calories of
+    /// that bar). The bridge divides by the parsed portion count to get per-native values.
     let caloriesPerServing: Double
     let proteinPerServing: Double
     let carbsPerServing: Double

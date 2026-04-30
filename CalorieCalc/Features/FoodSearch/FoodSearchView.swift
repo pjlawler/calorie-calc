@@ -214,10 +214,24 @@ struct FoodSearchView: View {
 
     private var favoritesTab: some View {
         List {
-            ForEach(cachedFoods.filter { $0.isFavorite }, id: \.id) { cached in
+            ForEach(favoriteFoods, id: \.id) { cached in
                 cachedRow(cached, forFavorites: true)
             }
         }
+    }
+
+    /// Favorites sort alphabetically by name (case- and diacritic-insensitive). Brand is used
+    /// as the tie-breaker so two "Chocolate" items from different brands stay grouped sensibly.
+    private var favoriteFoods: [CachedFood] {
+        cachedFoods
+            .filter { $0.isFavorite }
+            .sorted { lhs, rhs in
+                let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+                if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+                let lb = lhs.brand ?? ""
+                let rb = rhs.brand ?? ""
+                return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
+            }
     }
 
     private func cachedRow(_ cached: CachedFood, forFavorites: Bool = false) -> some View {
@@ -277,16 +291,26 @@ private struct FoodResultRow: View {
                 Text(result.name).lineLimit(1)
                 HStack(spacing: 6) {
                     if let brand = result.brand { Text(brand).lineLimit(1) }
-                    Text(result.servingDescription).lineLimit(1)
+                    Text(result.rowCaption).lineLimit(1)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            Text("\(CalorieFormatter.whole(result.caloriesPerServing)) kcal")
+            Text("\(CalorieFormatter.whole(rowCalories)) kcal")
                 .font(.subheadline.monospacedDigit())
         }
         .padding(.vertical, 2)
+    }
+
+    /// kcal shown on the search row — corresponds to the row caption (one native unit, or the
+    /// loose-food default like "100 g").
+    private var rowCalories: Double {
+        let nativeIsMeasurement = ServingMath.isMeasurementUnit(result.nativeUnit)
+        if !nativeIsMeasurement {
+            return result.caloriesPerServing
+        }
+        return result.caloriesPerServing * result.initialSelectedQuantity
     }
 }
 
@@ -307,36 +331,79 @@ private struct CachedFoodRow: View {
                 Text(cached.name).lineLimit(1)
                 HStack(spacing: 6) {
                     if let brand = cached.brand { Text(brand).lineLimit(1) }
-                    Text(cached.defaultServingDescription).lineLimit(1)
+                    Text(cached.rowCaption).lineLimit(1)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            Text("\(CalorieFormatter.whole(cached.caloriesPerServing)) kcal")
+            Text("\(CalorieFormatter.whole(rowCalories)) kcal")
                 .font(.subheadline.monospacedDigit())
         }
+    }
+
+    private var rowCalories: Double {
+        // For sticky-preset cached foods, show the calories at the user's last-picked serving so
+        // the row matches what reopening will load. Falls back to per-native otherwise.
+        if let unit = cached.lastSelectedUnit, let qty = cached.lastSelectedQuantity {
+            let factor = ServingMath.nativeUnitsConsumed(
+                selectedUnit: unit,
+                quantity: qty,
+                nativeUnit: cached.nativeUnit,
+                nativeUnitGrams: cached.nativeUnitGrams,
+                nativeUnitMilliliters: cached.nativeUnitMilliliters
+            )
+            return cached.caloriesPerServing * factor
+        }
+        return cached.caloriesPerServing
     }
 }
 
 extension CachedFood {
-    /// `forFavorites: true` substitutes the locked favorite snapshot for the live default fields
-    /// so the Favorites tab opens the food with the serving the user originally favorited, even
-    /// if their last log used a different size. Falls back to the live fields when no snapshot
-    /// has been captured yet.
+    /// Search-row caption mirrors `FoodSearchResult.rowCaption`. Prefers the user's sticky preset
+    /// when present so Recents reads as "2 bar" / "57 g" matching their last log.
+    var rowCaption: String {
+        if let unit = lastSelectedUnit, let qty = lastSelectedQuantity {
+            return ServingMath.displayConsumed(quantity: qty, unit: unit)
+        }
+        let nativeIsMeasurement = ServingMath.isMeasurementUnit(nativeUnit)
+        if !nativeIsMeasurement {
+            if let g = nativeUnitGrams, g > 0 { return "1 \(nativeUnit) (\(formatNumber(g))g)" }
+            if let ml = nativeUnitMilliliters, ml > 0 { return "1 \(nativeUnit) (\(formatNumber(ml))ml)" }
+            return "1 \(nativeUnit)"
+        }
+        return "1 \(nativeUnit)"
+    }
+
+    /// `forFavorites: true` uses the locked favorite preset (the unit + quantity captured at
+    /// favorite time) instead of the user's most-recent pick, so the Favorites tab opens the food
+    /// with the serving they originally favorited even if later logs changed it.
     func toSearchResult(forFavorites: Bool = false) -> FoodSearchResult {
-        let useFav = forFavorites && favoriteServingDescription != nil
+        let initialUnit: String
+        let initialQty: Double
+        if forFavorites, let unit = favoriteSelectedUnit, let qty = favoriteSelectedQuantity {
+            initialUnit = unit
+            initialQty = qty
+        } else if let unit = lastSelectedUnit, let qty = lastSelectedQuantity {
+            initialUnit = unit
+            initialQty = qty
+        } else {
+            initialUnit = nativeUnit
+            initialQty = 1
+        }
         return FoodSearchResult(
             id: externalId ?? id.uuidString,
             name: name,
             brand: brand,
-            servingDescription: useFav ? (favoriteServingDescription ?? defaultServingDescription) : defaultServingDescription,
-            servingSizeGrams: useFav ? favoriteServingSizeGrams : defaultServingSizeGrams,
-            servingSizeMilliliters: useFav ? favoriteServingSizeMilliliters : defaultServingSizeMilliliters,
-            caloriesPerServing: useFav ? (favoriteCaloriesPerServing ?? caloriesPerServing) : caloriesPerServing,
-            proteinPerServing: useFav ? (favoriteProteinPerServing ?? proteinPerServing) : proteinPerServing,
-            carbsPerServing: useFav ? (favoriteCarbsPerServing ?? carbsPerServing) : carbsPerServing,
-            fatPerServing: useFav ? (favoriteFatPerServing ?? fatPerServing) : fatPerServing,
+            nativeUnit: nativeUnit,
+            nativeUnitGrams: nativeUnitGrams,
+            nativeUnitMilliliters: nativeUnitMilliliters,
+            initialSelectedUnit: initialUnit,
+            initialSelectedQuantity: initialQty,
+            caloriesPerServing: caloriesPerServing,
+            proteinPerServing: proteinPerServing,
+            carbsPerServing: carbsPerServing,
+            fatPerServing: fatPerServing,
             saturatedFatPerServing: saturatedFatPerServing,
             transFatPerServing: transFatPerServing,
             monounsaturatedFatPerServing: monounsaturatedFatPerServing,

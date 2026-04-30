@@ -1,60 +1,217 @@
 import Foundation
 
-/// A picker option in the food portion sheet. Encodes how to scale the food's per-serving
-/// nutrients when the user picks it: `servingsPerUnit` is "1 of this option" expressed in
-/// native servings, so amount × servingsPerUnit × numServings = native-serving multiplier.
+/// One option in the food portion sheet's unit picker. The label is the unit token shown to the
+/// user ("bar", "g", "oz"). Native options additionally annotate the gram weight of one native
+/// unit ("bar (57g)") so the user knows what they're dealing with at a glance.
 nonisolated struct ServingOption: Identifiable, Hashable, Sendable {
     let id: String
+    let unit: String
     let label: String
-    let servingsPerUnit: Double
 }
 
-/// Render a native serving description multiplied by `multiplier` — e.g. "1 bar" × 2 → "2 bars",
-/// "100 g" × 1.5 → "150 g", "0.67 cup" × 2 → "1.34 cups". Strips parenthetical annotations like
-/// "(130g)" before pluralizing. Falls back to "<multiplier> × <label>" when the leading number
-/// can't be parsed.
-nonisolated func renderNativeServing(label: String, multiplier: Double) -> String {
-    let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else {
-        let isOne = abs(multiplier - 1) < 0.0001
-        return formatServingNumber(multiplier) + (isOne ? " serving" : " servings")
-    }
-    if let split = splitLeadingNumber(trimmed) {
-        let total = split.value * multiplier
-        let cleanRest = stripParenthetical(split.rest)
-        if cleanRest.isEmpty {
-            return formatServingNumber(total)
-        }
-        return formatServingNumber(total) + " " + pluralizeServingUnit(cleanRest, count: total)
-    }
-    if abs(multiplier - 1) < 0.0001 {
-        return trimmed
-    }
-    let cleanWhole = stripParenthetical(trimmed)
-    let unitText = cleanWhole.isEmpty ? trimmed : cleanWhole
-    return formatServingNumber(multiplier) + " " + pluralizeServingUnit(unitText, count: multiplier)
-}
+nonisolated enum ServingMath {
 
-/// Render the consumed portion of a `FoodEntry`-shaped serving. When the stored description
-/// has no leading number (legacy USDA-style shapes like "serving (100g)"), prefer the total
-/// mass or volume — that's what was actually consumed and avoids ugly pluralization fallouts.
-nonisolated func renderConsumedServing(
-    description: String,
-    quantity: Double,
-    grams: Double?,
-    milliliters: Double?
-) -> String {
-    let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
-    let hasLeadingNumber = trimmed.first.map { $0.isNumber } ?? false
-    if !hasLeadingNumber {
-        if let g = grams, g > 0 {
-            return formatServingNumber(g * quantity) + " g"
+    /// Mass conversions. Cup/tbsp/tsp belong to the *volume* table — they aren't here because we
+    /// don't have density data to convert mass↔volume.
+    static let gramsPerMassUnit: [String: Double] = [
+        "g": 1,
+        "kg": 1_000,
+        "mg": 0.001,
+        "oz": 28.3495,
+        "lb": 453.592,
+    ]
+
+    static let millilitersPerVolumeUnit: [String: Double] = [
+        "ml": 1,
+        "l": 1_000,
+        "fl oz": 29.5735,
+        "cup": 236.588,
+        "tbsp": 14.7868,
+        "tsp": 4.92892,
+    ]
+
+    /// Recognized loose mass-unit tokens. When the API's "native" unit parses as one of these we
+    /// don't treat it as a countable — the food is loose mass, native unit = "g".
+    static let massUnitTokens: Set<String> = ["g", "gm", "gram", "grams", "kg", "kilogram", "kilograms",
+                                              "mg", "milligram", "milligrams",
+                                              "oz", "ounce", "ounces", "lb", "lbs", "pound", "pounds"]
+    static let volumeUnitTokens: Set<String> = ["ml", "milliliter", "milliliters", "millilitre", "millilitres",
+                                                "l", "liter", "liters", "litre", "litres",
+                                                "fl oz", "floz", "fluid ounce", "fluid ounces",
+                                                "tbsp", "tablespoon", "tablespoons",
+                                                "tsp", "teaspoon", "teaspoons"]
+
+    /// Parses a free-text serving description like "1 bar", "1/4 cup", "57 g", "240 ml" into
+    /// `(count, unit)`. Strips parenthetical annotations ("1 bar (57g)" → "1 bar"). Supports
+    /// integers, decimals, comma-decimals, and simple fractions like "1/4" or "1 1/2".
+    static func parseServingDescription(_ description: String) -> (count: Double, unit: String)? {
+        let cleaned = stripParenthetical(description).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty else { return nil }
+
+        // Try fraction first ("1 1/2 cup" / "1/2 cup").
+        let mixedFraction = #"^(\d+)\s+(\d+)/(\d+)\s*(.*)$"#
+        let simpleFraction = #"^(\d+)/(\d+)\s*(.*)$"#
+        let decimal = #"^(\d+(?:[\.,]\d+)?)\s*(.*)$"#
+
+        if let m = cleaned.firstMatch(of: try! Regex(mixedFraction)) {
+            let whole = Double(m.output[1].substring ?? "") ?? 0
+            let num = Double(m.output[2].substring ?? "") ?? 0
+            let den = Double(m.output[3].substring ?? "") ?? 1
+            let rest = String(m.output[4].substring ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return (whole + num / den, rest)
         }
-        if let ml = milliliters, ml > 0 {
-            return formatServingNumber(ml * quantity) + " ml"
+        if let m = cleaned.firstMatch(of: try! Regex(simpleFraction)) {
+            let num = Double(m.output[1].substring ?? "") ?? 0
+            let den = Double(m.output[2].substring ?? "") ?? 1
+            let rest = String(m.output[3].substring ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return (num / den, rest)
         }
+        if let m = cleaned.firstMatch(of: try! Regex(decimal)) {
+            let value = Double((m.output[1].substring ?? "").replacingOccurrences(of: ",", with: ".")) ?? 0
+            let rest = String(m.output[2].substring ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return (value, rest)
+        }
+        return nil
     }
-    return renderNativeServing(label: description, multiplier: quantity)
+
+    /// Normalizes parsed unit text into a stable token. "Bars" → "bar", "GRAMS" → "g", "fl. oz."
+    /// → "fl oz". Returns the lowercased canonical form, suitable as a picker `unit` label.
+    static func normalizeUnitToken(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if trimmed.isEmpty { return "" }
+        // Strip trailing punctuation and common suffixes.
+        let stripped = trimmed.replacingOccurrences(of: #"\.$"#, with: "", options: .regularExpression)
+        // Direct alias normalization for measurement units.
+        let aliases: [String: String] = [
+            "gm": "g", "gram": "g", "grams": "g",
+            "kilogram": "kg", "kilograms": "kg",
+            "milligram": "mg", "milligrams": "mg",
+            "ounce": "oz", "ounces": "oz",
+            "pound": "lb", "pounds": "lb", "lbs": "lb",
+            "milliliter": "ml", "milliliters": "ml", "millilitre": "ml", "millilitres": "ml",
+            "liter": "l", "liters": "l", "litre": "l", "litres": "l",
+            "floz": "fl oz", "fluid ounce": "fl oz", "fluid ounces": "fl oz",
+            "tablespoon": "tbsp", "tablespoons": "tbsp",
+            "teaspoon": "tsp", "teaspoons": "tsp",
+            "cups": "cup",
+        ]
+        if let canon = aliases[stripped] { return canon }
+
+        // Singularize trailing 's' for countable nouns (bar/bars, slice/slices) — but leave units
+        // already canonical alone.
+        if stripped.hasSuffix("s") && stripped.count > 2 && !["fl oz"].contains(stripped) {
+            let singular = String(stripped.dropLast())
+            if !massUnitTokens.contains(stripped) && !volumeUnitTokens.contains(stripped) {
+                return singular
+            }
+        }
+        return stripped
+    }
+
+    /// True when the token represents a recognized mass unit (g/oz/lb…).
+    static func isMassUnit(_ token: String) -> Bool {
+        gramsPerMassUnit[token] != nil
+    }
+
+    /// True when the token represents a recognized volume unit (ml/cup/tbsp…).
+    static func isVolumeUnit(_ token: String) -> Bool {
+        millilitersPerVolumeUnit[token] != nil
+    }
+
+    /// True when the token is a measurement unit (mass or volume) — so it should NOT be treated
+    /// as a countable native ("g" is a unit of mass, not a thing you can count individually).
+    static func isMeasurementUnit(_ token: String) -> Bool {
+        massUnitTokens.contains(token) || volumeUnitTokens.contains(token) || isMassUnit(token) || isVolumeUnit(token)
+    }
+
+    /// Grams represented by `quantity` of `selectedUnit`. nil if `selectedUnit` is the food's
+    /// native countable and we'd have to go through `nativeUnitGrams` (caller handles that).
+    static func grams(forSelectedUnit unit: String, quantity: Double) -> Double? {
+        guard let perUnit = gramsPerMassUnit[unit] else { return nil }
+        return quantity * perUnit
+    }
+
+    static func milliliters(forSelectedUnit unit: String, quantity: Double) -> Double? {
+        guard let perUnit = millilitersPerVolumeUnit[unit] else { return nil }
+        return quantity * perUnit
+    }
+
+    /// Renders a count-and-unit pair the way the user wants to see it: never pluralized.
+    /// "1 bar", "2 bar", "0.5 bar", "114 g", "1 ea". Strips trailing zeros.
+    nonisolated static func displayConsumed(quantity: Double, unit: String) -> String {
+        formatNumber(quantity) + " " + unit
+    }
+
+    /// Number of native units consumed given the entry's selectedUnit and quantity.
+    /// `selectedUnit == nativeUnit`: 1:1, the user typed native units directly.
+    /// `selectedUnit` is mass and `nativeUnitGrams` known: convert via grams.
+    /// `selectedUnit` is volume and `nativeUnitMilliliters` known: convert via ml.
+    /// Otherwise: fall back to `quantity` (best-effort; shouldn't happen for valid foods).
+    nonisolated static func nativeUnitsConsumed(
+        selectedUnit: String,
+        quantity: Double,
+        nativeUnit: String,
+        nativeUnitGrams: Double?,
+        nativeUnitMilliliters: Double?
+    ) -> Double {
+        if selectedUnit == nativeUnit { return quantity }
+        if let gPerNative = nativeUnitGrams, gPerNative > 0,
+           let g = grams(forSelectedUnit: selectedUnit, quantity: quantity) {
+            return g / gPerNative
+        }
+        if let mlPerNative = nativeUnitMilliliters, mlPerNative > 0,
+           let ml = milliliters(forSelectedUnit: selectedUnit, quantity: quantity) {
+            return ml / mlPerNative
+        }
+        return quantity
+    }
+
+    /// Picker option list for a food. Always includes the native unit (when present and not a
+    /// bare measurement). Adds mass siblings (g/oz/lb) when grams are known and volume siblings
+    /// (ml/L/fl oz/cup/tbsp/tsp) when ml is known. For a loose mass food (native="g"), the
+    /// picker is just the mass family — same for loose volume.
+    nonisolated static func options(
+        nativeUnit: String,
+        nativeUnitGrams: Double?,
+        nativeUnitMilliliters: Double?
+    ) -> [ServingOption] {
+        var options: [ServingOption] = []
+        var seenUnits = Set<String>()
+
+        let nativeIsMeasurement = isMeasurementUnit(nativeUnit)
+
+        if !nativeUnit.isEmpty && !nativeIsMeasurement {
+            let label = nativeUnitGrams.map { "\(nativeUnit) (\(formatNumber($0))g)" } ?? nativeUnit
+            options.append(ServingOption(id: nativeUnit, unit: nativeUnit, label: label))
+            seenUnits.insert(nativeUnit)
+        }
+
+        let hasGrams = (nativeUnitGrams ?? 0) > 0 || isMassUnit(nativeUnit)
+        let hasMl = (nativeUnitMilliliters ?? 0) > 0 || isVolumeUnit(nativeUnit)
+
+        if hasGrams {
+            for unit in ["g", "oz", "lb", "kg"] {
+                if !seenUnits.contains(unit) {
+                    options.append(ServingOption(id: unit, unit: unit, label: unit))
+                    seenUnits.insert(unit)
+                }
+            }
+        }
+        if hasMl {
+            for unit in ["ml", "fl oz", "cup", "tbsp", "tsp", "l"] {
+                if !seenUnits.contains(unit) {
+                    options.append(ServingOption(id: unit, unit: unit, label: unit))
+                    seenUnits.insert(unit)
+                }
+            }
+        }
+
+        // Last-resort fallback: a food with no native, no mass, no volume info — show "ea".
+        if options.isEmpty {
+            options.append(ServingOption(id: "ea", unit: "ea", label: "ea"))
+        }
+        return options
+    }
 }
 
 nonisolated private func stripParenthetical(_ s: String) -> String {
@@ -70,75 +227,10 @@ nonisolated private func stripParenthetical(_ s: String) -> String {
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-nonisolated private func splitLeadingNumber(_ s: String) -> (value: Double, rest: String)? {
-    var prefix = ""
-    var idx = s.startIndex
-    while idx < s.endIndex {
-        let c = s[idx]
-        if c.isNumber || c == "." || c == "," {
-            prefix.append(c)
-            idx = s.index(after: idx)
-        } else { break }
+nonisolated func formatNumber(_ v: Double) -> String {
+    if v.isNaN || v.isInfinite { return "0" }
+    if v.truncatingRemainder(dividingBy: 1) == 0 {
+        return String(Int(v))
     }
-    guard !prefix.isEmpty,
-          let value = Double(prefix.replacingOccurrences(of: ",", with: "."))
-    else { return nil }
-    let rest = String(s[idx...]).trimmingCharacters(in: .whitespacesAndNewlines)
-    return (value, rest)
-}
-
-nonisolated private func pluralizeServingUnit(_ phrase: String, count: Double) -> String {
-    if abs(count - 1) < 0.0001 { return phrase }
-    let trimmed = phrase.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmed.isEmpty else { return phrase }
-    let lower = trimmed.lowercased()
-    // Measurement-style units don't pluralize: "200 g" not "200 gs".
-    let nonPlural: Set<String> = [
-        "g", "kg", "mg", "oz", "lb", "ml", "l",
-        "fl oz", "tbsp", "tsp", "kcal", "cal"
-    ]
-    if nonPlural.contains(lower) { return phrase }
-    if lower.hasSuffix("s") { return phrase }
-    var words = phrase.split(separator: " ", omittingEmptySubsequences: false).map(String.init)
-    guard !words.isEmpty else { return phrase }
-    words[words.count - 1] = words.last! + "s"
-    return words.joined(separator: " ")
-}
-
-nonisolated private func formatServingNumber(_ v: Double) -> String {
-    v.truncatingRemainder(dividingBy: 1) == 0
-        ? String(Int(v))
-        : v.formatted(.number.precision(.fractionLength(0...2)))
-}
-
-extension FoodSearchResult {
-    /// Per-food picker options. Always starts with the food's native serving (the default
-    /// selection), then adds per-unit options scoped to whichever native dimension is known —
-    /// mass units when grams known, volume units when ml known. Both are added when both are
-    /// known (cross-family) so a 0.67 cup / 87 g serving exposes cup AND gram units in one
-    /// picker.
-    var servingOptions: [ServingOption] {
-        var options: [ServingOption] = []
-
-        let nativeRaw = servingDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        let nativeLabel = nativeRaw.isEmpty ? "1 serving" : nativeRaw
-        options.append(ServingOption(id: "native", label: nativeLabel, servingsPerUnit: 1.0))
-
-        if let g = servingSizeGrams, g > 0 {
-            options.append(ServingOption(id: "g",  label: "g",  servingsPerUnit: 1.0     / g))
-            options.append(ServingOption(id: "kg", label: "kg", servingsPerUnit: 1_000   / g))
-            options.append(ServingOption(id: "oz", label: "oz", servingsPerUnit: 28.3495 / g))
-            options.append(ServingOption(id: "lb", label: "lb", servingsPerUnit: 453.592 / g))
-        }
-        if let ml = servingSizeMilliliters, ml > 0 {
-            options.append(ServingOption(id: "ml",    label: "ml",    servingsPerUnit: 1.0     / ml))
-            options.append(ServingOption(id: "L",     label: "L",     servingsPerUnit: 1_000   / ml))
-            options.append(ServingOption(id: "fl_oz", label: "fl oz", servingsPerUnit: 29.5735 / ml))
-            options.append(ServingOption(id: "cup",   label: "cup",   servingsPerUnit: 236.588 / ml))
-            options.append(ServingOption(id: "tbsp",  label: "tbsp",  servingsPerUnit: 14.7868 / ml))
-            options.append(ServingOption(id: "tsp",   label: "tsp",   servingsPerUnit: 4.92892 / ml))
-        }
-
-        return options
-    }
+    return v.formatted(.number.precision(.fractionLength(0...2)))
 }

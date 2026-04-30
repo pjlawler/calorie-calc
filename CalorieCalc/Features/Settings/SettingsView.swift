@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
 
@@ -175,18 +176,33 @@ struct SettingsView: View {
             return value
         }
 
+        // Lossless export: appends `native_unit` / `native_unit_grams` / `native_unit_ml` /
+        // `selected_unit` columns. Older importers ignore unknown columns; the importer here
+        // keys by header so column order is irrelevant for round-tripping.
         let header = [
             "record_type", "id", "day_log_id", "timestamp", "date", "name", "brand",
             "meal_type", "source", "calories", "protein", "carbs", "fat", "quantity",
             "duration_seconds", "calories_burned", "weight", "unit", "daily_net_goal",
             "daily_gross_goal", "daily_workout_goal", "bank_split", "week_start",
-            "start_date", "end_date", "notes"
+            "start_date", "end_date", "notes",
+            "native_unit", "native_unit_grams", "native_unit_ml", "selected_unit"
         ]
 
         var rows: [[String]] = [header]
 
+        // Helper for the trailing four serving columns — append them to a row that already has
+        // the 26 base columns filled in.
+        func append(_ row: [String], native: String? = nil, nativeGrams: Double? = nil, nativeMl: Double? = nil, selected: String? = nil) {
+            var copy = row
+            copy.append(native ?? "")
+            copy.append(nativeGrams.map { String($0) } ?? "")
+            copy.append(nativeMl.map { String($0) } ?? "")
+            copy.append(selected ?? "")
+            rows.append(copy)
+        }
+
         for profile in profiles {
-            rows.append([
+            append([
                 "user_profile", profile.id.uuidString, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
                 String(profile.dailyNetCalorieGoal), String(profile.dailyGrossCalorieGoal), String(profile.dailyWorkoutCalorieGoal),
                 profile.bankSplit.rawValue, "\(profile.weekStart.rawValue)", "", "", ""
@@ -194,7 +210,7 @@ struct SettingsView: View {
         }
 
         for period in goalPeriods {
-            rows.append([
+            append([
                 "goal_period", period.id.uuidString, "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
                 String(period.dailyNetCalorieGoal), String(period.dailyGrossCalorieGoal), String(period.dailyWorkoutCalorieGoal),
                 period.bankSplit.rawValue, "\(period.weekStart.rawValue)", d(period.startDate), d(period.endDate), ""
@@ -202,22 +218,26 @@ struct SettingsView: View {
         }
 
         for log in dayLogs {
-            rows.append([
+            append([
                 "day_log", log.id.uuidString, "", "", d(log.date), "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""
             ])
         }
 
         for entry in foodEntries {
-            rows.append([
+            append([
                 "food_entry", entry.id.uuidString, entry.dayLog?.id.uuidString ?? "", d(entry.timestamp), "",
                 entry.name, entry.brand ?? "", entry.mealType.rawValue, entry.source.rawValue,
                 String(entry.caloriesPerServing), String(entry.proteinPerServing), String(entry.carbsPerServing),
                 String(entry.fatPerServing), String(entry.quantity), "", "", "", "", "", "", "", "", "", "", "", entry.notes ?? ""
-            ])
+            ],
+            native: entry.nativeUnit,
+            nativeGrams: entry.nativeUnitGrams,
+            nativeMl: entry.nativeUnitMilliliters,
+            selected: entry.selectedUnit)
         }
 
         for workout in manualWorkouts {
-            rows.append([
+            append([
                 "manual_workout", workout.id.uuidString, workout.dayLog?.id.uuidString ?? "", d(workout.timestamp), "",
                 workout.name, "", "", "", "", "", "", "", "",
                 String(workout.durationSeconds), String(workout.caloriesBurned), "", "", "", "", "", "", "", "", "", workout.notes ?? ""
@@ -225,18 +245,22 @@ struct SettingsView: View {
         }
 
         for weight in weightEntries {
-            rows.append([
+            append([
                 "weight_entry", weight.id.uuidString, "", d(weight.timestamp), "", "", "", "", "", "", "", "", "", "", "", "",
                 String(weight.weight), weight.unit.rawValue, "", "", "", "", "", "", "", weight.notes ?? ""
             ])
         }
 
         for cached in cachedFoods {
-            rows.append([
+            append([
                 "cached_food", cached.id.uuidString, "", d(cached.lastUsed), "", cached.name, cached.brand ?? "", "", cached.source.rawValue,
                 String(cached.caloriesPerServing), String(cached.proteinPerServing), String(cached.carbsPerServing), String(cached.fatPerServing),
                 "", "", "", "", "", "", "", "", "", "", "", "", cached.notes ?? ""
-            ])
+            ],
+            native: cached.nativeUnit,
+            nativeGrams: cached.nativeUnitGrams,
+            nativeMl: cached.nativeUnitMilliliters,
+            selected: cached.lastSelectedUnit)
         }
 
         let text = rows.map { $0.map(csv).joined(separator: ",") }.joined(separator: "\n")
@@ -312,6 +336,19 @@ private struct SettingsForm: View {
     let isExportingCSV: Bool
     let exportStatusMessage: String?
     let exportURL: URL?
+
+    @Environment(\.modelContext) private var modelContext
+    @State private var showImporter = false
+    @State private var importStatusMessage: String?
+    @State private var showWipeConfirm = false
+    @State private var pendingImportURL: URL?
+
+    @State private var snapshots: [BackupService.Snapshot] = []
+    @State private var backupStatusMessage: String?
+    @State private var pendingRestore: BackupService.Snapshot?
+    @State private var showRestoreConfirm = false
+    @State private var showRelaunchPrompt = false
+    @State private var migrationStatusMessage: String?
 
     private var defaultTab: AppTab {
         get { AppTab(rawValue: defaultTabRaw) ?? .week }
@@ -435,6 +472,108 @@ private struct SettingsForm: View {
             #if DEBUG
             Section {
                 Button {
+                    backupNow()
+                } label: {
+                    Label("Back up now", systemImage: "tray.and.arrow.down")
+                }
+
+                if !snapshots.isEmpty {
+                    ForEach(snapshots) { snap in
+                        BackupRow(snapshot: snap) {
+                            pendingRestore = snap
+                            showRestoreConfirm = true
+                        } onDelete: {
+                            deleteBackup(snap)
+                        }
+                    }
+                }
+
+                if let backupStatusMessage {
+                    Text(backupStatusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Backups")
+            } footer: {
+                Text("A snapshot is taken automatically each time the app launches; the last 10 are kept. Restoring will close the app — relaunch to load the restored data. Visible only in debug builds; auto-snapshots still run in release.")
+            }
+            .onAppear { refreshSnapshots() }
+            .confirmationDialog(
+                "Restoring overwrites the current data with this backup. The app will close — relaunch to apply.",
+                isPresented: $showRestoreConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Restore + Close App", role: .destructive) {
+                    if let snap = pendingRestore { restore(snap) }
+                    pendingRestore = nil
+                }
+                Button("Cancel", role: .cancel) { pendingRestore = nil }
+            }
+            .alert("Restore complete — please relaunch the app", isPresented: $showRelaunchPrompt) {
+                Button("Close app now") { exit(0) }
+                Button("Later", role: .cancel) {}
+            }
+
+            Section {
+                Button {
+                    runMigration()
+                } label: {
+                    Label("Re-run unit migration", systemImage: "wand.and.stars")
+                }
+
+                Button {
+                    showImporter = true
+                } label: {
+                    Label("Import from backup CSV", systemImage: "square.and.arrow.down")
+                }
+
+                if let migrationStatusMessage {
+                    Text(migrationStatusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                if let importStatusMessage {
+                    Text(importStatusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Migrate / Restore")
+            } footer: {
+                Text("Re-run the unit migration if entries are stuck on ‘ea’ — it parses any surviving legacy serving data first, then falls back to name-based inference (RX Bar → bar, etc.). Idempotent: rows that already have a real unit are left alone. Visible only in debug builds.")
+            }
+            .fileImporter(
+                isPresented: $showImporter,
+                allowedContentTypes: [.commaSeparatedText, .text, .plainText, .data],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    if let url = urls.first {
+                        pendingImportURL = url
+                        showWipeConfirm = true
+                    }
+                case .failure(let error):
+                    importStatusMessage = "Couldn't open file: \(error.localizedDescription)"
+                }
+            }
+            .confirmationDialog(
+                "This will erase your current data and replace it with the CSV.",
+                isPresented: $showWipeConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Replace data", role: .destructive) {
+                    if let url = pendingImportURL { runImport(url: url) }
+                    pendingImportURL = nil
+                }
+                Button("Cancel", role: .cancel) { pendingImportURL = nil }
+            }
+            #endif
+
+            #if DEBUG
+            Section {
+                Button {
                     onExportCSV()
                 } label: {
                     HStack {
@@ -464,6 +603,98 @@ private struct SettingsForm: View {
         }
     }
 
+    private func runImport(url: URL) {
+        do {
+            let summary = try CSVBackupImporter.importBackup(from: url, into: modelContext)
+            var msg = "Imported \(summary.foodEntries) food entries, \(summary.dayLogs) day logs, \(summary.cachedFoods) cached foods, \(summary.weightEntries) weights, \(summary.manualWorkouts) workouts, \(summary.goalPeriods) goal periods, \(summary.profiles) profile."
+            if !summary.skipped.isEmpty {
+                msg += " Skipped \(summary.skipped.count) row(s)."
+            }
+            importStatusMessage = msg
+            refreshSnapshots()
+        } catch {
+            importStatusMessage = "Import failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func runMigration() {
+        let summary = LegacyDataMigrator.forceRun(in: modelContext)
+        var msg =
+            "Food entries: \(summary.foodEntriesFromLegacy) from legacy data, " +
+            "\(summary.foodEntriesFromInference) from name match, " +
+            "\(summary.foodEntriesUntouched) unchanged.\n" +
+            "Cached foods: \(summary.cachedFoodsFromLegacy) from legacy data, " +
+            "\(summary.cachedFoodsFromInference) from name match, " +
+            "\(summary.cachedFoodsUntouched) unchanged."
+        if !summary.sampleDiagnostics.isEmpty {
+            msg += "\n\nSample rows (BEFORE this run):\n" + summary.sampleDiagnostics.joined(separator: "\n")
+        }
+        migrationStatusMessage = msg
+    }
+
+    private func refreshSnapshots() {
+        snapshots = BackupService.listSnapshots()
+    }
+
+    private func backupNow() {
+        do {
+            _ = try BackupService.snapshotNow(maxKeep: 10)
+            backupStatusMessage = "Backup created."
+            refreshSnapshots()
+        } catch {
+            backupStatusMessage = "Backup failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func restore(_ snapshot: BackupService.Snapshot) {
+        do {
+            try BackupService.restore(snapshot)
+            backupStatusMessage = "Restored. Relaunch the app to load the restored data."
+            showRelaunchPrompt = true
+        } catch {
+            backupStatusMessage = "Restore failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func deleteBackup(_ snapshot: BackupService.Snapshot) {
+        do {
+            try BackupService.delete(snapshot)
+            refreshSnapshots()
+        } catch {
+            backupStatusMessage = "Couldn't delete backup: \(error.localizedDescription)"
+        }
+    }
+
+}
+
+private struct BackupRow: View {
+    let snapshot: BackupService.Snapshot
+    let onRestore: () -> Void
+    let onDelete: () -> Void
+
+    private var subtitle: String {
+        let date = snapshot.timestamp.formatted(date: .abbreviated, time: .shortened)
+        let kb = ByteCountFormatter.string(fromByteCount: snapshot.totalBytes, countStyle: .file)
+        return "\(date) · \(kb)"
+    }
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(snapshot.id).font(.subheadline.monospaced())
+                Text(subtitle).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button("Restore", action: onRestore)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+        .swipeActions(edge: .trailing) {
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+    }
 }
 
 private struct BankingDaysPreview: View {

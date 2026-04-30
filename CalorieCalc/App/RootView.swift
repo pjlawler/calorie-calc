@@ -1,9 +1,11 @@
 import SwiftUI
+import SwiftData
 
 struct RootView: View {
     @State private var selection: AppTab
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw: String = AppAppearance.system.rawValue
     @Environment(HealthKitService.self) private var healthKitService
+    @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
@@ -20,20 +22,25 @@ struct RootView: View {
             Tab(AppTab.week.displayName, systemImage: AppTab.week.systemImage, value: AppTab.week) {
                 WeekCalendarView()
             }
+            Tab(AppTab.dashboard.displayName, systemImage: AppTab.dashboard.systemImage, value: AppTab.dashboard) {
+                DashboardView()
+            }
             Tab(AppTab.history.displayName, systemImage: AppTab.history.systemImage, value: AppTab.history) {
                 HistoryView()
             }
-            Tab(AppTab.progress.displayName, systemImage: AppTab.progress.systemImage, value: AppTab.progress) {
-                ProgressTrendView()
-            }
-            Tab(AppTab.dashboard.displayName, systemImage: AppTab.dashboard.systemImage, value: AppTab.dashboard) {
-                DashboardView()
+            Tab(AppTab.info.displayName, systemImage: AppTab.info.systemImage, value: AppTab.info) {
+                InfoView()
             }
         }
         .task(id: appearanceRaw) {
             AppAppearance.apply(appearance)
         }
         .task {
+            // Convert any pre-redesign rows (servingDescription / servingSizeGrams) into the new
+            // nativeUnit / selectedUnit / quantity layout. No-op after first successful run.
+            // BackupService snapshotted the previous-session store before this point, so there's
+            // a roll-back path in Settings → Backups if anything goes sideways.
+            LegacyDataMigrator.runIfNeeded(in: modelContext)
             await healthKitService.ensureAuthorizationAtStartup()
         }
         .onChange(of: scenePhase) { _, newPhase in

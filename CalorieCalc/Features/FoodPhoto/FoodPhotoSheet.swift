@@ -395,19 +395,28 @@ struct FoodPhotoSheet: View {
         )
         let log = ensureDayLog()
 
-        let servingDescription = trimmedPortion.isEmpty ? (useEach ? "1 each" : "1 serving") : trimmedPortion
-        let servingGrams: Double? = useEach ? nil : recognizedServingGrams
         let protein = Double(proteinText) ?? 0
         let carbs = Double(carbsText) ?? 0
         let fat = Double(fatText) ?? 0
         let externalId = "photo:\(UUID().uuidString)"
         let storedNotes: String? = notesText.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
 
+        // Resolve native unit from the AI's portion text. Composite plates ("burger and fries")
+        // collapse to "ea". A clean "1 bar" / "1 burger" parses to its noun. Recognized grams
+        // become per-native grams.
+        let (nativeUnit, nativeUnitGrams) = resolveNative(
+            portion: trimmedPortion,
+            useEach: useEach,
+            recognizedGrams: recognizedServingGrams
+        )
+
         let entry = FoodEntry(
             name: trimmedName,
             brand: trimmedBrand,
-            servingDescription: servingDescription,
-            servingSizeGrams: servingGrams,
+            nativeUnit: nativeUnit,
+            nativeUnitGrams: nativeUnitGrams,
+            nativeUnitMilliliters: nil,
+            selectedUnit: nativeUnit,
             quantity: 1,
             caloriesPerServing: cals,
             proteinPerServing: protein,
@@ -425,47 +434,74 @@ struct FoodPhotoSheet: View {
             externalId: externalId,
             name: trimmedName,
             brand: trimmedBrand,
-            servingDescription: servingDescription,
-            servingSizeGrams: servingGrams,
+            nativeUnit: nativeUnit,
+            nativeUnitGrams: nativeUnitGrams,
             calories: cals,
             protein: protein,
             carbs: carbs,
-            fat: fat
+            fat: fat,
+            notes: storedNotes
         )
         try? modelContext.save()
         dismiss()
         onLogged()
     }
 
+    /// Parse the AI's portion description ("1 bar", "1 burger") into a native unit token + per-
+    /// native gram weight. Falls back to "ea" for composite/recipe-style portions where no clean
+    /// unit noun is available.
+    private func resolveNative(portion: String, useEach: Bool, recognizedGrams: Double?) -> (String, Double?) {
+        if useEach || RecognizedMeal.looksLikeRecipeExplanation(portion) {
+            return ("ea", nil)
+        }
+        guard let parsed = ServingMath.parseServingDescription(portion),
+              parsed.count > 0,
+              !parsed.unit.isEmpty else {
+            return ("ea", nil)
+        }
+        let token = ServingMath.normalizeUnitToken(parsed.unit)
+        if token.isEmpty || ServingMath.isMeasurementUnit(token) {
+            return ("ea", nil)
+        }
+        let perNative = recognizedGrams.map { $0 / parsed.count }
+        return (token, perNative)
+    }
+
     private func upsertCached(
         externalId: String,
         name: String,
         brand: String?,
-        servingDescription: String,
-        servingSizeGrams: Double?,
+        nativeUnit: String,
+        nativeUnitGrams: Double?,
         calories: Double,
         protein: Double,
         carbs: Double,
-        fat: Double
+        fat: Double,
+        notes: String?
     ) {
         if let existing = cachedFoods.first(where: { $0.externalId == externalId }) {
             existing.lastUsed = .now
             existing.useCount += 1
+            existing.lastSelectedUnit = nativeUnit
+            existing.lastSelectedQuantity = 1
         } else {
             let cached = CachedFood(
                 externalId: externalId,
                 name: name,
                 brand: brand,
-                defaultServingDescription: servingDescription,
-                defaultServingSizeGrams: servingSizeGrams,
-                defaultServingSizeMilliliters: nil,
+                nativeUnit: nativeUnit,
+                nativeUnitGrams: nativeUnitGrams,
+                nativeUnitMilliliters: nil,
+                lastSelectedUnit: nativeUnit,
+                lastSelectedQuantity: 1,
                 caloriesPerServing: calories,
                 proteinPerServing: protein,
                 carbsPerServing: carbs,
                 fatPerServing: fat,
                 source: .photo,
                 lastUsed: .now,
-                useCount: 1
+                useCount: 1,
+                notes: notes
             )
             modelContext.insert(cached)
         }

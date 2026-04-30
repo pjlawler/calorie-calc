@@ -2,9 +2,9 @@ import Foundation
 
 nonisolated enum AppTab: String, CaseIterable, Hashable, Identifiable, Sendable {
     case week
-    case history
-    case progress
     case dashboard
+    case history
+    case info
 
     var id: String { rawValue }
 
@@ -13,7 +13,7 @@ nonisolated enum AppTab: String, CaseIterable, Hashable, Identifiable, Sendable 
         case .dashboard: "My Plan"
         case .week: "Calc"
         case .history: "History"
-        case .progress: "Progress"
+        case .info: "Info"
         }
     }
 
@@ -22,7 +22,7 @@ nonisolated enum AppTab: String, CaseIterable, Hashable, Identifiable, Sendable 
         case .dashboard: "target"
         case .week: "flame"
         case .history: "clock.arrow.circlepath"
-        case .progress: "chart.line.uptrend.xyaxis"
+        case .info: "info.circle"
         }
     }
 
