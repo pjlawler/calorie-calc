@@ -47,15 +47,20 @@ struct DayCellView: View {
     }
 
     private var dayStack: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        // Both labels fill the 44pt slot and center within it. Without `maxWidth: .infinity`
+        // each Text would self-size to its glyph width, leaving a one-digit day ("1") sitting
+        // at the natural baseline of the wider "FRI" instead of centered under it.
+        VStack(spacing: 2) {
             Text(budget.weekday.shortName.uppercased())
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(isToday ? Color.accentColor : .secondary)
+                .frame(maxWidth: .infinity)
             Text(dayNumber)
                 .font(.title3.weight(.bold))
                 .monospacedDigit()
+                .frame(maxWidth: .infinity)
         }
-        .frame(width: 44, alignment: .leading)
+        .frame(width: 44)
     }
 
     private var consumedStack: some View {

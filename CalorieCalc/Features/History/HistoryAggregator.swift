@@ -169,9 +169,17 @@ enum HistoryAggregator {
     }
 
     /// Total + per-day / per-week / per-month averages over the inclusive `[start, end]` range
-    /// for one metric. Averages divide by the calendar span (days × 7 etc.), not just active days,
-    /// so a week with two zero days still divides by seven. Pass `averageEnd` to clamp the
-    /// averaging window (e.g. to exclude today's incomplete data); the total stays full-range.
+    /// for one metric. Averages divide by *tracked* days only — and tracked is defined per metric:
+    ///
+    /// - calories / net / protein / carbs / fat → days where food was logged (calories > 0)
+    /// - exercise → days where any workout burn > 0
+    /// - steps → days where step count > 0
+    ///
+    /// HK records steps automatically every day, so we can't treat "any DailyTotals entry" as
+    /// tracked — that would inflate the divisor for food metrics on days the user didn't log.
+    ///
+    /// Pass `averageEnd` to clamp the averaging window (e.g. to exclude today's incomplete data);
+    /// the total stays full-range.
     static func summary(
         metric: HistoryMetric,
         start: Date,
@@ -183,35 +191,55 @@ enum HistoryAggregator {
         let startDay = calendar.startOfDay(for: start)
         let endDay = calendar.startOfDay(for: end)
 
-        func sum(through limit: Date) -> Double {
-            var running = 0.0
+        // Walks the calendar range, summing the metric and counting only tracked days. Returns
+        // (sum, trackedDayCount) — caller decides how to divide.
+        func walk(through limit: Date) -> (sum: Double, trackedDays: Int) {
+            var sum = 0.0
+            var tracked = 0
             var cursor = startDay
             while cursor <= limit {
-                if let totals = dailyTotals[cursor] {
-                    running += value(for: metric, totals: totals)
+                if let totals = dailyTotals[cursor], isTrackedDay(metric: metric, totals: totals) {
+                    sum += value(for: metric, totals: totals)
+                    tracked += 1
                 }
                 guard let next = calendar.date(byAdding: .day, value: 1, to: cursor) else { break }
                 cursor = next
             }
-            return running
+            return (sum, tracked)
         }
 
-        let total = sum(through: endDay)
+        let total = walk(through: endDay).sum
 
         let avgEndDay = averageEnd.map { min(endDay, calendar.startOfDay(for: $0)) } ?? endDay
-        let hasAverageRange = avgEndDay >= startDay
-        let avgSum = hasAverageRange ? sum(through: avgEndDay) : 0
-        let avgDayCount = hasAverageRange
-            ? max(1, (calendar.dateComponents([.day], from: startDay, to: avgEndDay).day ?? 0) + 1)
-            : 1
-        let weeks = max(1.0, Double(avgDayCount) / 7.0)
-        let months = max(1.0, Double(avgDayCount) / 30.0)
+        guard avgEndDay >= startDay else {
+            return HistorySummary(total: total, dayAvg: 0, weekAvg: 0, monthAvg: 0)
+        }
+        let avg = walk(through: avgEndDay)
+        guard avg.trackedDays > 0 else {
+            return HistorySummary(total: total, dayAvg: 0, weekAvg: 0, monthAvg: 0)
+        }
+        let dayAvg = avg.sum / Double(avg.trackedDays)
+        // Per-week/per-month: scale the per-day average up. Using tracked days (not calendar
+        // span) means a month where 10 of 30 days were logged reports the average of those 10,
+        // multiplied by 7 / 30 for week / month projections.
         return HistorySummary(
             total: total,
-            dayAvg: avgSum / Double(avgDayCount),
-            weekAvg: avgSum / weeks,
-            monthAvg: avgSum / months
+            dayAvg: dayAvg,
+            weekAvg: dayAvg * 7,
+            monthAvg: dayAvg * 30
         )
+    }
+
+    /// Whether `totals` should count toward this metric's average. See `summary` for the rules.
+    private static func isTrackedDay(metric: HistoryMetric, totals: DailyTotals) -> Bool {
+        switch metric {
+        case .calories, .net, .protein, .carbs, .fat:
+            return totals.calories > 0
+        case .exercise:
+            return totals.exercise > 0
+        case .steps:
+            return totals.steps > 0
+        }
     }
 
     static func value(for metric: HistoryMetric, totals: DailyTotals?) -> Double {

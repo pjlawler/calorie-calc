@@ -15,6 +15,12 @@ struct MathCardData: Equatable {
     /// what we should have eaten by now. Compared against `alreadyEatenThisWeek` to
     /// surface a running consumption variance (how much more we can eat to stay on plan).
     let consumeGoalSoFar: Int
+    /// Per-day gross-eaten target. Used by the Eat Today blurb to decide whether the
+    /// projected per-day budget is still big enough to eat normally.
+    let dailyGrossGoal: Int
+    /// Days remaining in the week (excludes today's logged-but-incomplete day count from
+    /// past + today). Used as the divisor for projected-per-day budget math.
+    let remainingDays: Int
 
     var estimatedRemaining: Int {
         weeklyCalorieBudget
@@ -66,7 +72,8 @@ struct MathCard: View {
     @AppStorage("mathcard.remainingCollapsed") private var remainingCollapsed: Bool = false
 
     private var remainingEyebrow: String {
-        isLastDayOrPast ? "REMAINING THIS WEEK" : "PROJECTED REMAINING"
+        // One label across both states — same math, just less projection on the last day.
+        "WEEK'S NET REMAINING"
     }
 
     private var remainingIsPositive: Bool { data.estimatedRemaining >= 0 }
@@ -116,7 +123,7 @@ struct MathCard: View {
     private var varianceCard: some View {
         cardShell(
             collapsed: $varianceCollapsed,
-            eyebrow: "OVERALL VARIANCE",
+            eyebrow: "TODAY'S VARIANCE",
             heroText: varianceHeroText,
             heroColor: varianceColor(data.totalVariance),
             heroAnimationValue: Double(data.totalVariance)
@@ -124,8 +131,31 @@ struct MathCard: View {
             VStack(spacing: 0) {
                 varianceRow(label: "Consumed", value: data.consumedVariance)
                 varianceRow(label: "Exercise", value: data.exerciseVariance)
+                blurb(eatTodayBlurb, tint: varianceColor(data.totalVariance))
             }
         }
+    }
+
+    /// Dynamic copy that frames the variance number motivationally based on where the user
+    /// stands: ahead of plan, behind but recoverable, or behind with a tight runway.
+    private var eatTodayBlurb: String {
+        let intro = "Your current variance from plan."
+        if data.totalVariance >= 0 {
+            return intro + " You're on track to land on plan this week — keep going."
+        }
+        // Negative variance. Compare projected per-day budget to the daily gross goal — if
+        // there's still room to eat normally for the rest of the week, reassure; otherwise
+        // own it and aim to recover next week.
+        let perDayProjected: Double
+        if data.remainingDays > 0 {
+            perDayProjected = Double(data.estimatedRemaining) / Double(data.remainingDays)
+        } else {
+            perDayProjected = Double(data.estimatedRemaining)
+        }
+        if perDayProjected >= Double(data.dailyGrossGoal) {
+            return intro + " You're behind, but there's still room to make it a successful week. Stay tight today and you'll be fine."
+        }
+        return intro + " Things are tight. Do your best to minimize the damage today — anything you can't make up here, we'll catch on next week."
     }
 
     // MARK: - Remaining card
@@ -157,8 +187,20 @@ struct MathCard: View {
                              sign: .plus,
                              color: .green)
                 }
+                if !isLastDayOrPast {
+                    blurb(projectedRemainingBlurb, tint: remainingColor)
+                }
             }
         }
+    }
+
+    /// Reads as a guidebook for the projected number — explains what the figure represents
+    /// and reinforces that staying on plan today + tomorrow lands them here.
+    private var projectedRemainingBlurb: String {
+        if data.estimatedRemaining >= 0 {
+            return "What's left in your weekly budget if you stay on your eating and exercise plan for the rest of the week. Hold the line and you'll land here."
+        }
+        return "If you keep going at the current pace, the week will finish over budget by this much. Add a workout, dial back tomorrow's gross, or accept it and reset Sunday — you've got time to swing it back."
     }
 
     // MARK: - Shared shell
@@ -225,6 +267,23 @@ struct MathCard: View {
             .padding(.vertical, 8)
     }
 
+    /// Small motivational paragraph below the row content. A divider above visually separates
+    /// it from the breakdown rows. Color is `.primary` with reduced opacity so it stands out
+    /// from the secondary row labels but doesn't compete with the hero number.
+    private func blurb(_ text: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            divider
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(Color.primary.opacity(0.85))
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+                .padding(.top, 4)
+        }
+    }
+
     private func varianceRow(label: String, value: Int) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(label)
@@ -264,7 +323,9 @@ struct MathCard: View {
         workoutsCompleted: 2_000,
         plannedToWorkout: 1_350,
         exerciseGoalSoFar: 2_000,
-        consumeGoalSoFar: 5_400
+        consumeGoalSoFar: 5_400,
+        dailyGrossGoal: 1_800,
+        remainingDays: 3
     )
     return ScrollView {
         MathCard(data: math, isLastDayOrPast: false)
@@ -279,7 +340,9 @@ struct MathCard: View {
         workoutsCompleted: 3_742,
         plannedToWorkout: 0,
         exerciseGoalSoFar: 3_500,
-        consumeGoalSoFar: 12_600
+        consumeGoalSoFar: 12_600,
+        dailyGrossGoal: 1_800,
+        remainingDays: 0
     )
     return ScrollView {
         MathCard(data: math, isLastDayOrPast: false)

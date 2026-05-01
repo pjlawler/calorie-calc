@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// User-facing usage guide for the app — explains the banking strategy and how to read the
-/// Calc / My Plan screens to stay on track for the daily-net-calorie target.
+/// First-person walkthrough — how the banking strategy works, why I built CalorieCalc to track
+/// it, and how to read the two numbers that drive every decision (Eat Today + Projected
+/// Remaining).
 struct InfoView: View {
 
     var body: some View {
@@ -9,101 +10,113 @@ struct InfoView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     bigIdeaCard
+
                     section(
-                        title: "Banking calories",
-                        icon: "tray.and.arrow.down",
+                        title: "Why I built this",
+                        icon: "sparkles",
                         body:
                         """
-                        Your daily *net* goal isn't a hard ceiling — it's an average across the week. Each plan day you eat under your goal puts the unused calories in the bank. Each day you go over draws from it.
+                        I'm Patrick. I built CalorieCalc for myself.
 
-                        That's why a single big meal, a few drinks out, or a holiday won't sink your week. You spend Monday–Thursday hitting your plan-day gross goal (say 1,800 kcal eaten + 500 burned = 1,300 net) and bank the difference between 1,300 and your daily-net target of 1,600. Friday or Saturday you can go to 2,500 kcal eaten without exercising and still finish the week on plan.
+                        For years I tried to lose weight without giving up the things that make life worth living — dinners with friends, a beer on Friday, a real dessert now and then. Every "track your daily calories" app failed me the same way: life isn't a flat line. One steakhouse meal would put me over for the day, and the app would treat that as failure.
+
+                        Eventually I stopped thinking in days and started thinking in weeks. If my target was 1,600 net calories per day, that's 11,200 across the week. I could spend that however I wanted, as long as the average came out right.
+
+                        Most days I'd eat lighter and exercise. Those calories went into a "bank." Then on Friday or Saturday I'd cash some of that in for a dinner out and not torpedo my progress, because I was spending what I'd already saved.
+
+                        It worked. The problem was tracking it. Every app I tried showed me one day at a time and made me do the rest of the math in my head — adding up what I'd eaten so far this week, subtracting workouts, projecting out to Sunday — just to know if tonight's pizza was on plan.
+
+                        So I built this.
                         """
                     )
+
                     section(
-                        title: "Plan days vs flex days",
-                        icon: "calendar",
-                        body:
-                        """
-                        Set your week split in My Plan → Settings — 5/2 means five plan days, two flex days; 6/1 means six and one. Plan days are when you stay disciplined and bank. Flex days are when you spend.
-
-                        Banking days come at the *start* of your week (per your "Week starts on" setting), flex days at the end. That ordering is intentional — earning the headroom first means flex days are guilt-free.
-                        """
-                    )
-                    section(
-                        title: "Reading the Calc tab",
-                        icon: "flame.fill",
-                        body:
-                        """
-                        The Calc tab shows the current week with a hero number at the top: the **average daily net** you'd land on if you keep going at today's pace. Stay at or under your daily-net goal and the hero number stays green.
-
-                        Below that the math card breaks down where you are:
-
-                        • **Eaten / Burned / Net** — the running totals for the week so far.
-                        • **Variance** — how far ahead or behind your weekly target you are. A positive variance means you've banked extra calories; negative means you're in the red.
-                        • **Projected remaining** — what you can still net (eaten minus burned) across the rest of the week and still hit your average-daily-net goal. This is the number to manage by.
-                        """
-                    )
-                    section(
-                        title: "Using projected remaining",
-                        icon: "chart.line.uptrend.xyaxis",
-                        body:
-                        """
-                        Projected remaining is your spendable budget for the rest of the week, divided across however many days are left. It's the number that tells you whether tonight's pizza is on plan or off plan.
-
-                        Quick mental model:
-
-                        • Big variance built up + plenty of days left → you can ease off and enjoy something out.
-                        • Variance is roughly zero → just hit your daily-net goal today and tomorrow.
-                        • Variance is negative → either eat tighter for a day or two, or add a workout to claw back. The projected-remaining number updates in real time as you log food and burns, so you can decide on the fly.
-
-                        The point isn't restriction — it's *visibility*. If you can see the cost of a choice before you make it, you stay in control without obsessing.
-                        """
-                    )
-                    section(
-                        title: "Logging food",
+                        title: "Eat Today",
                         icon: "fork.knife",
                         body:
                         """
-                        From the Calc tab, tap any day to open it, then add food to the right meal section. You have four ways in:
+                        The hero number on the Calc tab. **How many more calories I can eat right now and still be on plan.**
 
-                        • **Scan** — scan a barcode (Open Food Facts).
-                        • **Photo** — snap a meal and let Claude estimate calories + macros.
-                        • **Describe** — type what you ate ("Five Guys cheeseburger") and Claude estimates.
-                        • **Search** — query the USDA database by name.
+                        It updates live. When I log a meal it goes down. When I log a workout it goes up. It's a real-time snapshot of where I stand against the cumulative plan through this point in the week — under-eating earlier in the week pads it; over-eating drains it.
 
-                        Pick a unit (bar, slice, g, oz, cup…) and a quantity. The picker remembers your last choice per food, so the next time you log the same item it pre-fills. Star anything you eat regularly to surface it on the Favorites tab for one-tap logging.
+                        It does *not* assume anything about the rest of today. If I haven't done my workout yet, it doesn't pre-credit those calories — the moment I log the burn, the number jumps. That keeps it honest about what's actually banked vs. what I'm planning.
+
+                        Practical use:
+
+                        • Big positive number → cruise. Eat normal, hit your targets.
+                        • Near zero → just stay on today's bank-day plan and keep moving.
+                        • Negative → tighten up for a meal or two, or get a workout in. The number updates immediately so you can decide on the fly.
                         """
                     )
+
                     section(
-                        title: "Logging exercise",
-                        icon: "figure.run",
+                        title: "Projected Remaining",
+                        icon: "chart.line.uptrend.xyaxis",
                         body:
                         """
-                        Workouts come in two flavors:
+                        The forward-looking number. **What's left in your weekly budget after you finish out the week at today's pace.**
 
-                        • **Apple Health** — once authorized in Settings, the app pulls your active-energy burn for each day automatically.
-                        • **Manual** — add a workout from any day's detail view if Health didn't catch it (gym session without your watch, gardening, etc.).
+                        Where Eat Today is "how I'm doing right now," Projected Remaining is "how the week is going to land." It folds in your remaining workout commitments and what's left of the weekly target.
 
-                        Your daily *workout goal* (set in My Plan → Settings) is the number of calories you aim to burn on plan days. Hitting it is what makes the banking math work — without it, the gross-eaten target eats too much of your weekly budget.
+                        Practical use:
+
+                        • Healthy positive → on track for the week. The bank is filling.
+                        • Shrinking but still positive → you're spending the bank — fine if you've got bonus days coming up.
+                        • Going negative → the week is heading off-plan. Add a workout, dial back tomorrow's gross, or accept it and reset Sunday.
                         """
                     )
+
                     section(
-                        title: "Adjusting your plan",
+                        title: "Bank days vs bonus days",
+                        icon: "calendar",
+                        body:
+                        """
+                        Settings → Week split lets you set something like "5/2" — five bank days at the start of the week, two bonus days at the end.
+
+                        Bank days have a tighter target — eat your bank-day gross, hit your workout goal, build up calories. Bonus days have a higher target — that's where you spend what you saved.
+
+                        I want to be clear: every day is flexible. There's no day where the app stops you from eating more. The split just tells the math what to *target* for each day, so the daily-net average works out across the week. I order bank days first because earning the headroom before spending it makes bonus days actually feel like a reward instead of a guilt trip.
+                        """
+                    )
+
+                    section(
+                        title: "Logging",
+                        icon: "plus.circle",
+                        body:
+                        """
+                        From the Calc tab, tap any day to open it, then add food to the right meal section. Four ways in:
+
+                        • **Scan** — barcode lookup via Open Food Facts.
+                        • **Photo** — Claude estimates calories + macros from a picture.
+                        • **Describe** — type "Five Guys cheeseburger" and Claude does the math.
+                        • **Search** — USDA database by name.
+
+                        Pick a unit (bar, slice, g, oz, cup…) and an amount. The picker remembers your last choice per food, so the next time you log it, it pre-fills.
+
+                        For exercise, Apple Health pulls active-energy automatically once you authorize it in Settings. Add manual workouts for anything Health misses — gym session without the watch, gardening, etc.
+
+                        Star anything you eat regularly and it surfaces on the Favorites tab for one-tap re-logging.
+                        """
+                    )
+
+                    section(
+                        title: "Tuning the plan",
                         icon: "slider.horizontal.3",
                         body:
                         """
-                        Open My Plan → Settings to tune any of:
+                        My Plan → Settings is where the targets live:
 
-                        • **Daily net** — your weekly target ÷ 7. Lower it to lose faster, raise it to maintain.
-                        • **Plan-day gross** — calories you'll eat on a banking day before exercise.
-                        • **Workout goal** — calories you commit to burn on a banking day.
-                        • **Week split** — how many banking vs flex days.
-                        • **Week starts on** — flex days come at the end of *your* week.
+                        • **Daily net** — your weekly goal ÷ 7. Lower it to lose faster, raise it to maintain.
+                        • **Daily gross (bank days)** — calories eaten before exercise on a banking day.
+                        • **Workout goal** — calories you commit to burn on a banking day. Hitting this is what makes the math work — without it, the gross-eaten target eats too much of the weekly budget.
+                        • **Week split** — how many bank vs bonus days.
+                        • **Week starts on** — bonus days come at the end of *your* week.
 
-                        Changes apply going forward only. Past weeks keep the goals that were active at the time, so your history stays honest.
+                        Changes apply going forward only. Past weeks keep the goals that were active at the time, so the history stays honest about what you were aiming for then.
                         """
                     )
-                    Text("Tap-and-hold any number on the Calc tab to see what it represents. The math is the math — when you trust it, the plan runs itself.")
+
+                    Text("That's the whole system. The math runs the plan; you just decide.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .padding(.top, 8)
@@ -123,13 +136,13 @@ struct InfoView: View {
     private var bigIdeaCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "sparkles").foregroundStyle(.tint)
-                Text("The big idea")
+                Image(systemName: "tray.and.arrow.down").foregroundStyle(.tint)
+                Text("Bank, then spend")
                     .font(.headline)
             }
             Text(
                 """
-                CalorieCalc treats your daily-net-calorie goal as a *weekly average*, not a hard daily ceiling. Eat under on plan days to bank headroom; spend it on flex days. As long as the week averages out, you're on plan — and a single big meal can't derail you.
+                Your daily-net-calorie goal is a *weekly average*, not a daily ceiling. Eat under earlier in the week to bank calories; spend them on a bigger day later. As long as the week averages out, you're on plan — and a single big meal can't derail you.
                 """
             )
             .font(.subheadline)

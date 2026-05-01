@@ -26,6 +26,11 @@ struct SettingsView: View {
     @State private var exportStatusMessage: String?
     @State private var exportURL: URL?
 
+    /// Validation alert state. The user taps Done; if the plan has issues, we show this and
+    /// only commit when they explicitly choose to proceed.
+    @State private var pendingValidation: PlanValidator.Result?
+    @State private var showValidationAlert = false
+
     var body: some View {
         NavigationStack {
             Group {
@@ -53,11 +58,7 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        commitDraft()
-                        try? modelContext.save()
-                        dismiss()
-                    }
+                    Button("Done") { handleDoneTap() }
                 }
             }
             .task {
@@ -66,7 +67,44 @@ struct SettingsView: View {
                 }
                 seedDraftIfNeeded()
             }
+            .alert(validationAlertTitle, isPresented: $showValidationAlert, presenting: pendingValidation) { result in
+                if result.severity == .error {
+                    // Errors: math is broken. Default action is to go back and fix; allow
+                    // "Save anyway" as a destructive escape hatch in case the user truly knows
+                    // what they're doing.
+                    Button("Go back", role: .cancel) { pendingValidation = nil }
+                    Button("Save anyway", role: .destructive) { commitAndDismiss() }
+                } else {
+                    // Cautions: math works, just unusual. Save is the affirmative default.
+                    Button("Cancel", role: .cancel) { pendingValidation = nil }
+                    Button("Save") { commitAndDismiss() }
+                }
+            } message: { result in
+                Text(result.issues.map(\.message).joined(separator: "\n\n"))
+            }
         }
+    }
+
+    private var validationAlertTitle: String {
+        guard let severity = pendingValidation?.severity else { return "" }
+        return severity == .error ? "The math doesn't work" : "Heads up"
+    }
+
+    private func handleDoneTap() {
+        guard let draft else { commitAndDismiss(); return }
+        let result = PlanValidator.validate(draft: draft)
+        if result.hasIssues {
+            pendingValidation = result
+            showValidationAlert = true
+        } else {
+            commitAndDismiss()
+        }
+    }
+
+    private func commitAndDismiss() {
+        commitDraft()
+        try? modelContext.save()
+        dismiss()
     }
 
     private func seedDraftIfNeeded() {
@@ -383,22 +421,8 @@ private struct SettingsForm: View {
             }
 
             Section {
-                Stepper(value: $draft.dailyNetCalorieGoal, in: 800...5000, step: 50) {
-                    LabeledContent("Daily net") { Text("\(draft.dailyNetCalorieGoal) kcal").monospacedDigit() }
-                }
-                Stepper(value: $draft.dailyGrossCalorieGoal, in: 800...6000, step: 50) {
-                    LabeledContent("Daily gross (plan days)") { Text("\(draft.dailyGrossCalorieGoal) kcal").monospacedDigit() }
-                }
-                Stepper(value: $draft.dailyWorkoutCalorieGoal, in: 0...3000, step: 25) {
-                    LabeledContent("Daily workout goal") { Text("\(draft.dailyWorkoutCalorieGoal) kcal").monospacedDigit() }
-                }
-            } header: {
-                Text("Calorie goals")
-            } footer: {
-                Text("Changes apply to the current week and going forward. Historical weeks keep the goals that were in effect at the time.")
-            }
-
-            Section {
+                // Week shape comes first so the bank/bonus split is set before the user dials
+                // in calorie targets — the targets only make sense once the shape is decided.
                 Picker("Week split", selection: $draft.bankSplit) {
                     ForEach(BankSplit.allCases, id: \.self) { split in
                         Text(split.displayName).tag(split)
@@ -410,10 +434,20 @@ private struct SettingsForm: View {
                     }
                 }
                 BankingDaysPreview(weekStart: draft.weekStart, bankSplit: draft.bankSplit)
+
+                Stepper(value: $draft.dailyNetCalorieGoal, in: 800...5000, step: 50) {
+                    LabeledContent("Daily net") { Text("\(draft.dailyNetCalorieGoal) kcal").monospacedDigit() }
+                }
+                Stepper(value: $draft.dailyGrossCalorieGoal, in: 800...6000, step: 50) {
+                    LabeledContent("Daily gross (bank days)") { Text("\(draft.dailyGrossCalorieGoal) kcal").monospacedDigit() }
+                }
+                Stepper(value: $draft.dailyWorkoutCalorieGoal, in: 0...3000, step: 25) {
+                    LabeledContent("Daily workout goal") { Text("\(draft.dailyWorkoutCalorieGoal) kcal").monospacedDigit() }
+                }
             } header: {
-                Text("Week shape")
+                Text("My Plan")
             } footer: {
-                Text("Plan days are the first \(draft.bankSplit.bankingDayCount) days of your week. Flex days are the rest.")
+                Text("Bank days are the first \(draft.bankSplit.bankingDayCount) days of your week — tighter targets so you build up calories. Bonus days are the rest, with a higher allowance so you can spend what you banked. Calorie changes apply to the current week and forward; past weeks keep the goals that were in effect at the time.")
             }
 
             Section("Units") {
@@ -734,7 +768,7 @@ private struct BankingDaysPreview: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
         .accessibilityLabel(
-            "Plan days: \(bankingDays.sorted { $0.rawValue < $1.rawValue }.map(\.fullName).joined(separator: ", "))"
+            "Bank days: \(bankingDays.sorted { $0.rawValue < $1.rawValue }.map(\.fullName).joined(separator: ", "))"
         )
     }
 }

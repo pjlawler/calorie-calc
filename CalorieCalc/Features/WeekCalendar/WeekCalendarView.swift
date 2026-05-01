@@ -255,13 +255,22 @@ private struct WeekCalendarBody: View {
     }
 
     private var mathCardData: MathCardData {
-        MathCardData(
+        // Sum each day's actual gross goal so bonus days (which have a higher gross budget than
+        // bank days) contribute their real value to the running "should have eaten by now"
+        // figure. Multiplying nonFutureBudgets.count by dailyGrossCalorieGoal would treat every
+        // day like a bank day and under-count the goal on bonus-day weeks.
+        let consumeGoalSoFar = nonFutureBudgets.reduce(0.0) { acc, day in
+            acc + (day.grossBudget ?? Double(period.dailyGrossCalorieGoal))
+        }
+        return MathCardData(
             weeklyCalorieBudget: Int(calculation.weeklyNetTarget.rounded()),
             alreadyEatenThisWeek: Int(eatenThisWeek.rounded()),
             workoutsCompleted: Int(workoutsCompleted.rounded()),
             plannedToWorkout: futureBudgets.count * period.dailyWorkoutCalorieGoal,
             exerciseGoalSoFar: nonFutureBudgets.count * period.dailyWorkoutCalorieGoal,
-            consumeGoalSoFar: nonFutureBudgets.count * period.dailyGrossCalorieGoal
+            consumeGoalSoFar: Int(consumeGoalSoFar.rounded()),
+            dailyGrossGoal: period.dailyGrossCalorieGoal,
+            remainingDays: futureBudgets.count
         )
     }
 
