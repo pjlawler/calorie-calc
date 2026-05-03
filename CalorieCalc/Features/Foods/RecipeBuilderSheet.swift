@@ -161,6 +161,7 @@ struct RecipeBuilderSheet: View {
                     Task { await analyze() }
                 } label: {
                     Label("Analyze with AI", systemImage: "sparkles")
+                        .labelStyle(TitleAndIconLabelStyle())
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
@@ -303,6 +304,7 @@ struct RecipeBuilderSheet: View {
             Section {
                 Button { saveToMyFoods() } label: {
                     Label("Save to My Foods", systemImage: "checkmark.circle.fill")
+                        .labelStyle(TitleAndIconLabelStyle())
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }

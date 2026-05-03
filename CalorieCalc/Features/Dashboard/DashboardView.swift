@@ -42,6 +42,7 @@ struct DashboardView: View {
                             showWeightSheet = true
                         } label: {
                             Label("Log", systemImage: "plus.circle.fill")
+                                .labelStyle(TitleAndIconLabelStyle())
                                 .font(.subheadline.weight(.semibold))
                         }
                         .buttonStyle(.borderedProminent)

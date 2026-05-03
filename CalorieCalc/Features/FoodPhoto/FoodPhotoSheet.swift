@@ -115,6 +115,7 @@ struct FoodPhotoSheet: View {
                     showCameraPicker = true
                 } label: {
                     Label("Take photo", systemImage: "camera.fill")
+                        .labelStyle(TitleAndIconLabelStyle())
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -128,6 +129,7 @@ struct FoodPhotoSheet: View {
                     preferredItemEncoding: .automatic
                 ) {
                     Label("Choose from library", systemImage: "photo.on.rectangle")
+                        .labelStyle(TitleAndIconLabelStyle())
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -275,6 +277,7 @@ struct FoodPhotoSheet: View {
                         addToMyFoods ? "Save to My Foods" : "Add to \(mealType.displayName)",
                         systemImage: addToMyFoods ? "checkmark.circle.fill" : "plus.circle.fill"
                     )
+                    .labelStyle(TitleAndIconLabelStyle())
                     .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)

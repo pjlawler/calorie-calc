@@ -35,6 +35,11 @@ final class HealthKitService {
     /// otherwise return empty data after periods of app inactivity.
     private var didEnsureAuthorization = false
 
+    /// Shared in-flight auth task. Concurrent callers (every query at launch + the explicit
+    /// `RootView` startup call) await the SAME task so we don't kick off the system permission
+    /// prompt more than once and don't race the request against pre-auth queries.
+    private var authorizationTask: Task<Void, Never>?
+
     var isAvailable: Bool {
         #if canImport(HealthKit) && os(iOS)
         return HKHealthStore.isHealthDataAvailable()
@@ -70,16 +75,25 @@ final class HealthKitService {
         #endif
     }
 
-    /// Fire-and-forget startup call — safe to invoke from `.task` on every app launch. Silently
-    /// swallows errors (a failed request still leaves queries working if access was granted
-    /// previously; the Settings screen surfaces real errors when the user taps Request access).
+    /// Awaits authorization completion. Safe to invoke from every HK query and from `.task` on
+    /// app launch — concurrent callers coalesce behind a single in-flight task so the system
+    /// prompt fires once. Returns immediately after the first call completes.
     func ensureAuthorizationAtStartup() async {
-        guard !didEnsureAuthorization else { return }
-        do {
-            try await requestAuthorization()
-        } catch {
-            didEnsureAuthorization = true
+        if didEnsureAuthorization { return }
+        if let existing = authorizationTask {
+            await existing.value
+            return
         }
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await self.requestAuthorization()
+            } catch {
+                self.didEnsureAuthorization = true
+            }
+        }
+        authorizationTask = task
+        await task.value
     }
 
     /// Sum of active energy burned across recorded workouts for the day.
@@ -88,6 +102,7 @@ final class HealthKitService {
     func workoutsEnergyBurned(on date: Date, calendar: Calendar = .current) async throws -> Double {
         #if canImport(HealthKit) && os(iOS)
         guard isAvailable else { return 0 }
+        await ensureAuthorizationAtStartup()
         let list = try await workouts(on: date, calendar: calendar)
         return list.reduce(0) { $0 + $1.activeEnergyBurned }
         #else
@@ -104,6 +119,7 @@ final class HealthKitService {
     ) async throws -> [Date: Double] {
         #if canImport(HealthKit) && os(iOS)
         guard isAvailable else { return [:] }
+        await ensureAuthorizationAtStartup()
         let rangeStart = calendar.startOfDay(for: startDate)
         guard let rangeEnd = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: endDate)) else { return [:] }
         let predicate = HKQuery.predicateForSamples(withStart: rangeStart, end: rangeEnd, options: .strictStartDate)
@@ -131,6 +147,7 @@ final class HealthKitService {
     func dailySteps(on date: Date, calendar: Calendar = .current) async throws -> Double {
         #if canImport(HealthKit) && os(iOS)
         guard isAvailable else { return 0 }
+        await ensureAuthorizationAtStartup()
         let start = calendar.startOfDay(for: date)
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return 0 }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)
@@ -153,6 +170,7 @@ final class HealthKitService {
     ) async throws -> [Date: Double] {
         #if canImport(HealthKit) && os(iOS)
         guard isAvailable else { return [:] }
+        await ensureAuthorizationAtStartup()
         let rangeStart = calendar.startOfDay(for: startDate)
         guard let rangeEnd = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: endDate)) else { return [:] }
         let predicate = HKQuery.predicateForSamples(withStart: rangeStart, end: rangeEnd, options: .strictStartDate)
@@ -175,6 +193,7 @@ final class HealthKitService {
     func workouts(on date: Date, calendar: Calendar = .current) async throws -> [HealthKitWorkout] {
         #if canImport(HealthKit) && os(iOS)
         guard isAvailable else { return [] }
+        await ensureAuthorizationAtStartup()
         let start = calendar.startOfDay(for: date)
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return [] }
         let predicate = HKQuery.predicateForSamples(withStart: start, end: end, options: .strictStartDate)

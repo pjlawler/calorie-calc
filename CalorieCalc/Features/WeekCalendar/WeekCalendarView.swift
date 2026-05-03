@@ -151,6 +151,7 @@ private struct WeekCalendarBody: View {
                         showFavoriteQuickAdd = true
                     } label: {
                         Label("Add", systemImage: "star.fill")
+                            .labelStyle(TitleAndIconLabelStyle())
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)

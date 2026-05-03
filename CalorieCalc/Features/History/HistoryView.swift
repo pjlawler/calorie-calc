@@ -111,6 +111,7 @@ struct HistoryView: View {
             showAnalysis = true
         } label: {
             Label("Analyze", systemImage: "sparkles")
+                .labelStyle(TitleAndIconLabelStyle())
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)

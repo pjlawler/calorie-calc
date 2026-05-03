@@ -78,7 +78,7 @@ struct MathCard: View {
 
     private var remainingEyebrow: String {
         // One label across both states — same math, just less projection on the last day.
-        "WEEK'S NET REMAINING"
+        "PROJECTED REMAINING"
     }
 
     private var remainingIsPositive: Bool { data.estimatedRemaining >= 0 }
@@ -180,11 +180,11 @@ struct MathCard: View {
                          value: data.weeklyCalorieBudget,
                          sign: .none,
                          color: .primary)
-                inputRow(label: "Calories consumed",
+                inputRow(label: "Actual consumed",
                          value: data.alreadyEatenThisWeek,
                          sign: .minus,
                          color: .primary)
-                inputRow(label: "Completed exercise",
+                inputRow(label: "Actual exercise",
                          value: data.workoutsCompleted,
                          sign: .plus,
                          color: .green)
