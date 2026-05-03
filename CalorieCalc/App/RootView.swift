@@ -48,5 +48,14 @@ struct RootView: View {
                 selection = .week
             }
         }
+        .onChange(of: selection) { _, _ in
+            NotificationCenter.default.post(name: .scrollToTop, object: nil)
+        }
     }
+}
+
+extension Notification.Name {
+    /// Posted when the active tab changes. Each tab's top-level scroll view listens
+    /// and resets to its top anchor so the user always lands at the top of a tab.
+    static let scrollToTop = Notification.Name("scrollToTop")
 }

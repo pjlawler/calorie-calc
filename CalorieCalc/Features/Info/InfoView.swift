@@ -7,8 +7,10 @@ struct InfoView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    Color.clear.frame(height: 0).id("top")
                     bigIdeaCard
 
                     section(
@@ -128,6 +130,10 @@ struct InfoView: View {
             .scrollBounceBehavior(.basedOnSize)
             .navigationTitle("How it works")
             .navigationBarTitleDisplayMode(.large)
+            .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
+                withAnimation { proxy.scrollTo("top", anchor: .top) }
+            }
+            }
         }
     }
 

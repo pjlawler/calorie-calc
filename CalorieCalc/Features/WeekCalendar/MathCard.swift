@@ -67,6 +67,11 @@ struct MathCard: View {
     let data: MathCardData
     let isLastDayOrPast: Bool
     var isLoading: Bool = false
+    /// Toggle each section independently. The Calc tab now hides the variance card
+    /// (it surfaces inline on today's day cell + on the day view); the day view
+    /// hides the remaining card (it stays on the week summary).
+    var includeVariance: Bool = true
+    var includeRemaining: Bool = true
 
     @AppStorage("mathcard.varianceCollapsed") private var varianceCollapsed: Bool = false
     @AppStorage("mathcard.remainingCollapsed") private var remainingCollapsed: Bool = false
@@ -111,10 +116,12 @@ struct MathCard: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            if !isLastDayOrPast {
+            if includeVariance && !isLastDayOrPast {
                 varianceCard
             }
-            remainingCard
+            if includeRemaining {
+                remainingCard
+            }
         }
     }
 
@@ -123,14 +130,14 @@ struct MathCard: View {
     private var varianceCard: some View {
         cardShell(
             collapsed: $varianceCollapsed,
-            eyebrow: "TODAY'S VARIANCE",
+            eyebrow: "WEEK'S VARIANCE",
             heroText: varianceHeroText,
             heroColor: varianceColor(data.totalVariance),
             heroAnimationValue: Double(data.totalVariance)
         ) {
             VStack(spacing: 0) {
-                varianceRow(label: "Consumed", value: data.consumedVariance)
-                varianceRow(label: "Exercise", value: data.exerciseVariance)
+                varianceRow(label: "Consumption variance", value: data.consumedVariance)
+                varianceRow(label: "Exercise variance", value: data.exerciseVariance)
                 blurb(eatTodayBlurb, tint: varianceColor(data.totalVariance))
             }
         }
@@ -139,7 +146,7 @@ struct MathCard: View {
     /// Dynamic copy that frames the variance number motivationally based on where the user
     /// stands: ahead of plan, behind but recoverable, or behind with a tight runway.
     private var eatTodayBlurb: String {
-        let intro = "Your current variance from plan."
+        let intro = "This is your current tracking on the plan based on your actual intake and exercise through today. Exercising more will increase this number."
         if data.totalVariance >= 0 {
             return intro + " You're on track to land on plan this week — keep going."
         }
@@ -212,50 +219,15 @@ struct MathCard: View {
         heroText: String,
         heroColor: Color,
         heroAnimationValue: Double,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    collapsed.wrappedValue.toggle()
-                }
-            } label: {
-                HStack(alignment: .center, spacing: 8) {
-                    Text(eyebrow)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    Spacer(minLength: 8)
-                    HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        Text(heroText)
-                            .font(.system(size: 24, weight: .regular, design: .rounded).monospacedDigit())
-                            .foregroundStyle(heroColor)
-                            .contentTransition(.numericText(value: heroAnimationValue))
-                        Text("kCal")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(heroColor)
-                    }
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(collapsed.wrappedValue ? -90 : 0))
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if !collapsed.wrappedValue {
-                divider
-                content()
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .padding(.vertical, 14)
-        .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
+        CardShell(
+            collapsed: collapsed,
+            eyebrow: eyebrow,
+            heroText: heroText,
+            heroColor: heroColor,
+            heroAnimationValue: heroAnimationValue,
+            content: content
         )
     }
 
@@ -311,6 +283,78 @@ struct MathCard: View {
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 4)
+    }
+}
+
+// MARK: - CardShell
+
+/// Expand/collapse shell with measured-height frame animation. Without measurement, animating
+/// a `.frame(maxHeight:)` between 0 and `.infinity` interacts poorly with List row layout —
+/// row resize and content fade can desync, producing the "text drops in" effect. Here we
+/// render an off-screen measurer to capture the content's natural height, then animate a
+/// real `.frame(height:)` between 0 and that exact value, which interpolates cleanly.
+private struct CardShell<Content: View>: View {
+    @Binding var collapsed: Bool
+    let eyebrow: String
+    let heroText: String
+    let heroColor: Color
+    let heroAnimationValue: Double
+    @ViewBuilder let content: () -> Content
+
+    private var disclosedBody: some View {
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(Color.black.opacity(0.12))
+                .frame(height: 0.5)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 8)
+            content()
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    collapsed.toggle()
+                }
+            } label: {
+                HStack(alignment: .center, spacing: 8) {
+                    Text(eyebrow)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Spacer(minLength: 8)
+                    HStack(alignment: .lastTextBaseline, spacing: 4) {
+                        Text(heroText)
+                            .font(.system(size: 24, weight: .regular, design: .rounded).monospacedDigit())
+                            .foregroundStyle(heroColor)
+                            .contentTransition(.numericText(value: heroAnimationValue))
+                        Text("kCal")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(heroColor)
+                    }
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(collapsed ? -90 : 0))
+                        .animation(.easeInOut(duration: 0.2), value: collapsed)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if !collapsed {
+                disclosedBody
+            }
+        }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
     }
 }
 

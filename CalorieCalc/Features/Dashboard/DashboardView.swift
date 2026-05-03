@@ -30,8 +30,10 @@ struct DashboardView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    Color.clear.frame(height: 0).id("top")
                     HStack(alignment: .firstTextBaseline) {
                         Text("Progress")
                             .font(.largeTitle.weight(.bold))
@@ -80,6 +82,10 @@ struct DashboardView: View {
             }
             .task { await ensureProfile() }
             .task(id: healthKitFetchKey) { await loadHealthKitBurns() }
+            .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
+                withAnimation { proxy.scrollTo("top", anchor: .top) }
+            }
+            }
         }
     }
 

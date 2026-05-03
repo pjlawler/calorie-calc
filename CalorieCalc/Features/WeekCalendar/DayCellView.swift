@@ -5,6 +5,9 @@ struct DayCellView: View {
     let budget: DailyBudget
     let macros: Macros
     let workoutGoal: Int
+    /// When non-nil, shown inline next to "consumed / planned". Wired to today's cell only —
+    /// surfaces the same number that the variance card on the day view shows.
+    var varianceValue: Int? = nil
 
     struct Macros: Hashable {
         var protein: Double
@@ -72,6 +75,13 @@ struct DayCellView: View {
                     Text("/ \(CalorieFormatter.whole(gross))")
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
+                }
+                if let variance = varianceValue {
+                    let sign = variance >= 0 ? "+" : "−"
+                    let magnitude = abs(variance).formatted(.number)
+                    Text("(\(sign)\(magnitude))")
+                        .font(.subheadline.monospacedDigit())
+                        .foregroundStyle(variance >= 0 ? .green : .red)
                 }
             }
             macroBar

@@ -4,6 +4,10 @@ import SwiftData
 struct DayDetailView: View {
 
     let date: Date
+    /// When viewing today and provided by the parent week view, the "Today's Variance"
+    /// card renders at the top of the day. Nil for any other day or when math hasn't
+    /// finished computing yet.
+    var currentWeekMathData: MathCardData? = nil
 
     @Environment(\.modelContext) private var modelContext
     @Environment(HealthKitService.self) private var healthKitService
@@ -20,12 +24,23 @@ struct DayDetailView: View {
     }
 
     var body: some View {
-        List {
-            totalsSection(log: dayLog)
-            mealsSections(log: dayLog)
-            workoutsSection(log: dayLog)
-            if showSteps {
-                stepsSection
+        VStack(spacing: 12) {
+            totalsHeader(log: dayLog)
+            if let mathData = currentWeekMathData,
+               Calendar.current.isDateInToday(date) {
+                MathCard(
+                    data: mathData,
+                    isLastDayOrPast: false,
+                    includeRemaining: false
+                )
+                .padding(.horizontal)
+            }
+            List {
+                mealsSections(log: dayLog)
+                workoutsSection(log: dayLog)
+                if showSteps {
+                    stepsSection
+                }
             }
         }
         .navigationTitle(date.formatted(.dateTime.weekday(.wide).month().day()))
@@ -48,7 +63,7 @@ struct DayDetailView: View {
     }
 
     @ViewBuilder
-    private func totalsSection(log: DayLog?) -> some View {
+    private func totalsHeader(log: DayLog?) -> some View {
         let hkBurn = viewModel?.includedHealthKitActiveEnergy ?? 0
         let manualBurn = log?.totalManualBurned ?? 0
         let totalBurn = hkBurn + manualBurn
@@ -59,27 +74,26 @@ struct DayDetailView: View {
             ? "(\(CalorieFormatter.whole(abs(roundedNet))))"
             : CalorieFormatter.whole(roundedNet)
 
-        Section {
-            VStack(spacing: 12) {
-                HStack {
-                    totalCell(title: "Consumed", value: CalorieFormatter.whole(consumed))
-                    Divider().frame(height: 36)
-                    totalCell(title: "Burned", value: CalorieFormatter.whole(totalBurn))
-                    Divider().frame(height: 36)
-                    totalCell(
-                        title: "Net",
-                        value: netDisplay,
-                        valueColor: roundedNet < 0 ? .red : .primary
-                    )
-                }
-                macroRow(
-                    protein: log?.totalProtein ?? 0,
-                    carbs: log?.totalCarbs ?? 0,
-                    fat: log?.totalFat ?? 0
+        VStack(spacing: 12) {
+            HStack {
+                totalCell(title: "Consumed", value: CalorieFormatter.whole(consumed))
+                Divider().frame(height: 36)
+                totalCell(title: "Burned", value: CalorieFormatter.whole(totalBurn))
+                Divider().frame(height: 36)
+                totalCell(
+                    title: "Net",
+                    value: netDisplay,
+                    valueColor: roundedNet < 0 ? .red : .primary
                 )
             }
+            macroRow(
+                protein: log?.totalProtein ?? 0,
+                carbs: log?.totalCarbs ?? 0,
+                fat: log?.totalFat ?? 0
+            )
         }
-        .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
+        .padding(.horizontal)
+        .padding(.top, 12)
     }
 
     private func totalCell(title: String, value: String, valueColor: Color = .primary) -> some View {

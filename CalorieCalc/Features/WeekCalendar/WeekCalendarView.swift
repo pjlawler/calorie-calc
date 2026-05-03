@@ -25,9 +25,6 @@ struct WeekCalendarView: View {
                 .navigationTitle("Weekly Log")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbar }
-                .navigationDestination(item: $selectedDate) { date in
-                    DayDetailView(date: date)
-                }
                 .sheet(isPresented: $showSettings) {
                     SettingsView()
                 }
@@ -142,8 +139,10 @@ private struct WeekCalendarBody: View {
     private var weekDates: [Date] { viewModel.assembler(for: period).weekDates }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ScrollView {
             VStack(spacing: 12) {
+                Color.clear.frame(height: 0).id("top")
                 HStack(alignment: .center) {
                     Text("CalorieCalc")
                         .font(.largeTitle.bold())
@@ -172,7 +171,8 @@ private struct WeekCalendarBody: View {
                                     carbs: log?.totalCarbs ?? 0,
                                     fat: log?.totalFat ?? 0
                                 ),
-                                workoutGoal: period.dailyWorkoutCalorieGoal
+                                workoutGoal: period.dailyWorkoutCalorieGoal,
+                                varianceValue: budget.status == .today ? displayMathData.totalVariance : nil
                             )
                         }
                         .buttonStyle(.plain)
@@ -188,16 +188,27 @@ private struct WeekCalendarBody: View {
         .sheet(isPresented: $showFavoriteQuickAdd) {
             FavoriteQuickAddListSheet(favorites: favoriteFoods)
         }
+        .navigationDestination(item: $selectedDate) { date in
+            DayDetailView(
+                date: date,
+                currentWeekMathData: Calendar.current.isDateInToday(date) ? displayMathData : nil
+            )
+        }
         .onAppear { captureStableData() }
         .onChange(of: mathCardData) { _, _ in captureStableData() }
         .onChange(of: isHealthBurnLoaded) { _, _ in captureStableData() }
+        .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
+            withAnimation { proxy.scrollTo("top", anchor: .top) }
+        }
+        }
     }
 
     private var weeklySummary: some View {
         MathCard(
             data: displayMathData,
             isLastDayOrPast: isLastDayOrPast,
-            isLoading: showLoadingPlaceholder
+            isLoading: showLoadingPlaceholder,
+            includeVariance: false
         )
         .padding(.top, 4)
         .animation(.easeInOut(duration: 0.25), value: displayMathData)

@@ -62,8 +62,10 @@ struct HistoryView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    Color.clear.frame(height: 0).id("top")
                     header
                     if timeframe == .custom {
                         customRangeEditor
@@ -95,6 +97,10 @@ struct HistoryView: View {
             }
             .sheet(isPresented: $showAnalysis) {
                 NutritionAnalysisSheet(data: analysisInput)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
+                withAnimation { proxy.scrollTo("top", anchor: .top) }
+            }
             }
         }
         .task(id: timeframeRangeKey) { await loadHealthKit() }
