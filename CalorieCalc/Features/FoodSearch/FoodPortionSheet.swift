@@ -265,7 +265,7 @@ struct FoodPortionSheet: View {
                 }
 
                 Section {
-                    if !addToMyFoods {
+                    if !addToMyFoods && !pickMealAndDate {
                         Button { toggleMyFoods() } label: {
                             Label(
                                 isInMyFoods ? "Saved to My Foods" : "Save to My Foods",
@@ -319,7 +319,7 @@ struct FoodPortionSheet: View {
     private var navigationTitle: String {
         if addToMyFoods { return "New Food" }
         if editingEntry != nil { return "Edit Entry" }
-        if pickMealAndDate { return "Log Food Item" }
+        if pickMealAndDate { return "My Food Item" }
         return "Add Food"
     }
 

@@ -25,6 +25,57 @@ protocol FoodRecognitionService: Sendable {
     /// Estimate nutrition info from a free-text description like "Five Guys cheeseburger" or
     /// "medium Chipotle burrito bowl with chicken, rice, black beans".
     func estimate(description: String) async throws -> RecognizedMeal
+    /// Estimate total nutrition + suggested yield options for a multi-ingredient recipe.
+    /// Ingredients with `known*` macros (e.g. from a barcode scan) are scaled by their
+    /// amount and used as hard data; ingredients without are estimated by the AI from
+    /// name + amount + unit. Returned totals are for the WHOLE recipe; the caller picks
+    /// one of the yield options to derive per-serving nutrition.
+    func analyzeRecipe(_ input: RecipeAnalysisInput) async throws -> AnalyzedRecipe
+}
+
+/// Input to `FoodRecognitionService.analyzeRecipe` — recipe identity and ingredient list
+/// (with optional pre-known nutrition for ingredients that came from a barcode lookup or
+/// other authoritative source). The AI determines yield, so no servings count is supplied.
+nonisolated struct RecipeAnalysisInput: Sendable {
+    nonisolated struct Ingredient: Sendable {
+        let name: String
+        /// User-entered count of `unit`. e.g. amount=200, unit="g" → 200 g.
+        let amount: Double
+        let unit: String
+        let brand: String?
+        /// Known total nutrition for `amount` × `unit` of this ingredient (already scaled —
+        /// the caller multiplied per-serving by amount for known foods). nil = AI estimates.
+        let knownCalories: Double?
+        let knownProtein: Double?
+        let knownCarbs: Double?
+        let knownFat: Double?
+    }
+
+    let recipeName: String
+    let ingredients: [Ingredient]
+}
+
+/// One way to slice the recipe into servings — e.g. (amount=100, unit="g", servingsInRecipe=10)
+/// describes 10 servings of 100 g each, totalling 1000 g of food. The caller multiplies
+/// `amount × servingsInRecipe` to get the recipe's total quantity in `unit`s.
+nonisolated struct RecipeYieldOption: Sendable, Hashable, Identifiable {
+    var id: String { "\(amount)_\(unit)_\(servingsInRecipe)" }
+    let amount: Double
+    let unit: String
+    let servingsInRecipe: Double
+}
+
+/// AI's analysis of a recipe — TOTAL nutrition (whole recipe) plus suggested yield options.
+/// Per-serving nutrition is derived by the caller: total / chosen-option.servingsInRecipe.
+nonisolated struct AnalyzedRecipe: Sendable, Hashable {
+    let name: String
+    let totalCalories: Double
+    let totalProtein: Double
+    let totalCarbs: Double
+    let totalFat: Double
+    let yieldOptions: [RecipeYieldOption]
+    let confidence: String?
+    let notes: String?
 }
 
 extension RecognizedMeal {

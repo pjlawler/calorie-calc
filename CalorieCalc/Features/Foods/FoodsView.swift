@@ -26,6 +26,7 @@ struct FoodsView: View {
     @State private var showPhotoAnalyzer = false
     @State private var showDescribe = false
     @State private var showQuickAdd = false
+    @State private var showRecipeBuilder = false
     @State private var quickAddBarcode: String?
     @State private var addLookupViewModel: FoodSearchViewModel?
 
@@ -93,6 +94,7 @@ struct FoodsView: View {
                     Button("Scan Barcode") { showScanner = true }
                     Button("Photo") { showPhotoAnalyzer = true }
                     Button("Describe with AI") { showDescribe = true }
+                    Button("Recipe Analyzer") { showRecipeBuilder = true }
                     Button("Manual Entry") {
                         quickAddBarcode = nil
                         showQuickAdd = true
@@ -149,6 +151,9 @@ struct FoodsView: View {
                     ) {
                         showQuickAdd = false
                     }
+                }
+                .sheet(isPresented: $showRecipeBuilder) {
+                    RecipeBuilderSheet { }
                 }
                 .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
                     withAnimation { proxy.scrollTo("top", anchor: .top) }
