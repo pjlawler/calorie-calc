@@ -68,7 +68,6 @@ struct HistoryView: View {
                     if timeframe == .custom {
                         customRangeEditor
                     }
-                    rangeLabel
                     ForEach(visibleMetrics) { metric in
                         metricSection(metric)
                     }
@@ -152,10 +151,13 @@ struct HistoryView: View {
                 }
             }
             .pickerStyle(.menu)
-            Spacer()
             if isLoadingHealthKit {
                 ProgressView().controlSize(.small)
             }
+            Spacer()
+            Text(rangeText)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
     }
 

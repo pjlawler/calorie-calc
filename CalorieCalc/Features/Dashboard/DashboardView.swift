@@ -32,11 +32,24 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Progress")
+                            .font(.largeTitle.weight(.bold))
+                        Spacer()
+                        Button {
+                            showWeightSheet = true
+                        } label: {
+                            Label("Log", systemImage: "plus.circle.fill")
+                                .font(.subheadline.weight(.semibold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
                     if let profile = profiles.first {
+                        progressSection(profile: profile)
                         Text("Plan Overview")
                             .font(.title2.weight(.bold))
                         planCard(profile: profile)
-                        progressSection(profile: profile)
                     } else {
                         ProgressView().padding(.top, 80)
                     }
@@ -46,8 +59,9 @@ struct DashboardView: View {
                 .padding(.vertical, 8)
             }
             .scrollBounceBehavior(.basedOnSize)
-            .navigationTitle("Progress")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.hidden, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -173,21 +187,6 @@ struct DashboardView: View {
 
     private func progressSection(profile: UserProfile) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Weight Progress")
-                    .font(.title2.weight(.bold))
-                Spacer()
-                Button {
-                    showWeightSheet = true
-                } label: {
-                    Label("Log", systemImage: "plus.circle.fill")
-                        .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            }
-            .padding(.top, 4)
-
             timeframePicker
             if timeframe == .custom {
                 customRangeEditor
@@ -394,6 +393,12 @@ struct DashboardView: View {
         max(1, (Calendar.current.dateComponents([.day], from: range.start, to: range.end).day ?? 0) + 1)
     }
 
+    /// Chart X-domain end. `range.end` is start-of-day, so a weigh-in logged later that day
+    /// would sit past the chart's right edge. Extend by one day to cover the full end-date.
+    private var chartDomainEnd: Date {
+        Calendar.current.date(byAdding: .day, value: 1, to: range.end) ?? range.end
+    }
+
     private struct WeightPoint: Identifiable, Hashable {
         let id: String
         let date: Date
@@ -425,7 +430,18 @@ struct DashboardView: View {
             }
             .pickerStyle(.menu)
             Spacer()
+            Text(rangeText)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
         }
+    }
+
+    private var rangeText: String {
+        let (start, end) = range
+        let s = start.formatted(.dateTime.month(.abbreviated).day().year())
+        let e = end.formatted(.dateTime.month(.abbreviated).day().year())
+        if Calendar.current.isDate(start, inSameDayAs: end) { return s }
+        return "\(s) – \(e)"
     }
 
     private var customRangeEditor: some View {
@@ -470,7 +486,7 @@ struct DashboardView: View {
                     }
                 }
                 .frame(height: 240)
-                .chartXScale(domain: range.start...range.end)
+                .chartXScale(domain: range.start...chartDomainEnd)
                 .chartXAxis { weightXAxis }
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
