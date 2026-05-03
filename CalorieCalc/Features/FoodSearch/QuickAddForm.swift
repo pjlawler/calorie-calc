@@ -7,6 +7,7 @@ struct QuickAddSheet: View {
     let mealType: MealType
     let date: Date
     var scannedBarcode: String? = nil
+    var addToMyFoods: Bool = false
     let onSaved: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -17,9 +18,10 @@ struct QuickAddSheet: View {
                 mealType: mealType,
                 date: date,
                 scannedBarcode: scannedBarcode,
+                addToMyFoods: addToMyFoods,
                 onSaved: onSaved
             )
-            .navigationTitle("Quick Add")
+            .navigationTitle("Manual Entry")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -35,12 +37,14 @@ struct QuickAddForm: View {
     let mealType: MealType
     let date: Date
     var scannedBarcode: String? = nil
+    var addToMyFoods: Bool = false
     let onSaved: () -> Void
 
     @Environment(\.modelContext) private var modelContext
     @Query private var dayLogs: [DayLog]
 
     @State private var name: String = ""
+    @State private var brandText: String = ""
     @State private var caloriesText: String = ""
     @State private var proteinText: String = ""
     @State private var carbsText: String = ""
@@ -99,6 +103,8 @@ struct QuickAddForm: View {
             Section {
                 TextField("Name", text: $name)
                     .textInputAutocapitalization(.words)
+                TextField("Brand (optional)", text: $brandText)
+                    .textInputAutocapitalization(.words)
                 LabeledContent("Serving") {
                     HStack(spacing: 8) {
                         TextField("Amount", text: $quantityText)
@@ -135,7 +141,7 @@ struct QuickAddForm: View {
                 Button {
                     save()
                 } label: {
-                    Text("Add to \(mealType.displayName)")
+                    Text(addToMyFoods ? "Save to My Foods" : "Add to \(mealType.displayName)")
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                 }
@@ -164,9 +170,10 @@ struct QuickAddForm: View {
     private func save() {
         guard let cals = calories, cals > 0 else { return }
         guard let amount = quantity, amount > 0 else { return }
-        let log = ensureDayLog()
         let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedName = trimmedName.isEmpty ? "Quick entry" : trimmedName
+        let trimmedBrand = brandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedBrand: String? = trimmedBrand.isEmpty ? nil : trimmedBrand
         let trimmedNotes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
         let storedNotes: String? = trimmedNotes.isEmpty ? nil : trimmedNotes
 
@@ -225,29 +232,34 @@ struct QuickAddForm: View {
             initialSelectedQuantity = amount
         }
 
-        let entry = FoodEntry(
-            name: resolvedName,
-            brand: nil,
-            nativeUnit: nativeUnit,
-            nativeUnitGrams: nativeUnitGrams,
-            nativeUnitMilliliters: nativeUnitMilliliters,
-            selectedUnit: initialSelectedUnit,
-            quantity: initialSelectedQuantity,
-            caloriesPerServing: calsPerNative,
-            proteinPerServing: proteinPerNative,
-            carbsPerServing: carbsPerNative,
-            fatPerServing: fatPerNative,
-            mealType: mealType,
-            source: scannedBarcode != nil ? .barcode : .manual,
-            externalId: externalId,
-            notes: storedNotes,
-            timestamp: Date(),
-            dayLog: log
-        )
-        modelContext.insert(entry)
+        let entrySource: FoodSource = scannedBarcode != nil ? .barcode : .manual
+        if !addToMyFoods {
+            let log = ensureDayLog()
+            let entry = FoodEntry(
+                name: resolvedName,
+                brand: storedBrand,
+                nativeUnit: nativeUnit,
+                nativeUnitGrams: nativeUnitGrams,
+                nativeUnitMilliliters: nativeUnitMilliliters,
+                selectedUnit: initialSelectedUnit,
+                quantity: initialSelectedQuantity,
+                caloriesPerServing: calsPerNative,
+                proteinPerServing: proteinPerNative,
+                carbsPerServing: carbsPerNative,
+                fatPerServing: fatPerNative,
+                mealType: mealType,
+                source: entrySource,
+                externalId: externalId,
+                notes: storedNotes,
+                timestamp: Date(),
+                dayLog: log
+            )
+            modelContext.insert(entry)
+        }
         upsertCached(
             externalId: externalId,
             name: resolvedName,
+            brand: storedBrand,
             nativeUnit: nativeUnit,
             nativeUnitGrams: nativeUnitGrams,
             nativeUnitMilliliters: nativeUnitMilliliters,
@@ -258,7 +270,7 @@ struct QuickAddForm: View {
             carbsPerNative: carbsPerNative,
             fatPerNative: fatPerNative,
             notes: storedNotes,
-            source: entry.source
+            source: entrySource
         )
         try? modelContext.save()
         onSaved()
@@ -269,6 +281,7 @@ struct QuickAddForm: View {
     private func upsertCached(
         externalId: String,
         name: String,
+        brand: String?,
         nativeUnit: String,
         nativeUnitGrams: Double?,
         nativeUnitMilliliters: Double?,
@@ -283,17 +296,19 @@ struct QuickAddForm: View {
     ) {
         if let existing = cachedFoods.first(where: { $0.externalId == externalId }) {
             existing.lastUsed = .now
-            existing.useCount += 1
+            if !addToMyFoods { existing.useCount += 1 }
             existing.notes = notes
+            existing.brand = brand
             existing.lastSelectedUnit = initialSelectedUnit
             existing.lastSelectedQuantity = initialSelectedQuantity
+            if addToMyFoods { existing.isInMyFoods = true }
             trimRecents(limit: 100)
             return
         }
         let cached = CachedFood(
             externalId: externalId,
             name: name,
-            brand: nil,
+            brand: brand,
             nativeUnit: nativeUnit,
             nativeUnitGrams: nativeUnitGrams,
             nativeUnitMilliliters: nativeUnitMilliliters,
@@ -304,8 +319,9 @@ struct QuickAddForm: View {
             carbsPerServing: carbsPerNative,
             fatPerServing: fatPerNative,
             source: source,
+            isInMyFoods: addToMyFoods,
             lastUsed: .now,
-            useCount: 1,
+            useCount: addToMyFoods ? 0 : 1,
             notes: notes
         )
         modelContext.insert(cached)
@@ -314,7 +330,7 @@ struct QuickAddForm: View {
 
     private func trimRecents(limit: Int) {
         let descriptor = FetchDescriptor<CachedFood>(
-            predicate: #Predicate<CachedFood> { $0.isFavorite == false },
+            predicate: #Predicate<CachedFood> { $0.isFavorite == false && $0.isInMyFoods == false },
             sortBy: [SortDescriptor(\.lastUsed, order: .reverse)]
         )
         guard let recentNonFavorites = try? modelContext.fetch(descriptor),

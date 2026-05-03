@@ -9,6 +9,7 @@ import UIKit
 struct FoodPhotoSheet: View {
     let mealType: MealType
     let date: Date
+    var addToMyFoods: Bool = false
     let onLogged: () -> Void
 
     @Environment(\.dismiss) private var dismiss
@@ -270,8 +271,11 @@ struct FoodPhotoSheet: View {
                 Button {
                     save()
                 } label: {
-                    Label("Add to \(mealType.displayName)", systemImage: "plus.circle.fill")
-                        .frame(maxWidth: .infinity)
+                    Label(
+                        addToMyFoods ? "Save to My Foods" : "Add to \(mealType.displayName)",
+                        systemImage: addToMyFoods ? "checkmark.circle.fill" : "plus.circle.fill"
+                    )
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -393,7 +397,6 @@ struct FoodPhotoSheet: View {
             portionDescription: trimmedPortion,
             userText: description
         )
-        let log = ensureDayLog()
 
         let protein = Double(proteinText) ?? 0
         let carbs = Double(carbsText) ?? 0
@@ -410,26 +413,29 @@ struct FoodPhotoSheet: View {
             recognizedGrams: recognizedServingGrams
         )
 
-        let entry = FoodEntry(
-            name: trimmedName,
-            brand: trimmedBrand,
-            nativeUnit: nativeUnit,
-            nativeUnitGrams: nativeUnitGrams,
-            nativeUnitMilliliters: nil,
-            selectedUnit: nativeUnit,
-            quantity: 1,
-            caloriesPerServing: cals,
-            proteinPerServing: protein,
-            carbsPerServing: carbs,
-            fatPerServing: fat,
-            mealType: mealType,
-            source: .photo,
-            externalId: externalId,
-            notes: storedNotes,
-            timestamp: Date(),
-            dayLog: log
-        )
-        modelContext.insert(entry)
+        if !addToMyFoods {
+            let log = ensureDayLog()
+            let entry = FoodEntry(
+                name: trimmedName,
+                brand: trimmedBrand,
+                nativeUnit: nativeUnit,
+                nativeUnitGrams: nativeUnitGrams,
+                nativeUnitMilliliters: nil,
+                selectedUnit: nativeUnit,
+                quantity: 1,
+                caloriesPerServing: cals,
+                proteinPerServing: protein,
+                carbsPerServing: carbs,
+                fatPerServing: fat,
+                mealType: mealType,
+                source: .photo,
+                externalId: externalId,
+                notes: storedNotes,
+                timestamp: Date(),
+                dayLog: log
+            )
+            modelContext.insert(entry)
+        }
         upsertCached(
             externalId: externalId,
             name: trimmedName,
@@ -481,9 +487,10 @@ struct FoodPhotoSheet: View {
     ) {
         if let existing = cachedFoods.first(where: { $0.externalId == externalId }) {
             existing.lastUsed = .now
-            existing.useCount += 1
+            if !addToMyFoods { existing.useCount += 1 }
             existing.lastSelectedUnit = nativeUnit
             existing.lastSelectedQuantity = 1
+            if addToMyFoods { existing.isInMyFoods = true }
         } else {
             let cached = CachedFood(
                 externalId: externalId,
@@ -499,8 +506,9 @@ struct FoodPhotoSheet: View {
                 carbsPerServing: carbs,
                 fatPerServing: fat,
                 source: .photo,
+                isInMyFoods: addToMyFoods,
                 lastUsed: .now,
-                useCount: 1,
+                useCount: addToMyFoods ? 0 : 1,
                 notes: notes
             )
             modelContext.insert(cached)
@@ -510,7 +518,7 @@ struct FoodPhotoSheet: View {
 
     private func trimRecents(limit: Int) {
         let descriptor = FetchDescriptor<CachedFood>(
-            predicate: #Predicate<CachedFood> { $0.isFavorite == false },
+            predicate: #Predicate<CachedFood> { $0.isFavorite == false && $0.isInMyFoods == false },
             sortBy: [SortDescriptor(\.lastUsed, order: .reverse)]
         )
         guard let recentNonFavorites = try? modelContext.fetch(descriptor),

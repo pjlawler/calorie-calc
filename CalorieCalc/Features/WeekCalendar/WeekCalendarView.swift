@@ -436,7 +436,7 @@ private struct FavoriteQuickAddListSheet: View {
     }
 }
 
-private extension MealType {
+extension MealType {
     static func quickAddDefaultForCurrentTime(date: Date = .now, calendar: Calendar = .current) -> MealType {
         let hour = calendar.component(.hour, from: date)
         switch hour {

@@ -8,14 +8,25 @@ struct FoodPortionSheet: View {
     let date: Date
     /// Set when the sheet is opened to edit an existing entry. `nil` on the create flow.
     let editingEntry: FoodEntry?
+    /// When `true`, the post-save upsert sets `isInMyFoods` on the cached food. Used by the
+    /// Foods tab's Add flow so anything created lands in My Foods automatically.
+    let addToMyFoods: Bool
+    /// When `true`, surfaces in-sheet meal + date pickers so the user can retarget the log
+    /// (the `mealType` / `date` params seed the "best guess"). The toolbar Cancel becomes a
+    /// Done that persists field edits without logging. Used by the My Foods tap flow.
+    let pickMealAndDate: Bool
     let onLogged: () -> Void
 
-    init(result: FoodSearchResult, mealType: MealType, date: Date, editingEntry: FoodEntry? = nil, onLogged: @escaping () -> Void) {
+    init(result: FoodSearchResult, mealType: MealType, date: Date, editingEntry: FoodEntry? = nil, addToMyFoods: Bool = false, pickMealAndDate: Bool = false, onLogged: @escaping () -> Void) {
         self.result = result
         self.mealType = mealType
         self.date = date
         self.editingEntry = editingEntry
+        self.addToMyFoods = addToMyFoods
+        self.pickMealAndDate = pickMealAndDate
         self.onLogged = onLogged
+        _selectedMealType = State(initialValue: mealType)
+        _selectedDate = State(initialValue: date)
     }
 
     /// Convenience for opening the sheet on an existing `FoodEntry` — reconstructs a
@@ -26,6 +37,7 @@ struct FoodPortionSheet: View {
             mealType: entry.mealType,
             date: entry.timestamp,
             editingEntry: entry,
+            addToMyFoods: false,
             onLogged: onCompleted
         )
     }
@@ -42,6 +54,8 @@ struct FoodPortionSheet: View {
     @State private var notesText: String = ""
     @State private var nameText: String = ""
     @State private var brandText: String = ""
+    @State private var selectedMealType: MealType
+    @State private var selectedDate: Date
 
     private var trimmedName: String { nameText.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedBrand: String? {
@@ -79,6 +93,51 @@ struct FoodPortionSheet: View {
     }
 
     private var isFavorite: Bool { cachedFood?.isFavorite ?? false }
+    private var isInMyFoods: Bool { cachedFood?.isInMyFoods ?? false }
+
+    private func toggleMyFoods() {
+        if let existing = cachedFood {
+            existing.isInMyFoods.toggle()
+            existing.name = effectiveName
+            existing.brand = trimmedBrand
+            if !existing.isInMyFoods && !existing.isFavorite && existing.useCount == 0 {
+                modelContext.delete(existing)
+            }
+        } else {
+            let trimmedNotes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let cached = CachedFood(
+                externalId: result.id,
+                name: effectiveName,
+                brand: trimmedBrand,
+                nativeUnit: result.nativeUnit,
+                nativeUnitGrams: result.nativeUnitGrams,
+                nativeUnitMilliliters: result.nativeUnitMilliliters,
+                lastSelectedUnit: nil,
+                lastSelectedQuantity: nil,
+                caloriesPerServing: result.caloriesPerServing,
+                proteinPerServing: result.proteinPerServing,
+                carbsPerServing: result.carbsPerServing,
+                fatPerServing: result.fatPerServing,
+                saturatedFatPerServing: result.saturatedFatPerServing,
+                transFatPerServing: result.transFatPerServing,
+                monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,
+                polyunsaturatedFatPerServing: result.polyunsaturatedFatPerServing,
+                cholesterolPerServing: result.cholesterolPerServing,
+                sodiumPerServing: result.sodiumPerServing,
+                fiberPerServing: result.fiberPerServing,
+                sugarsPerServing: result.sugarsPerServing,
+                addedSugarsPerServing: result.addedSugarsPerServing,
+                source: result.source,
+                isFavorite: false,
+                isInMyFoods: true,
+                lastUsed: .now,
+                useCount: 0,
+                notes: trimmedNotes.isEmpty ? nil : trimmedNotes
+            )
+            modelContext.insert(cached)
+        }
+        try? modelContext.save()
+    }
 
     private func toggleFavorite() {
         if let existing = cachedFood {
@@ -89,7 +148,7 @@ struct FoodPortionSheet: View {
                 existing.favoriteSelectedUnit = selectedUnit
                 existing.favoriteSelectedQuantity = amount
             }
-            if !existing.isFavorite && existing.useCount == 0 {
+            if !existing.isFavorite && !existing.isInMyFoods && existing.useCount == 0 {
                 modelContext.delete(existing)
             }
         } else {
@@ -194,7 +253,30 @@ struct FoodPortionSheet: View {
                         .lineLimit(2...6)
                 }
 
+                if pickMealAndDate {
+                    Section("Add to") {
+                        Picker("Meal", selection: $selectedMealType) {
+                            ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
+                                Text(meal.displayName).tag(meal)
+                            }
+                        }
+                        DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
+                    }
+                }
+
                 Section {
+                    if !addToMyFoods {
+                        Button { toggleMyFoods() } label: {
+                            Label(
+                                isInMyFoods ? "Saved to My Foods" : "Save to My Foods",
+                                systemImage: isInMyFoods ? "checkmark" : "plus"
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                    }
+
                     Button { save() } label: {
                         Text(saveButtonLabel)
                             .fontWeight(.semibold)
@@ -205,11 +287,15 @@ struct FoodPortionSheet: View {
                     .disabled(!isValid)
                 }
             }
-            .navigationTitle(editingEntry == nil ? "Add Food" : "Edit Entry")
+            .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
+                    if pickMealAndDate {
+                        Button("Done") { saveEditsAndDismiss() }
+                    } else {
+                        Button("Cancel") { dismiss() }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { toggleFavorite() } label: {
@@ -224,7 +310,17 @@ struct FoodPortionSheet: View {
     }
 
     private var saveButtonLabel: String {
-        editingEntry == nil ? "Add to \(mealType.displayName)" : "Save"
+        if editingEntry != nil { return "Save" }
+        if addToMyFoods { return "Save to My Foods" }
+        if pickMealAndDate { return "Log Food Item" }
+        return "Add to \(selectedMealType.displayName)"
+    }
+
+    private var navigationTitle: String {
+        if addToMyFoods { return "New Food" }
+        if editingEntry != nil { return "Edit Entry" }
+        if pickMealAndDate { return "Log Food Item" }
+        return "Add Food"
     }
 
     private func configureInitialState() {
@@ -301,8 +397,14 @@ struct FoodPortionSheet: View {
             entry.notes = storedNotes
             updateCachedSticky(unit: selectedUnit, quantity: amount, notes: storedNotes)
             try? modelContext.save()
+        } else if addToMyFoods {
+            // My Foods creation flow — only persist the cached food, no day-log entry.
+            upsertCached(name: effectiveName, brand: trimmedBrand, notes: storedNotes)
+            try? modelContext.save()
         } else {
-            let log = ensureDayLog(for: date)
+            let logDay = pickMealAndDate ? normalizedSelectedDay(from: selectedDate) : date
+            let log = ensureDayLog(for: logDay)
+            let timestamp = pickMealAndDate ? defaultTimestamp(for: logDay) : Date()
             let entry = FoodEntry(
                 name: effectiveName,
                 brand: trimmedBrand,
@@ -324,11 +426,11 @@ struct FoodPortionSheet: View {
                 fiberPerServing: result.fiberPerServing,
                 sugarsPerServing: result.sugarsPerServing,
                 addedSugarsPerServing: result.addedSugarsPerServing,
-                mealType: mealType,
+                mealType: selectedMealType,
                 source: result.source,
                 externalId: result.id,
                 notes: storedNotes,
-                timestamp: Date(),
+                timestamp: timestamp,
                 dayLog: log
             )
             modelContext.insert(entry)
@@ -337,6 +439,40 @@ struct FoodPortionSheet: View {
         }
         dismiss()
         onLogged()
+    }
+
+    /// Tap-from-My-Foods Done: persist field edits to the cached food without creating a
+    /// log entry. Falls back to plain dismiss if no cached row exists (shouldn't happen on
+    /// the My Foods flow, but keeps the bypass safe).
+    private func saveEditsAndDismiss() {
+        let trimmedNotes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedNotes: String? = trimmedNotes.isEmpty ? nil : trimmedNotes
+        if let cached = cachedFood {
+            cached.name = effectiveName
+            cached.brand = trimmedBrand
+            cached.notes = storedNotes
+            cached.lastSelectedUnit = selectedUnit
+            cached.lastSelectedQuantity = amount
+            try? modelContext.save()
+        }
+        dismiss()
+    }
+
+    private func defaultTimestamp(for day: Date) -> Date {
+        if Calendar.current.isDateInToday(day) {
+            return .now
+        }
+        return Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: day) ?? day
+    }
+
+    private func normalizedSelectedDay(from pickerDate: Date) -> Date {
+        // DatePicker(.date) may round-trip through GMT and shift a day for some locales.
+        // Read Y/M/D in UTC, then rebuild in local calendar to preserve the user's chosen date.
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let components = utc.dateComponents([.year, .month, .day], from: pickerDate)
+        let localDate = Calendar.current.date(from: components) ?? pickerDate
+        return Calendar.current.startOfDay(for: localDate)
     }
 
     private func propagateNotesToCache(_ notes: String?) {
@@ -365,12 +501,13 @@ struct FoodPortionSheet: View {
         let id = result.id
         if let existing = cachedFoods.first(where: { $0.externalId == id }) {
             existing.lastUsed = .now
-            existing.useCount += 1
+            if !addToMyFoods { existing.useCount += 1 }
             existing.notes = notes
             existing.name = name
             existing.brand = brand
             existing.lastSelectedUnit = selectedUnit
             existing.lastSelectedQuantity = amount
+            if addToMyFoods { existing.isInMyFoods = true }
         } else {
             let cached = CachedFood(
                 externalId: id,
@@ -395,8 +532,9 @@ struct FoodPortionSheet: View {
                 sugarsPerServing: result.sugarsPerServing,
                 addedSugarsPerServing: result.addedSugarsPerServing,
                 source: result.source,
+                isInMyFoods: addToMyFoods,
                 lastUsed: .now,
-                useCount: 1,
+                useCount: addToMyFoods ? 0 : 1,
                 notes: notes
             )
             modelContext.insert(cached)
@@ -406,7 +544,7 @@ struct FoodPortionSheet: View {
 
     private func trimRecents(limit: Int) {
         let descriptor = FetchDescriptor<CachedFood>(
-            predicate: #Predicate<CachedFood> { $0.isFavorite == false },
+            predicate: #Predicate<CachedFood> { $0.isFavorite == false && $0.isInMyFoods == false },
             sortBy: [SortDescriptor(\.lastUsed, order: .reverse)]
         )
         guard let recentNonFavorites = try? modelContext.fetch(descriptor),

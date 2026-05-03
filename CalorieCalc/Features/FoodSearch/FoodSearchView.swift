@@ -26,6 +26,7 @@ struct FoodSearchView: View {
         case search = "Search"
         case recents = "Recents"
         case favorites = "Favorites"
+        case myFoods = "My Foods"
     }
 
     var body: some View {
@@ -86,6 +87,7 @@ struct FoodSearchView: View {
         case .search: searchTab
         case .recents: recentsTab
         case .favorites: favoritesTab
+        case .myFoods: myFoodsTab
         }
     }
 
@@ -215,6 +217,29 @@ struct FoodSearchView: View {
         }
     }
 
+    /// User-curated catalog. Persists regardless of recency, sorted alphabetically like
+    /// favorites. Lives alongside (not subset of) favorites — items can be in both, neither,
+    /// or one.
+    private var myFoodsTab: some View {
+        List {
+            ForEach(myFoods, id: \.id) { cached in
+                cachedRow(cached)
+            }
+        }
+    }
+
+    private var myFoods: [CachedFood] {
+        cachedFoods
+            .filter { $0.isInMyFoods }
+            .sorted { lhs, rhs in
+                let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+                if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+                let lb = lhs.brand ?? ""
+                let rb = rhs.brand ?? ""
+                return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
+            }
+    }
+
     /// Favorites sort alphabetically by name (case- and diacritic-insensitive). Brand is used
     /// as the tie-breaker so two "Chocolate" items from different brands stay grouped sensibly.
     private var favoriteFoods: [CachedFood] {
@@ -235,7 +260,7 @@ struct FoodSearchView: View {
         } label: {
             CachedFoodRow(cached: cached) {
                 cached.isFavorite.toggle()
-                if !cached.isFavorite && cached.useCount == 0 {
+                if !cached.isFavorite && !cached.isInMyFoods && cached.useCount == 0 {
                     modelContext.delete(cached)
                 }
                 try? modelContext.save()
@@ -255,8 +280,9 @@ struct FoodSearchView: View {
     private func deleteRecentFoods(at offsets: IndexSet) {
         for index in offsets {
             let cached = recentFoods[index]
-            if cached.isFavorite {
-                // Keep favorites available in the Favorites tab while removing from Recents.
+            if cached.isFavorite || cached.isInMyFoods {
+                // Keep persistent items (favorites + My Foods) accessible in their tabs while
+                // removing them from Recents.
                 cached.useCount = 0
             } else {
                 modelContext.delete(cached)
@@ -309,7 +335,7 @@ private struct FoodResultRow: View {
     }
 }
 
-private struct CachedFoodRow: View {
+struct CachedFoodRow: View {
     let cached: CachedFood
     let onToggleFavorite: () -> Void
 

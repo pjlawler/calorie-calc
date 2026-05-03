@@ -28,6 +28,9 @@ struct RootView: View {
             Tab(AppTab.history.displayName, systemImage: AppTab.history.systemImage, value: AppTab.history) {
                 HistoryView()
             }
+            Tab(AppTab.foods.displayName, systemImage: AppTab.foods.systemImage, value: AppTab.foods) {
+                FoodsView()
+            }
             Tab(AppTab.info.displayName, systemImage: AppTab.info.systemImage, value: AppTab.info) {
                 InfoView()
             }

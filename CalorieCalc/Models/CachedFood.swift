@@ -41,6 +41,10 @@ final class CachedFood {
 
     var source: FoodSource = FoodSource.manual
     var isFavorite: Bool = false
+    /// When `true`, surface in the "My Foods" tab and protect from recents-trim. A curated
+    /// catalog the user maintains explicitly — distinct from the auto-tracked Recents list and
+    /// the highlight-style Favorites list.
+    var isInMyFoods: Bool = false
     var lastUsed: Date = Date()
     var useCount: Int = 0
     var notes: String?
@@ -92,6 +96,7 @@ final class CachedFood {
         addedSugarsPerServing: Double? = nil,
         source: FoodSource,
         isFavorite: Bool = false,
+        isInMyFoods: Bool = false,
         lastUsed: Date = .now,
         useCount: Int = 0,
         notes: String? = nil,
@@ -122,6 +127,7 @@ final class CachedFood {
         self.addedSugarsPerServing = addedSugarsPerServing
         self.source = source
         self.isFavorite = isFavorite
+        self.isInMyFoods = isInMyFoods
         self.lastUsed = lastUsed
         self.useCount = useCount
         self.notes = notes
