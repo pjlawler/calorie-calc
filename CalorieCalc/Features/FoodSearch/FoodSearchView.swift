@@ -43,7 +43,7 @@ struct FoodSearchView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
+                    Button("Done") { dismiss() }
                 }
             }
             .task {
@@ -52,9 +52,7 @@ struct FoodSearchView: View {
                 }
             }
             .sheet(item: $portionTarget) { target in
-                FoodPortionSheet(result: target, mealType: mealType, date: date) {
-                    dismiss()
-                }
+                FoodPortionSheet(result: target, mealType: mealType, date: date) { }
             }
             .sheet(isPresented: $showScanner) {
                 BarcodeScannerView { code in
@@ -69,13 +67,10 @@ struct FoodSearchView: View {
                     scannedBarcode: quickAddBarcode
                 ) {
                     showQuickAdd = false
-                    dismiss()
                 }
             }
             .sheet(isPresented: $showPhotoAnalyzer) {
-                FoodPhotoSheet(mealType: mealType, date: date) {
-                    dismiss()
-                }
+                FoodPhotoSheet(mealType: mealType, date: date) { }
             }
             .sheet(isPresented: $showDescribe) {
                 FoodDescribeSheet { result in

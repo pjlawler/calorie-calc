@@ -51,6 +51,8 @@ nonisolated enum HistoryTimeframe: String, CaseIterable, Identifiable, Hashable 
     case lastWeek
     case rolling7
     case month
+    case days90
+    case days180
     case year
     case custom
 
@@ -63,6 +65,8 @@ nonisolated enum HistoryTimeframe: String, CaseIterable, Identifiable, Hashable 
         case .lastWeek: "Last Week"
         case .rolling7: "Last 7 Days"
         case .month: "Month"
+        case .days90: "90 Days"
+        case .days180: "180 Days"
         case .year: "Year"
         case .custom: "Custom"
         }
@@ -151,6 +155,12 @@ enum HistoryAggregator {
             return (start, today)
         case .month:
             let start = calendar.date(byAdding: .day, value: -29, to: today) ?? today
+            return (start, today)
+        case .days90:
+            let start = calendar.date(byAdding: .day, value: -89, to: today) ?? today
+            return (start, today)
+        case .days180:
+            let start = calendar.date(byAdding: .day, value: -179, to: today) ?? today
             return (start, today)
         case .year:
             let currentMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: today)) ?? today

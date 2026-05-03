@@ -198,7 +198,7 @@ struct HistoryView: View {
         let cards = cardsFor(metric: metric, summary: summary)
 
         VStack(alignment: .leading, spacing: 8) {
-            Text(metric.displayName)
+            Text(metric == .steps ? metric.displayName : "\(metric.displayName) (\(metric.unit))")
                 .font(.subheadline.weight(.semibold))
             if cards.count > 2 {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -229,21 +229,35 @@ struct HistoryView: View {
             ]
         case .currentWeek, .lastWeek, .rolling7, .custom:
             return [
-                SummaryCard(id: "total", title: totalTitleForShortRange, value: summary.total, unit: unit),
-                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit)
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                SummaryCard(id: "total", title: totalTitleForShortRange, value: summary.total, unit: unit)
             ]
         case .month:
             return [
-                SummaryCard(id: "month-total", title: "Month Total", value: summary.total, unit: unit),
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
                 SummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
-                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit)
+                SummaryCard(id: "month-total", title: "Month Total", value: summary.total, unit: unit)
+            ]
+        case .days90:
+            return [
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                SummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                SummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                SummaryCard(id: "range-total", title: "90-Day Total", value: summary.total, unit: unit)
+            ]
+        case .days180:
+            return [
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                SummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                SummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                SummaryCard(id: "range-total", title: "180-Day Total", value: summary.total, unit: unit)
             ]
         case .year:
             return [
-                SummaryCard(id: "year-total", title: "Year Total", value: summary.total, unit: unit),
-                SummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
                 SummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
-                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit)
+                SummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                SummaryCard(id: "year-total", title: "Year Total", value: summary.total, unit: unit)
             ]
         }
     }
@@ -262,15 +276,10 @@ struct HistoryView: View {
             Text(card.title.uppercased())
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(formatted(card.value, metric: metric))
-                    .font(.title3.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(metric.color)
-                Text(card.unit)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+            Text(formatted(card.value, metric: metric))
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(metric.color)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)

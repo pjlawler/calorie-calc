@@ -55,7 +55,7 @@ struct QuickAddForm: View {
     private let unitOptions: [String] = [
         "g", "oz", "lb", "kg",
         "ml", "fl oz", "cup", "tbsp", "tsp", "l",
-        "ea", "bar", "slice", "piece", "bowl",
+        "ea", "bar", "slice", "piece", "bowl", "package", "batch",
     ]
 
     private var calories: Double? { Double(caloriesText) }

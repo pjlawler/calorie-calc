@@ -289,6 +289,16 @@ private struct FavoriteQuickAddListSheet: View {
     @State private var selectedMeal: MealType = MealType.quickAddDefaultForCurrentTime()
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: .now)
 
+    private var sortedFavorites: [CachedFood] {
+        favorites.sorted { lhs, rhs in
+            let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+            let lb = lhs.brand ?? ""
+            let rb = rhs.brand ?? ""
+            return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
+        }
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -302,11 +312,11 @@ private struct FavoriteQuickAddListSheet: View {
                 }
 
                 Section("Favorites") {
-                    if favorites.isEmpty {
+                    if sortedFavorites.isEmpty {
                         Text("No favorites yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(favorites, id: \.id) { favorite in
+                        ForEach(sortedFavorites, id: \.id) { favorite in
                             Button {
                                 addFavoriteToLog(favorite)
                                 dismiss()
