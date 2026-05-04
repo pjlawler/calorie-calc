@@ -12,12 +12,16 @@ struct DayDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(HealthKitService.self) private var healthKitService
     @Query private var allDayLogs: [DayLog]
+    @Query private var profiles: [UserProfile]
 
     @State private var viewModel: DayDetailViewModel?
     @State private var presentedMealSearch: MealType?
     @State private var editingEntry: FoodEntry?
     @State private var showManualWorkout = false
+    @State private var showSupplementPicker = false
     @AppStorage("settings.showSteps") private var showSteps: Bool = true
+
+    private var tracksSupplements: Bool { profiles.first?.tracksSupplements ?? false }
 
     private var dayLog: DayLog? {
         DayLog.preferredForDay(allDayLogs, on: date)
@@ -37,6 +41,13 @@ struct DayDetailView: View {
             }
             List {
                 mealsSections(log: dayLog)
+                if tracksSupplements {
+                    SupplementSectionView(
+                        entries: (dayLog?.supplementEntries ?? []).sorted { $0.timestamp < $1.timestamp },
+                        onAdd: { showSupplementPicker = true },
+                        onDelete: { entry in delete(supplement: entry) }
+                    )
+                }
                 workoutsSection(log: dayLog)
                 if showSteps {
                     stepsSection
@@ -53,6 +64,9 @@ struct DayDetailView: View {
         }
         .sheet(isPresented: $showManualWorkout) {
             ManualWorkoutSheet(date: date)
+        }
+        .sheet(isPresented: $showSupplementPicker) {
+            SupplementPickerSheet(date: date) { }
         }
         .task {
             if viewModel == nil {
@@ -215,6 +229,11 @@ struct DayDetailView: View {
 
     private func delete(workout: ManualWorkout) {
         modelContext.delete(workout)
+        try? modelContext.save()
+    }
+
+    private func delete(supplement: SupplementEntry) {
+        modelContext.delete(supplement)
         try? modelContext.save()
     }
 }

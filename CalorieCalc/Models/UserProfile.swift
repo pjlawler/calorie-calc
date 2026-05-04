@@ -18,6 +18,11 @@ final class UserProfile {
     var weightUnit: WeightUnit = WeightUnit.pounds
     var energyUnit: EnergyUnit = EnergyUnit.kilocalories
 
+    /// When `true`, the daily-log view surfaces a Supplements section between Snacks and
+    /// Workouts and the picker sheet is reachable. Default off — opt-in for users who track
+    /// vitamins/supplements separately from food.
+    var tracksSupplements: Bool = false
+
     var startingWeight: Double?
     var startingWeightLoggedAt: Date?
     var goalWeight: Double?

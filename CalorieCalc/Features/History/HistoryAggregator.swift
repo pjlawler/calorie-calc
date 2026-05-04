@@ -80,6 +80,22 @@ nonisolated struct HistorySummary: Hashable {
     let monthAvg: Double
 }
 
+/// One per-supplement breakdown for the History view. Grouped by case-insensitive
+/// (name, unit) — different units of the "same" supplement become separate rows since
+/// we don't have cross-unit conversion (mg ↔ IU, etc.).
+nonisolated struct SupplementHistorySummary: Hashable, Identifiable {
+    /// Display name preserved from the most-recent entry in the group (so casing follows
+    /// what the user last typed).
+    let name: String
+    let unit: String
+    let total: Double
+    let dayAvg: Double
+    let weekAvg: Double
+    let monthAvg: Double
+
+    var id: String { "\(name.lowercased())|\(unit.lowercased())" }
+}
+
 @MainActor
 enum HistoryAggregator {
 
@@ -238,6 +254,79 @@ enum HistoryAggregator {
             weekAvg: dayAvg * 7,
             monthAvg: dayAvg * 30
         )
+    }
+
+    /// Per-supplement totals + averages over the inclusive `[start, end]` range. Groups by
+    /// case-insensitive (name, unit). `dayAvg` divides the in-window dose sum by the FULL
+    /// number of days in the averaging window (not just days the supplement was taken) —
+    /// supplements are commonly intermittent, so "average daily intake across the period" is
+    /// the meaningful metric. (Food metrics intentionally divide by tracked-days only because
+    /// food is logged daily; using the same denominator for supplements would inflate a 1×
+    /// per-period dose into an apparent everyday habit.) `averageEnd` clamps the averaging
+    /// window (e.g. the current week excludes today).
+    static func supplementSummaries(
+        entries: [SupplementEntry],
+        start: Date,
+        end: Date,
+        averageEnd: Date? = nil,
+        calendar: Calendar = .current
+    ) -> [SupplementHistorySummary] {
+        let startDay = calendar.startOfDay(for: start)
+        let endDay = calendar.startOfDay(for: end)
+        let avgEndDay = averageEnd.map { min(endDay, calendar.startOfDay(for: $0)) } ?? endDay
+
+        let avgWindowDays: Int
+        if avgEndDay >= startDay {
+            let diff = calendar.dateComponents([.day], from: startDay, to: avgEndDay).day ?? 0
+            avgWindowDays = max(0, diff + 1)
+        } else {
+            avgWindowDays = 0
+        }
+
+        struct Bucket {
+            var displayName: String
+            var unit: String
+            var latestTimestamp: Date
+            var total: Double = 0
+            var avgSum: Double = 0
+        }
+        var buckets: [String: Bucket] = [:]
+
+        for entry in entries {
+            let day = calendar.startOfDay(for: entry.timestamp)
+            guard day >= startDay, day <= endDay else { continue }
+            let key = "\(entry.name.lowercased())|\(entry.doseUnit.lowercased())"
+            var bucket = buckets[key] ?? Bucket(
+                displayName: entry.name,
+                unit: entry.doseUnit,
+                latestTimestamp: entry.timestamp
+            )
+            bucket.total += entry.dose
+            if day <= avgEndDay {
+                bucket.avgSum += entry.dose
+            }
+            // Latest entry wins display casing — feels right when the user re-types a name.
+            if entry.timestamp > bucket.latestTimestamp {
+                bucket.displayName = entry.name
+                bucket.unit = entry.doseUnit
+                bucket.latestTimestamp = entry.timestamp
+            }
+            buckets[key] = bucket
+        }
+
+        return buckets.values
+            .map { bucket in
+                let dayAvg = avgWindowDays > 0 ? bucket.avgSum / Double(avgWindowDays) : 0
+                return SupplementHistorySummary(
+                    name: bucket.displayName,
+                    unit: bucket.unit,
+                    total: bucket.total,
+                    dayAvg: dayAvg,
+                    weekAvg: dayAvg * 7,
+                    monthAvg: dayAvg * 30
+                )
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     /// Whether `totals` should count toward this metric's average. See `summary` for the rules.

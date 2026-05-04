@@ -7,6 +7,7 @@ struct HistoryView: View {
     @Query(sort: \DayLog.date) private var dayLogs: [DayLog]
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
     @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
+    @Query(sort: \SupplementEntry.timestamp) private var supplementEntries: [SupplementEntry]
 
     @AppStorage("history.timeframe") private var timeframe: HistoryTimeframe = .currentWeek
     @AppStorage("settings.showSteps") private var showSteps: Bool = true
@@ -20,6 +21,7 @@ struct HistoryView: View {
 
     private var weekStart: Weekday { profiles.first?.weekStart ?? .monday }
     private var currentGoalPeriod: GoalPeriod? { GoalPeriod.current(in: goalPeriods) }
+    private var tracksSupplements: Bool { profiles.first?.tracksSupplements ?? false }
 
     private var customStart: Date { Date(timeIntervalSinceReferenceDate: customStartTS) }
     private var customEnd: Date { Date(timeIntervalSinceReferenceDate: customEndTS) }
@@ -60,6 +62,15 @@ struct HistoryView: View {
         )
     }
 
+    private var supplementSummaries: [SupplementHistorySummary] {
+        HistoryAggregator.supplementSummaries(
+            entries: supplementEntries,
+            start: range.start,
+            end: range.end,
+            averageEnd: averageEnd
+        )
+    }
+
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
@@ -72,6 +83,9 @@ struct HistoryView: View {
                     }
                     ForEach(visibleMetrics) { metric in
                         metricSection(metric)
+                    }
+                    if tracksSupplements && !supplementSummaries.isEmpty {
+                        supplementsSection
                     }
                     analyzeButton
                         .padding(.top, 8)
@@ -269,6 +283,111 @@ struct HistoryView: View {
                 SummaryCard(id: "year-total", title: "Year Total", value: summary.total, unit: unit)
             ]
         }
+    }
+
+    // MARK: - Supplements section
+
+    private var supplementsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Supplements")
+                .font(.headline)
+            ForEach(supplementSummaries) { summary in
+                supplementRow(summary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func supplementRow(_ summary: SupplementHistorySummary) -> some View {
+        let cards = supplementCards(for: summary)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(summary.name) (\(summary.unit))")
+                .font(.subheadline.weight(.semibold))
+            if cards.count > 2 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(cards) { card in
+                            supplementTile(card)
+                                .frame(width: 140)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 12) {
+                    ForEach(cards) { card in
+                        supplementTile(card)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Mirrors `cardsFor(metric:summary:)` so supplements render the same tile layout per
+    /// timeframe — Day Total / Day+Total / Day+Week+Month+Range Total / etc.
+    private func supplementCards(for summary: SupplementHistorySummary) -> [SummaryCard] {
+        let unit = summary.unit
+        switch timeframe {
+        case .day:
+            return [SummaryCard(id: "day-total", title: "Day Total", value: summary.total, unit: unit)]
+        case .currentWeek, .lastWeek, .rolling7, .custom:
+            return [
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                SummaryCard(id: "total", title: totalTitleForShortRange, value: summary.total, unit: unit),
+            ]
+        case .month:
+            return [
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                SummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                SummaryCard(id: "month-total", title: "Month Total", value: summary.total, unit: unit),
+            ]
+        case .days90:
+            return [
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                SummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                SummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                SummaryCard(id: "range-total", title: "90-Day Total", value: summary.total, unit: unit),
+            ]
+        case .days180:
+            return [
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                SummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                SummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                SummaryCard(id: "range-total", title: "180-Day Total", value: summary.total, unit: unit),
+            ]
+        case .year:
+            return [
+                SummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                SummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                SummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                SummaryCard(id: "year-total", title: "Year Total", value: summary.total, unit: unit),
+            ]
+        }
+    }
+
+    private func supplementTile(_ card: SummaryCard) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(card.title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(formatSupplementValue(card.value))
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.purple)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.regularMaterial)
+        )
+    }
+
+    private func formatSupplementValue(_ value: Double) -> String {
+        if value.truncatingRemainder(dividingBy: 1) == 0 {
+            return Int(value).formatted(.number)
+        }
+        return value.formatted(.number.precision(.fractionLength(0...2)))
     }
 
     private var totalTitleForShortRange: String {

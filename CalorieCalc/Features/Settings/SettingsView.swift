@@ -503,6 +503,12 @@ private struct SettingsForm: View {
                 Toggle("Show step count", isOn: $showSteps)
             }
 
+            Section {
+                Toggle("Track supplements & vitamins", isOn: $profile.tracksSupplements)
+            } footer: {
+                Text("Adds a Supplements section to the daily log between Snacks and Workouts. Doesn't affect calorie or macro totals.")
+            }
+
             #if DEBUG
             Section {
                 Button {

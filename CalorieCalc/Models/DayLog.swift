@@ -12,6 +12,9 @@ final class DayLog {
     @Relationship(deleteRule: .cascade, inverse: \ManualWorkout.dayLog)
     var manualWorkouts: [ManualWorkout] = []
 
+    @Relationship(deleteRule: .cascade, inverse: \SupplementEntry.dayLog)
+    var supplementEntries: [SupplementEntry] = []
+
     init(id: UUID = UUID(), date: Date) {
         self.id = id
         self.date = Calendar.current.startOfDay(for: date)
