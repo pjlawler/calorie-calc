@@ -54,8 +54,8 @@ struct WeekAssembler {
             // "Has data" = the user actually logged food or a workout, or HealthKit reports a burn.
             // An empty DayLog (e.g. created by visiting the day detail but not logging) counts as no data.
             let hasAnyData =
-                (log?.foodEntries.isEmpty == false)
-                || (log?.manualWorkouts.isEmpty == false)
+                (log?.foodEntriesList.isEmpty == false)
+                || (log?.manualWorkoutsList.isEmpty == false)
                 || hkBurn > 0
 
             return DayInput(

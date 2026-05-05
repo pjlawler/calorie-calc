@@ -22,10 +22,13 @@ struct FoodSearchView: View {
     @State private var quickAddBarcode: String?
     @State private var portionTarget: FoodSearchResult?
 
+    /// Shared with the Foods tab via the same `@AppStorage` key — toggling in one place is
+    /// reflected in the other so the user's "show only favorites" preference is global.
+    @AppStorage("foodsView.showFavoritesOnly") private var showFavoritesOnly: Bool = false
+
     enum Tab: String, CaseIterable, Hashable {
         case search = "Search"
         case recents = "Recents"
-        case favorites = "Favorites"
         case myFoods = "My Foods"
     }
 
@@ -45,6 +48,17 @@ struct FoodSearchView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") { dismiss() }
+                }
+                if tab == .recents || tab == .myFoods {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            showFavoritesOnly.toggle()
+                        } label: {
+                            Image(systemName: showFavoritesOnly ? "star.fill" : "star")
+                                .foregroundStyle(showFavoritesOnly ? Color.yellow : Color.accentColor)
+                        }
+                        .accessibilityLabel(showFavoritesOnly ? "Show all" : "Show only favorites")
+                    }
                 }
             }
             .task {
@@ -86,7 +100,6 @@ struct FoodSearchView: View {
         switch tab {
         case .search: searchTab
         case .recents: recentsTab
-        case .favorites: favoritesTab
         case .myFoods: myFoodsTab
         }
     }
@@ -209,49 +222,21 @@ struct FoodSearchView: View {
         }
     }
 
-    private var favoritesTab: some View {
-        List {
-            ForEach(favoriteFoods, id: \.id) { cached in
-                cachedRow(cached, forFavorites: true)
-            }
-        }
-    }
-
-    /// User-curated catalog. Persists regardless of recency, sorted alphabetically like
-    /// favorites. Lives alongside (not subset of) favorites — items can be in both, neither,
-    /// or one.
+    /// Unified My Foods catalog. Favorites sort first, then alphabetical. The star icon on each
+    /// row toggles `isFavorite`; a row in this list always has `isInMyFoods == true` already, so
+    /// starring/unstarring just adjusts the highlight + sort position.
     private var myFoodsTab: some View {
         List {
             ForEach(myFoods, id: \.id) { cached in
-                cachedRow(cached)
+                cachedRow(cached, forFavorites: cached.isFavorite)
             }
         }
     }
 
     private var myFoods: [CachedFood] {
         cachedFoods
-            .filter { $0.isInMyFoods }
-            .sorted { lhs, rhs in
-                let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-                if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
-                let lb = lhs.brand ?? ""
-                let rb = rhs.brand ?? ""
-                return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
-            }
-    }
-
-    /// Favorites sort alphabetically by name (case- and diacritic-insensitive). Brand is used
-    /// as the tie-breaker so two "Chocolate" items from different brands stay grouped sensibly.
-    private var favoriteFoods: [CachedFood] {
-        cachedFoods
-            .filter { $0.isFavorite }
-            .sorted { lhs, rhs in
-                let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-                if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
-                let lb = lhs.brand ?? ""
-                let rb = rhs.brand ?? ""
-                return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
-            }
+            .filter { $0.isInMyFoods && (!showFavoritesOnly || $0.isFavorite) }
+            .sorted(by: CachedFood.myFoodsSort)
     }
 
     private func cachedRow(_ cached: CachedFood, forFavorites: Bool = false) -> some View {
@@ -259,11 +244,7 @@ struct FoodSearchView: View {
             portionTarget = cached.toSearchResult(forFavorites: forFavorites)
         } label: {
             CachedFoodRow(cached: cached) {
-                cached.isFavorite.toggle()
-                if !cached.isFavorite && !cached.isInMyFoods && cached.useCount == 0 {
-                    modelContext.delete(cached)
-                }
-                try? modelContext.save()
+                CachedFood.toggleFavorite(cached, in: modelContext)
             }
         }
         .buttonStyle(.plain)
@@ -271,7 +252,7 @@ struct FoodSearchView: View {
 
     private var recentFoods: [CachedFood] {
         cachedFoods
-            .filter { $0.useCount > 0 }
+            .filter { $0.useCount > 0 && (!showFavoritesOnly || $0.isFavorite) }
             .sorted(by: { $0.lastUsed > $1.lastUsed })
             .prefix(100)
             .map { $0 }

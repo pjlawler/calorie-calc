@@ -144,16 +144,19 @@ struct FoodPortionSheet: View {
             existing.isFavorite.toggle()
             existing.name = effectiveName
             existing.brand = trimmedBrand
-            if existing.isFavorite && existing.favoriteSelectedUnit == nil {
-                existing.favoriteSelectedUnit = selectedUnit
-                existing.favoriteSelectedQuantity = amount
+            if existing.isFavorite {
+                // Favoriting auto-promotes to My Foods (the two lists are unified now).
+                existing.isInMyFoods = true
+                if existing.favoriteSelectedUnit == nil {
+                    existing.favoriteSelectedUnit = selectedUnit
+                    existing.favoriteSelectedQuantity = amount
+                }
             }
             if !existing.isFavorite && !existing.isInMyFoods && existing.useCount == 0 {
                 modelContext.delete(existing)
             }
         } else {
-            // Favorite a food the user hasn't logged yet — upsert so it appears on the Favorites
-            // tab even if they never hit Save on this sheet.
+            // Favorite a food the user hasn't logged yet — upsert so it lands directly in My Foods.
             let trimmedNotes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
             let cached = CachedFood(
                 externalId: result.id,
@@ -179,6 +182,7 @@ struct FoodPortionSheet: View {
                 addedSugarsPerServing: result.addedSugarsPerServing,
                 source: result.source,
                 isFavorite: true,
+                isInMyFoods: true,
                 lastUsed: .now,
                 useCount: 0,
                 notes: trimmedNotes.isEmpty ? nil : trimmedNotes,

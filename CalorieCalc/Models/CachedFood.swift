@@ -6,7 +6,10 @@ final class CachedFood {
     // Defaults on every non-optional property are required so SwiftData lightweight migration
     // can populate values for rows from an older store schema. Without them, opening an existing
     // store fails with NSCocoaErrorDomain 134110.
-    @Attribute(.unique) var id: UUID = UUID()
+    // No `@Attribute(.unique)` — CloudKit doesn't support unique constraints on synced entities.
+    // De-duplication in this model is by `externalId` at the lookup sites, so the unique
+    // constraint was always belt-and-suspenders.
+    var id: UUID = UUID()
 
     var externalId: String?
     var name: String = ""
@@ -70,6 +73,50 @@ final class CachedFood {
     var favoriteProteinPerServing: Double?
     var favoriteCarbsPerServing: Double?
     var favoriteFatPerServing: Double?
+
+    /// Pure alphabetical sort by name, brand as tie-breaker. Favorite state does not affect
+    /// position — the unified list reads consistently regardless of how many items are starred,
+    /// and a dedicated filter (in the Foods tab toolbar) handles "show only favorites".
+    static func myFoodsSort(_ lhs: CachedFood, _ rhs: CachedFood) -> Bool {
+        let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+        if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+        let lb = lhs.brand ?? ""
+        let rb = rhs.brand ?? ""
+        return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
+    }
+
+    /// Single source of truth for the star toggle. Favoriting auto-promotes to My Foods (so the
+    /// "favorite a recent" gesture lands the row in the user's saved catalog). The first favorite
+    /// captures a sticky preset so the row reopens with the unit + quantity at favorite-time.
+    /// Unfavoriting a transient quick-add row (no logs, not in My Foods) cleans it up — that
+    /// branch is mostly defensive now that favorite implies My Foods.
+    static func toggleFavorite(_ cached: CachedFood, in context: ModelContext) {
+        cached.isFavorite.toggle()
+        if cached.isFavorite {
+            cached.isInMyFoods = true
+            if cached.favoriteSelectedUnit == nil,
+               let unit = cached.lastSelectedUnit,
+               let qty = cached.lastSelectedQuantity {
+                cached.favoriteSelectedUnit = unit
+                cached.favoriteSelectedQuantity = qty
+            }
+        } else if !cached.isInMyFoods && cached.useCount == 0 {
+            context.delete(cached)
+        }
+        try? context.save()
+    }
+
+    /// Backfill: promote every existing `isFavorite && !isInMyFoods` row into My Foods so the
+    /// unified list catches old data. Idempotent — running it on an already-migrated store finds
+    /// zero matches and saves nothing.
+    static func promoteFavoritesToMyFoods(in context: ModelContext) {
+        let descriptor = FetchDescriptor<CachedFood>(
+            predicate: #Predicate<CachedFood> { $0.isFavorite == true && $0.isInMyFoods == false }
+        )
+        guard let foods = try? context.fetch(descriptor), !foods.isEmpty else { return }
+        for food in foods { food.isInMyFoods = true }
+        try? context.save()
+    }
 
     init(
         id: UUID = UUID(),

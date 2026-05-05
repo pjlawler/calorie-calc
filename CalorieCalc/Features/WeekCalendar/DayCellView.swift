@@ -26,8 +26,13 @@ struct DayCellView: View {
     var body: some View {
         HStack(spacing: 12) {
             dayStack
-            Spacer(minLength: 0)
+            Divider()
             consumedStack
+                .padding(.leading, 20)
+            if varianceValue != nil {
+                varianceStack
+                    .padding(.leading, 20)
+            }
             Spacer(minLength: 0)
             exerciseStack
         }
@@ -76,34 +81,51 @@ struct DayCellView: View {
                         .font(.subheadline.monospacedDigit())
                         .foregroundStyle(.secondary)
                 }
-                if let variance = varianceValue {
-                    let sign = variance >= 0 ? "+" : "−"
-                    let magnitude = abs(variance).formatted(.number)
-                    Text("(\(sign)\(magnitude))")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(variance >= 0 ? .green : .red)
-                }
             }
             macroBar
         }
     }
 
-    private var macroBar: some View {
-        let total = max(macros.protein + macros.carbs + macros.fat, 0.0001)
-        let pFrac = macros.protein / total
-        let cFrac = macros.carbs / total
-        let fFrac = macros.fat / total
-        return GeometryReader { geo in
-            HStack(spacing: 1) {
-                Rectangle().fill(.tint).frame(width: geo.size.width * pFrac)
-                Rectangle().fill(Color.orange).frame(width: geo.size.width * cFrac)
-                Rectangle().fill(Color.pink).frame(width: geo.size.width * fFrac)
-            }
-            .clipShape(Capsule())
-            .opacity(total > 0.001 ? 1 : 0.2)
+    /// Day-level variance shown only on today's cell (driven by `varianceValue` being non-nil).
+    /// Sits between the progress data and the exercise data, hugging the progress side with the
+    /// same 20pt leading gap that separates the progress data from the divider.
+    @ViewBuilder
+    private var varianceStack: some View {
+        if let variance = varianceValue {
+            let sign = variance >= 0 ? "+" : "−"
+            let magnitude = abs(variance).formatted(.number)
+            Text("\(sign)\(magnitude)")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(variance >= 0 ? .green : .red)
         }
-        .frame(height: 4)
-        .frame(maxWidth: 120)
+    }
+
+    @ViewBuilder
+    private var macroBar: some View {
+        if budget.status == .future {
+            // Solid gray placeholder for future days — keeps the row's vertical rhythm matching
+            // past/today cells without pretending to show a macro split that doesn't exist yet.
+            Capsule()
+                .fill(Color.secondary.opacity(0.25))
+                .frame(height: 4)
+                .frame(maxWidth: 120)
+        } else {
+            let total = max(macros.protein + macros.carbs + macros.fat, 0.0001)
+            let pFrac = macros.protein / total
+            let cFrac = macros.carbs / total
+            let fFrac = macros.fat / total
+            GeometryReader { geo in
+                HStack(spacing: 1) {
+                    Rectangle().fill(.tint).frame(width: geo.size.width * pFrac)
+                    Rectangle().fill(Color.orange).frame(width: geo.size.width * cFrac)
+                    Rectangle().fill(Color.pink).frame(width: geo.size.width * fFrac)
+                }
+                .clipShape(Capsule())
+                .opacity(total > 0.001 ? 1 : 0.2)
+            }
+            .frame(height: 4)
+            .frame(maxWidth: 120)
+        }
     }
 
     private var exerciseStack: some View {

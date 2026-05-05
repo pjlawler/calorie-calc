@@ -15,10 +15,20 @@ struct CalorieCalcApp: App {
         // install (no files to copy yet). Best-effort — failures don't block launch.
         BackupService.snapshotIfNeeded(maxKeep: 10)
 
-        // Two-store layout: user data (food, workouts, goals, weight) lives in the default
-        // store and will sync via CloudKit once the iCloud capability is enabled. The food
-        // cache is per-device noise — it lives in a separate local-only store so iCloud
-        // isn't bloated with data that would just be re-fetched anyway.
+        // One-shot lift of the user's My Foods / Favorites out of the legacy local-only cache
+        // store and into the synced store, so they fan out via CloudKit. Has to run BEFORE the
+        // new container opens — once the new container is created with CachedFood declared in
+        // `syncedSchema`, the cache store no longer has a schema entry for CachedFood and the
+        // data would be unreachable. See `CachedFoodStoreMigrator` for the snapshot+replay logic.
+        let stagedFoods = CachedFoodStoreMigrator.stageLegacyRowsIfNeeded()
+
+        // Three-tier layout:
+        //   • Synced store (CloudKit-backed): user data — logs, goals, weights, AND the My Foods
+        //     catalog so a fresh install on a second device rehydrates the user's saved foods.
+        //   • Cache store (local-only): per-device noise — HealthKit workouts/steps mirrored from
+        //     the on-device HK store, which is itself a per-device source of truth.
+        // CachedFood used to live in the cache store; the migrator above moves it to the synced
+        // store on first launch under this build.
         let syncedSchema = Schema([
             UserProfile.self,
             GoalPeriod.self,
@@ -27,9 +37,11 @@ struct CalorieCalcApp: App {
             ManualWorkout.self,
             SupplementEntry.self,
             WeightEntry.self,
+            CachedFood.self,
         ])
         let cacheSchema = Schema([
-            CachedFood.self,
+            CachedWorkout.self,
+            CachedDailySteps.self,
         ])
         let fullSchema = Schema([
             UserProfile.self,
@@ -40,18 +52,39 @@ struct CalorieCalcApp: App {
             SupplementEntry.self,
             WeightEntry.self,
             CachedFood.self,
+            CachedWorkout.self,
+            CachedDailySteps.self,
         ])
-        // Synced config keeps the default store URL so existing on-device data is preserved
-        // when this two-store split lands. CloudKit stays off until the capability is wired.
-        let syncedConfig = ModelConfiguration(schema: syncedSchema, isStoredInMemoryOnly: false)
-        let cacheConfig = ModelConfiguration("Cache", schema: cacheSchema, isStoredInMemoryOnly: false)
+        // `cloudKitDatabase: .automatic` opts the synced store into CloudKit. Requires the iCloud
+        // capability + a CloudKit container in the project's Signing & Capabilities (entitlements
+        // are already wired). On a device without an iCloud account, SwiftData silently falls
+        // back to a local store — no crash.
+        let syncedConfig = ModelConfiguration(
+            schema: syncedSchema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .automatic
+        )
+        // Explicit `.none` opt-out: with the iCloud entitlement active, ModelConfiguration
+        // otherwise tries to sync this store too — and CloudKit rejects the `@Attribute(.unique)`
+        // constraints on `CachedWorkout.healthKitUUID` and `CachedDailySteps.dayStart`. The HK
+        // cache is intentionally per-device anyway, so opting out is correct, not a workaround.
+        let cacheConfig = ModelConfiguration(
+            "Cache",
+            schema: cacheSchema,
+            isStoredInMemoryOnly: false,
+            cloudKitDatabase: .none
+        )
         do {
             modelContainer = try ModelContainer(for: fullSchema, configurations: syncedConfig, cacheConfig)
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
 
-        healthKitService = HealthKitService()
+        // Replay any rows the migrator pulled out of the legacy cache store into the new synced
+        // store. No-op once the install has run this branch (UserDefaults flag).
+        CachedFoodStoreMigrator.restore(stagedFoods, into: modelContainer.mainContext)
+
+        healthKitService = HealthKitService(modelContainer: modelContainer)
         let openFoodFacts = OpenFoodFactsService()
         let usda = USDAFoodDataCentralService()
         let chained = ChainedFoodDataSource(

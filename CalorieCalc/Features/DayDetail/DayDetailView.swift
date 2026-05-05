@@ -43,7 +43,7 @@ struct DayDetailView: View {
                 mealsSections(log: dayLog)
                 if tracksSupplements {
                     SupplementSectionView(
-                        entries: (dayLog?.supplementEntries ?? []).sorted { $0.timestamp < $1.timestamp },
+                        entries: (dayLog?.supplementEntriesList ?? []).sorted { $0.timestamp < $1.timestamp },
                         onAdd: { showSupplementPicker = true },
                         onDelete: { entry in delete(supplement: entry) }
                     )
@@ -177,7 +177,7 @@ struct DayDetailView: View {
                     .font(.subheadline)
                 }
             }
-            ForEach(log?.manualWorkouts ?? []) { workout in
+            ForEach(log?.manualWorkoutsList ?? []) { workout in
                 ManualWorkoutRow(workout: workout)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { delete(workout: workout) } label: {

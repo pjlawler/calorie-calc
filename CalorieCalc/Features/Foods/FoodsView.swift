@@ -20,6 +20,10 @@ struct FoodsView: View {
     @State private var editingFood: CachedFood?
     @State private var showSettings = false
 
+    /// Persisted between launches so the user's filter preference sticks. When `true`, the list
+    /// shows only favorites; when `false`, the full My Foods catalog.
+    @AppStorage("foodsView.showFavoritesOnly") private var showFavoritesOnly: Bool = false
+
     // Add-to-My-Foods flow state.
     @State private var showAddOptions = false
     @State private var showScanner = false
@@ -35,8 +39,11 @@ struct FoodsView: View {
             ScrollViewReader { proxy in
                 List {
                     Color.clear.frame(height: 0).id("top").listRowSeparator(.hidden)
+                    titleRow
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
                     if myFoods.isEmpty {
-                        Text("No saved foods yet. Tap + to add one, or use the Save to My Foods button on a food you find via search.")
+                        Text(emptyStateText)
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .center)
                             .padding()
@@ -44,17 +51,19 @@ struct FoodsView: View {
                     } else {
                         ForEach(myFoods, id: \.id) { cached in
                             Button {
-                                portionTarget = cached.toSearchResult()
+                                portionTarget = cached.toSearchResult(forFavorites: cached.isFavorite)
                             } label: {
                                 CachedFoodRow(cached: cached) {
-                                    cached.isFavorite.toggle()
-                                    try? modelContext.save()
+                                    CachedFood.toggleFavorite(cached, in: modelContext)
                                 }
                             }
                             .buttonStyle(.plain)
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
+                                    // Removing from the unified list also clears the favorite —
+                                    // there's no longer a separate Favorites list to live in.
                                     cached.isInMyFoods = false
+                                    cached.isFavorite = false
                                     try? modelContext.save()
                                 } label: {
                                     Label("Delete", systemImage: "trash")
@@ -70,8 +79,8 @@ struct FoodsView: View {
                     }
                 }
                 .listStyle(.plain)
-                .navigationTitle("My Foods")
-                .navigationBarTitleDisplayMode(.large)
+                .navigationTitle("")
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
@@ -167,16 +176,41 @@ struct FoodsView: View {
         }
     }
 
+    /// Custom title row replacing the default large-title navbar — gives the favorites-filter
+    /// button a home alongside the "My Foods" headline instead of crowding the toolbar. The
+    /// button sits 20pt to the right of the title; trailing `Spacer` keeps the pair left-aligned
+    /// instead of stretching across the row. `.contentTransition(.identity)` disables the
+    /// symbol-morph animation so the star.fill ↔ star swap is a clean cut, not a brief
+    /// blue-flash through an intermediate accent-tinted frame.
+    private var titleRow: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 20) {
+            Text("My Foods")
+                .font(.largeTitle.weight(.bold))
+            Button {
+                showFavoritesOnly.toggle()
+            } label: {
+                Image(systemName: showFavoritesOnly ? "star.fill" : "star")
+                    .font(.title)
+                    .foregroundStyle(showFavoritesOnly ? Color.yellow : Color.accentColor)
+                    .contentTransition(.identity)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only favorites")
+            Spacer()
+        }
+    }
+
     private var myFoods: [CachedFood] {
         cachedFoods
-            .filter { $0.isInMyFoods }
-            .sorted { lhs, rhs in
-                let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-                if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
-                let lb = lhs.brand ?? ""
-                let rb = rhs.brand ?? ""
-                return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
-            }
+            .filter { $0.isInMyFoods && (!showFavoritesOnly || $0.isFavorite) }
+            .sorted(by: CachedFood.myFoodsSort)
+    }
+
+    private var emptyStateText: String {
+        if showFavoritesOnly {
+            return "No favorites yet. Tap the star on a food to favorite it."
+        }
+        return "No saved foods yet. Tap + to add one, or use the Save to My Foods button on a food you find via search."
     }
 
     private func handleScan(code: String) async {

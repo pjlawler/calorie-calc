@@ -44,7 +44,13 @@ struct RootView: View {
             // BackupService snapshotted the previous-session store before this point, so there's
             // a roll-back path in Settings → Backups if anything goes sideways.
             LegacyDataMigrator.runIfNeeded(in: modelContext)
-            await healthKitService.ensureAuthorizationAtStartup()
+            // Unify Favorites + My Foods: backfills any pre-existing favorite that isn't yet in
+            // My Foods. Idempotent — does nothing once the store is fully migrated.
+            CachedFood.promoteFavoritesToMyFoods(in: modelContext)
+            // Kicks off auth (idempotent), the initial HK backfill into the SwiftData cache,
+            // observer queries with background delivery, and the 60s foreground refresh timer.
+            // Subsequent calls no-op.
+            await healthKitService.startBackgroundSync()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
