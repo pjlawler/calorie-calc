@@ -157,6 +157,11 @@ struct DayDetailView: View {
 
     @ViewBuilder
     private func workoutsSection(log: DayLog?) -> some View {
+        let hkBurn: Double = {
+            guard let vm = viewModel else { return 0 }
+            return vm.healthKitWorkouts.isEmpty ? vm.healthKitActiveEnergy : vm.includedHealthKitActiveEnergy
+        }()
+        let totalBurned = hkBurn + (log?.totalManualBurned ?? 0)
         Section {
             if let vm = viewModel {
                 ForEach(vm.healthKitWorkouts) { workout in
@@ -191,8 +196,14 @@ struct DayDetailView: View {
                 Label("Add workout", systemImage: "plus.circle")
             }
         } header: {
-            Label("Workouts", systemImage: "figure.run")
-                .font(.headline)
+            HStack {
+                Label("Workouts", systemImage: "figure.run")
+                    .font(.headline)
+                Spacer()
+                Text("\(CalorieFormatter.whole(totalBurned)) kcal")
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
