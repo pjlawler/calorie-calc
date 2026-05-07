@@ -16,9 +16,21 @@ struct RecipeBuilderSheet: View {
 
     @State private var recipeName: String = ""
     @State private var ingredients: [RecipeIngredient] = []
+    @State private var buildServingAmountText: String = ""
+    @State private var buildServingUnit: String = "serving"
+    @State private var buildNotes: String = ""
 
     @State private var stage: Stage = .build
     @State private var errorMessage: String?
+
+    /// Same options as the manual-ingredient sheet so units feel consistent across the recipe
+    /// flows. "serving" is added at the front for the most common case where the user just
+    /// wants to say "this recipe makes N servings".
+    private let buildServingUnits: [String] = [
+        "serving", "g", "oz", "lb", "kg",
+        "ml", "fl oz", "cup", "tbsp", "tsp", "l",
+        "muffin", "slice", "piece", "bowl", "patty", "batch",
+    ]
 
     @State private var showAddOptions = false
     @State private var showManualEntry = false
@@ -59,6 +71,15 @@ struct RecipeBuilderSheet: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Button("Cancel") { dismiss() }
                             .disabled(stage == .analyzing)
+                    }
+                    if stage == .build {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Create") {
+                                Task { await analyze() }
+                            }
+                            .fontWeight(.semibold)
+                            .disabled(!canAnalyze)
+                        }
                     }
                 }
                 .alert("Add Ingredient", isPresented: $showAddOptions) {
@@ -114,10 +135,27 @@ struct RecipeBuilderSheet: View {
             Section {
                 TextField("Name (e.g. Banana Oat Muffins)", text: $recipeName)
                     .textInputAutocapitalization(.words)
+                LabeledContent("Amount") {
+                    HStack(spacing: 8) {
+                        TextField("0", text: $buildServingAmountText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .monospacedDigit()
+                            .frame(minWidth: 60)
+                        Picker("Unit", selection: $buildServingUnit) {
+                            ForEach(buildServingUnits, id: \.self) { unit in
+                                Text(unit).tag(unit)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                    }
+                }
+                TextField("Notes (optional)", text: $buildNotes, axis: .vertical)
+                    .lineLimit(2...6)
+                    .textInputAutocapitalization(.sentences)
             } header: {
                 Text("Recipe")
-            } footer: {
-                Text("Add ingredients below. Claude will estimate the total recipe yield and suggest serving sizes you can pick from on the review screen.")
             }
 
             Section {
@@ -154,22 +192,6 @@ struct RecipeBuilderSheet: View {
                         .foregroundStyle(.red)
                         .font(.footnote)
                 }
-            }
-
-            Section {
-                Button {
-                    Task { await analyze() }
-                } label: {
-                    Label("Analyze with AI", systemImage: "sparkles")
-                        .labelStyle(TitleAndIconLabelStyle())
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(!canAnalyze)
-            } footer: {
-                Text("Claude will estimate per-serving nutrition based on the ingredients above. Scanned ingredients use their exact macros; typed ones are estimated.")
             }
         }
     }
@@ -470,9 +492,31 @@ struct RecipeBuilderSheet: View {
         totalCarbsText = String(format: "%.1f", analyzed.totalCarbs)
         totalFatText = String(format: "%.1f", analyzed.totalFat)
         resultConfidence = analyzed.confidence.flatMap { $0.isEmpty ? nil : $0 }
-        resultNotes = analyzed.notes.flatMap { $0.isEmpty ? nil : $0 }
+
+        // Combine the user's build-stage notes with the AI's caveat so both are visible on the
+        // review screen and persisted to the saved CachedFood.
+        let aiNotes = analyzed.notes.flatMap { $0.isEmpty ? nil : $0 }
+        let userNotes = buildNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        let combined = [
+            userNotes.isEmpty ? nil : userNotes,
+            aiNotes
+        ].compactMap { $0 }.joined(separator: "\n")
+        resultNotes = combined.isEmpty ? nil : combined
+
         yieldOptions = analyzed.yieldOptions
-        if let first = yieldOptions.first {
+
+        // Apply the build-stage serving size when the user filled it in. Prefer a yield option
+        // whose unit matches the user's chosen unit so per-serving math stays consistent with
+        // the AI's totals; fall back to the AI's first option otherwise.
+        let userAmount = Double(buildServingAmountText.replacingOccurrences(of: ",", with: "."))
+        let userUnit = buildServingUnit.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matched = (userAmount.map { $0 > 0 } ?? false)
+            ? yieldOptions.first(where: { $0.unit.caseInsensitiveCompare(userUnit) == .orderedSame })
+            : nil
+        if let matched, let userAmount {
+            selectedYieldOptionId = matched.id
+            servingAmountText = formatAmount(userAmount)
+        } else if let first = yieldOptions.first {
             selectedYieldOptionId = first.id
             servingAmountText = formatAmount(first.amount)
         } else {

@@ -24,19 +24,15 @@ struct DayCellView: View {
     private var isToday: Bool { budget.status == .today }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             dayStack
             Divider()
             consumedStack
                 .padding(.leading, 20)
-            if varianceValue != nil {
-                varianceStack
-                    .padding(.leading, 20)
-            }
             Spacer(minLength: 0)
             exerciseStack
         }
-        .padding(.vertical, 10)
+        .padding(.vertical, 6)
         .padding(.horizontal, 14)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -69,6 +65,7 @@ struct DayCellView: View {
                 .frame(maxWidth: .infinity)
         }
         .frame(width: 44)
+        .frame(maxHeight: .infinity, alignment: .center)
     }
 
     private var consumedStack: some View {
@@ -83,20 +80,33 @@ struct DayCellView: View {
                 }
             }
             macroBar
+            varianceRow
         }
     }
 
     /// Day-level variance shown only on today's cell (driven by `varianceValue` being non-nil).
-    /// Sits between the progress data and the exercise data, hugging the progress side with the
-    /// same 20pt leading gap that separates the progress data from the divider.
+    /// Sits below the progress + macro bar, left-aligned, with a "Plan Remaining" label.
     @ViewBuilder
-    private var varianceStack: some View {
+    private var varianceRow: some View {
         if let variance = varianceValue {
-            let sign = variance >= 0 ? "+" : "−"
             let magnitude = abs(variance).formatted(.number)
-            Text("\(sign)\(magnitude)")
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-                .foregroundStyle(variance >= 0 ? .green : .red)
+            let color: Color = variance >= 0 ? .green : .red
+            HStack(spacing: 6) {
+                Text(magnitude)
+                    .font(.system(size: 16.5, weight: .semibold).monospacedDigit())
+                    .foregroundStyle(color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(color, lineWidth: 1)
+                    )
+                Text("Plan Remaining")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+            }
+            .padding(.vertical, 6)
         }
     }
 
@@ -143,6 +153,7 @@ struct DayCellView: View {
                     .foregroundStyle(.secondary)
             }
         }
+        .frame(maxHeight: .infinity, alignment: .center)
     }
 
     private var accessibilityLabel: String {

@@ -107,6 +107,7 @@ struct FoodDescribeSheet: View {
         // collapse to "ea" with the verbose text appended to notes.
         var nativeUnit = "ea"
         var nativeUnitGrams: Double? = nil
+        var nativeUnitMilliliters: Double? = nil
         var recipeNote: String? = nil
 
         if useEach || isRecipe {
@@ -116,13 +117,23 @@ struct FoodDescribeSheet: View {
                   !parsed.unit.isEmpty {
             let token = ServingMath.normalizeUnitToken(parsed.unit)
             if !token.isEmpty && !ServingMath.isMeasurementUnit(token) {
+                // Countable noun like "1 bar", "1 burger".
                 nativeUnit = token
                 if let grams = meal.servingGrams { nativeUnitGrams = grams / parsed.count }
+            } else if ServingMath.isVolumeUnit(token),
+                      let grams = meal.servingGrams, grams > 0,
+                      let mlPerUnit = ServingMath.millilitersPerVolumeUnit[token] {
+                // Packaged label-style portion ("2 Tbsp (32g)"): treat the whole label serving
+                // as 1 native "serving" and surface BOTH families in the picker by populating
+                // grams (mass siblings) and milliliters (volume siblings) for it.
+                nativeUnit = "serving"
+                nativeUnitGrams = grams
+                nativeUnitMilliliters = parsed.count * mlPerUnit
             }
         }
 
-        // For loose-mass fallback when AI gives grams but no countable unit, still expose mass
-        // siblings so the picker isn't just "ea".
+        // Loose-mass fallback when AI gives grams but no countable unit and no volume anchor —
+        // still expose mass siblings so the picker isn't just "ea".
         if nativeUnit == "ea", let grams = meal.servingGrams, grams > 0 {
             nativeUnit = "g"
             nativeUnitGrams = 1
@@ -139,15 +150,37 @@ struct FoodDescribeSheet: View {
         let factor: Double = (nativeUnit == "g" && nativeUnitGrams == 1)
             ? max(meal.servingGrams ?? 1, 1)
             : 1
+
+        // Default the picker to the native (one label serving). If the AI returned an
+        // intake_amount — meaning the user explicitly named a quantity ("100g") or the photo
+        // shows a clear amount — open the picker on that unit/quantity instead, so the user
+        // sees what they asked for, not "1 serving".
+        var initialUnit: String = (nativeUnit == "g") ? "g" : nativeUnit
+        var initialQty: Double = (nativeUnit == "g") ? (meal.servingGrams ?? 1) : 1
+
+        if let intake = meal.intakeAmount,
+           let parsed = ServingMath.parseServingDescription(intake),
+           parsed.count > 0,
+           !parsed.unit.isEmpty {
+            let token = ServingMath.normalizeUnitToken(parsed.unit)
+            let isPickerUnit = ServingMath.isMassUnit(token)
+                || ServingMath.isVolumeUnit(token)
+                || token == nativeUnit
+            if !token.isEmpty && isPickerUnit {
+                initialUnit = token
+                initialQty = parsed.count
+            }
+        }
+
         return FoodSearchResult(
             id: "ai:\(UUID().uuidString)",
             name: meal.name,
-            brand: nil,
+            brand: meal.brand,
             nativeUnit: nativeUnit,
             nativeUnitGrams: nativeUnitGrams,
-            nativeUnitMilliliters: nil,
-            initialSelectedUnit: nativeUnit == "g" ? "g" : nativeUnit,
-            initialSelectedQuantity: nativeUnit == "g" ? (meal.servingGrams ?? 1) : 1,
+            nativeUnitMilliliters: nativeUnitMilliliters,
+            initialSelectedUnit: initialUnit,
+            initialSelectedQuantity: initialQty,
             caloriesPerServing: meal.caloriesPerServing / factor,
             proteinPerServing: meal.proteinPerServing / factor,
             carbsPerServing: meal.carbsPerServing / factor,

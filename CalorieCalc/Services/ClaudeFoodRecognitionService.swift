@@ -69,7 +69,9 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             }
             return RecognizedMeal(
                 name: input.name,
+                brand: input.brand.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : t },
                 portionDescription: input.portion,
+                intakeAmount: input.intake_amount.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : t },
                 servingGrams: input.serving_grams,
                 caloriesPerServing: input.calories,
                 proteinPerServing: input.protein_grams,
@@ -132,7 +134,9 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             }
             return RecognizedMeal(
                 name: input.name,
+                brand: input.brand.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : t },
                 portionDescription: input.portion,
+                intakeAmount: input.intake_amount.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : t },
                 servingGrams: input.serving_grams,
                 caloriesPerServing: input.calories,
                 proteinPerServing: input.protein_grams,
@@ -312,45 +316,59 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             : value.formatted(.number.precision(.fractionLength(0...2)))
     }
 
+    /// Shared field/format rules used by both the describe and photo flows so they return the
+    /// same shape of data. The entry preamble (text vs. photo) is supplied separately.
+    private var sharedReturnRules: String {
+        """
+        Return a single-portion nutritional profile through the log_meal tool only. Fields:
+
+        • name — the item itself with an optional parenthetical descriptor; the brand goes in its own field, NEVER in the name. Format: "<Item> (<Descriptor>)" when a descriptor adds useful info, otherwise just "<Item>". Examples:
+          – "Skippy Creamy Peanut Butter" → name: "Peanut Butter (Creamy)", brand: "Skippy".
+          – "RX Bar Chocolate Sea Salt" → name: "Protein Bar (Chocolate Sea Salt)", brand: "RX Bar".
+          – "Five Guys Cheeseburger" → name: "Cheeseburger", brand: "Five Guys".
+          – "Diet Coke 12 oz can" → name: "Diet Coke", brand: "Coca-Cola".
+          – Home-cooked "ribeye dinner" → name: "Ribeye Dinner", brand omitted.
+        • brand — manufacturer or restaurant chain when one applies (e.g. "Skippy", "RX Bar", "Coca-Cola", "Five Guys", "Chipotle"). Always pull the brand out of the name into this field. Omit only for generic / home-cooked / unbranded items.
+        • portion — pick the format that matches the food:
+          – Multi-item meal (a plate with several distinct components, e.g. steak + sides + drink, or a combo): use exactly "1 meal". Do NOT include grams or items in this field — the breakdown goes in notes.
+          – Single packaged item with a labeled serving (peanut butter, protein bar, cereal, canned drink): use the canonical product label serving — natural unit followed by parenthetical grams, e.g. "2 Tbsp (32g)", "1 bar (52g)", "3/4 cup (40g)", "1 can (355ml)". This lets the app scale by either unit. IMPORTANT: even if the user's description names a quantity (e.g. "Skippy peanut butter 100g", "two bars"), still return the canonical label serving here. The user's quantity is a UI concern — the app handles scaling. Don't substitute "100g" or "2 bars" into this field.
+          – Single non-packaged item (no label, no breakdown): use "1" + a single-word unit noun, e.g. "1 burger", "1 slice", "1 bowl", "1 taco". Put descriptors ("medium", "double") in notes, not the portion.
+        • serving_grams — gram weight of the portion you described above.
+          – REQUIRED for any single item with meaningful weight (essentially every solid food).
+          – OMIT for the "1 meal" case (we don't track a single weight for the whole plate) and for pure-liquid items where mass isn't meaningful.
+        • calories, protein_grams, carbs_grams, fat_grams — totals for the WHOLE portion above. For packaged items that means PER ONE LABEL SERVING (not for any user-mentioned quantity). For "1 meal" that means the entire plate combined.
+        • intake_amount — optional. The actual amount the user is logging when it's clearly known: the quantity they typed in the description ("100g of peanut butter" → "100g"; "two bars" → "2 bars"; "8 fl oz" → "8 fl oz") OR a clearly visible amount in a photo (e.g. "looks like roughly 100g of peanut butter on the toast" → "100g"). Use standard units the app understands: g, oz, lb, kg, ml, fl oz, cup, tbsp, tsp, l, or the same countable noun used in `portion`. If the user gave a vague unit ("half a jar"), convert to grams. OMIT when no specific quantity was given (e.g. just "Skippy peanut butter") and for the "1 meal" case (the meal is the meal).
+        • confidence — "high" / "medium" / "low".
+        • notes —
+          – For a "1 meal" portion: REQUIRED. Itemize the components with rough portions, e.g. "4 oz ribeye, 6 oz mashed potatoes with gravy, 12 oz Coke".
+          – Otherwise: short caveat if there's meaningful uncertainty (customization, size ambiguity, hidden sauces). Omit if nothing useful to add.
+
+        Be grounded. For ambiguous portions, choose a moderate estimate rather than an extreme. Prefer published chain-restaurant or branded-product nutrition data when the food is identifiable.
+        """
+    }
+
     private func buildDescribePrompt(description: String) -> String {
         """
         You're a nutrition estimator. A user typed this description of a food item or meal:
 
         \"\(description)\"
 
-        Estimate a single-serving nutritional profile:
-        • A short, clean name (e.g. "Five Guys Cheeseburger").
-        • A portion description starting with "1" + a single-word unit noun — "1 bar", "1 burger", "1 cup", "1 slice". Keep it simple: ONE word for the unit when possible. Avoid descriptors like "medium" or "generous" in the unit. If you must qualify, put it in the notes instead.
-        • serving_grams — REQUIRED for any food with a meaningful weight (essentially everything that isn't a pure liquid). Provide it even when the natural unit isn't grams: an RX Bar's portion is "1 bar" but its serving_grams is ~52. Only omit for items where mass really isn't meaningful (pure liquids by volume, small drinks, "1 small coffee").
-        • Calories, protein (g), carbs (g), and fat (g) for one serving.
-        • Confidence — "high" for well-known menu items or canonical recipes; "medium" for ambiguous descriptions; "low" when the input is too vague to estimate safely.
-        • A short caveat note if there's meaningful uncertainty (e.g. customization, size ambiguity).
-
-        Prefer published chain-restaurant nutrition data when the description names one. For generic foods, use moderate standard portions.
-        Submit via the log_meal tool only.
+        \(sharedReturnRules)
         """
     }
 
     private func buildPrompt(hint: String?) -> String {
-        var text = """
-        You're a nutrition estimator looking at a photo of a meal or food item.
+        let trimmedHint = hint?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hintLine = (trimmedHint?.isEmpty == false) ? trimmedHint! : "(none)"
+        return """
+        You're a nutrition estimator looking at a photo of a meal or food item. Identify what's in the image — brand for packaged products, item identity, portion size, and any distinct components if it's a multi-item plate (e.g. "4 oz ribeye, 6 oz mashed potatoes, 12 oz Coke").
 
-        Estimate:
-        • A short descriptive name of the primary food/meal.
-        • A portion description starting with "1" + a single-word unit noun — "1 burger", "1 bowl", "1 slice", "1 taco". Keep it simple: ONE word for the unit. Put descriptors ("medium", "double") in the notes, not the portion.
-        • serving_grams — REQUIRED for any food with a meaningful weight (essentially every solid food and most plates). Provide it even when the natural unit isn't grams: a burger photo's portion is "1 burger" but serving_grams is ~200. Only omit for pure liquids where mass isn't meaningful.
-        • Total calories, protein (g), carbs (g), and fat (g) for that portion.
-        • Your confidence — "high" for clear, well-known dishes in clear portions; "medium" for ambiguous portions or partially hidden food; "low" for unclear images.
-        • A short caveat note if there's uncertainty (hidden sauces, portion ambiguity, multiple items).
+        If the user provided a description below, treat it as ground truth. It OVERRIDES the photo on identity, brand, portion size, and meal composition — for example, if the photo looks like a 4 oz steak but the description says 6 oz, use 6 oz. Use the photo only for whatever the description leaves unspecified.
 
-        Be grounded. For ambiguous portions, choose a moderate estimate rather than an extreme.
-        For mixed plates, estimate the whole plate together rather than breaking it into items.
-        Submit via the log_meal tool only.
+        User description: \(hintLine)
+
+        \(sharedReturnRules)
         """
-        if let hint, !hint.trimmingCharacters(in: .whitespaces).isEmpty {
-            text += "\n\nUser hint: \(hint)"
-        }
-        return text
     }
 
     private var logMealTool: Tool {
@@ -360,15 +378,17 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             inputSchema: Schema(
                 type: "object",
                 properties: [
-                    "name": Property(type: "string", description: "Short descriptive meal name"),
-                    "portion": Property(type: "string", description: "Plain-language portion description"),
-                    "serving_grams": Property(type: "number", description: "Estimated weight of one serving in grams; omit if not meaningful"),
-                    "calories": Property(type: "number", description: "Estimated calories (kcal) for the portion"),
-                    "protein_grams": Property(type: "number", description: "Protein in grams for the portion"),
-                    "carbs_grams": Property(type: "number", description: "Carbohydrates in grams for the portion"),
-                    "fat_grams": Property(type: "number", description: "Fat in grams for the portion"),
+                    "name": Property(type: "string", description: "Item with an optional parenthetical descriptor, e.g. 'Peanut Butter (Creamy)'. Do NOT include the brand here — it goes in the brand field."),
+                    "brand": Property(type: "string", description: "Brand or restaurant chain (e.g. 'Skippy', 'Five Guys'). Always extract the brand out of the name into this field. Omit only for generic / home-cooked / unbranded items."),
+                    "portion": Property(type: "string", description: "'1 meal' for multi-item plates; '<unit> (<grams>g)' like '2 Tbsp (32g)' for packaged items with labeled servings; '1 burger' / '1 slice' for single non-packaged items"),
+                    "serving_grams": Property(type: "number", description: "Gram weight of the portion; omit for the '1 meal' case and for pure-liquid items"),
+                    "calories": Property(type: "number", description: "Total calories (kcal) for the whole portion"),
+                    "protein_grams": Property(type: "number", description: "Protein in grams for the whole portion"),
+                    "carbs_grams": Property(type: "number", description: "Carbohydrates in grams for the whole portion"),
+                    "fat_grams": Property(type: "number", description: "Fat in grams for the whole portion"),
+                    "intake_amount": Property(type: "string", description: "The actual amount the user is logging (from explicit user mention or photo-visible amount), e.g. '100g', '2 Tbsp', '4 oz', '2 bars'. Omit if no specific quantity was given."),
                     "confidence": Property(type: "string", description: "high, medium, or low"),
-                    "notes": Property(type: "string", description: "Short caveat or assumption"),
+                    "notes": Property(type: "string", description: "For '1 meal' portions: itemized breakdown like '4 oz ribeye, 6 oz mashed potatoes, 12 oz Coke'. Otherwise: short caveat if there's uncertainty."),
                 ],
                 required: ["name", "portion", "calories", "protein_grams", "carbs_grams", "fat_grams"]
             )
@@ -505,12 +525,14 @@ private struct ResponseContent: Decodable {
 
 private struct ToolInput: Decodable {
     let name: String
+    let brand: String?
     let portion: String
     let serving_grams: Double?
     let calories: Double
     let protein_grams: Double
     let carbs_grams: Double
     let fat_grams: Double
+    let intake_amount: String?
     let confidence: String?
     let notes: String?
 }

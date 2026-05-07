@@ -367,25 +367,80 @@ struct FoodPhotoSheet: View {
 
     private func prefill(from meal: RecognizedMeal) {
         nameText = meal.name
-        brandText = ""
+        brandText = meal.brand ?? ""
         recognizedServingGrams = meal.servingGrams
-        caloriesText = String(Int(meal.caloriesPerServing.rounded()))
-        proteinText = String(format: "%.1f", meal.proteinPerServing)
-        carbsText = String(format: "%.1f", meal.carbsPerServing)
-        fatText = String(format: "%.1f", meal.fatPerServing)
         confidenceLabel = meal.confidence.flatMap { $0.isEmpty ? nil : $0 }
+
+        // The shared prompt returns macros PER ONE LABEL SERVING and an optional intake_amount
+        // capturing what the user actually wants logged ("100g", "two bars", etc., or a clear
+        // amount visible in the photo). Scale the displayed macros to that intake so the user
+        // sees what they're logging — same contract as the describe-AI flow.
+        let scale = Self.intakeScaleFactor(meal: meal)
+        caloriesText = String(Int((meal.caloriesPerServing * scale).rounded()))
+        proteinText = String(format: "%.1f", meal.proteinPerServing * scale)
+        carbsText = String(format: "%.1f", meal.carbsPerServing * scale)
+        fatText = String(format: "%.1f", meal.fatPerServing * scale)
 
         // Recipe-like portions belong in Notes, not in the serving label — keep the serving
         // generic so the row reads "1 serving" while the full description is preserved below.
         let portionRaw = meal.portionDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         let aiCaveat = meal.notes.flatMap { $0.isEmpty ? nil : $0 }
+        let intakeRaw = meal.intakeAmount?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let intakeUsable = (intakeRaw?.isEmpty == false) && scale != 1.0
+
         if RecognizedMeal.looksLikeRecipeExplanation(portionRaw) {
             portionText = "1 serving"
             notesText = [portionRaw, aiCaveat].compactMap { $0 }.joined(separator: "\n")
+        } else if intakeUsable, let intake = intakeRaw {
+            // Show what the user is actually logging in the Portion field so the displayed
+            // macros and the label match.
+            portionText = intake
+            notesText = aiCaveat
         } else {
             portionText = portionRaw
             notesText = aiCaveat
         }
+    }
+
+    /// Multiplier to apply to per-label-serving macros so the form shows the intake the user
+    /// (or photo) named. Returns 1.0 when no intake_amount was returned or it can't be
+    /// reconciled with the canonical portion.
+    private static func intakeScaleFactor(meal: RecognizedMeal) -> Double {
+        guard let raw = meal.intakeAmount?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty,
+              let parsedIntake = ServingMath.parseServingDescription(raw),
+              parsedIntake.count > 0,
+              !parsedIntake.unit.isEmpty else {
+            return 1.0
+        }
+        let intakeToken = ServingMath.normalizeUnitToken(parsedIntake.unit)
+
+        // Mass intake — scale by grams ratio against the label-serving grams.
+        if let intakeG = ServingMath.grams(forSelectedUnit: intakeToken, quantity: parsedIntake.count),
+           let servingG = meal.servingGrams, servingG > 0 {
+            return intakeG / servingG
+        }
+
+        guard let parsedPortion = ServingMath.parseServingDescription(meal.portionDescription),
+              parsedPortion.count > 0,
+              !parsedPortion.unit.isEmpty else {
+            return 1.0
+        }
+        let portionToken = ServingMath.normalizeUnitToken(parsedPortion.unit)
+
+        // Volume intake against a volume-anchored portion ("8 fl oz" against "1 can (355ml)").
+        if let intakeMl = ServingMath.milliliters(forSelectedUnit: intakeToken, quantity: parsedIntake.count),
+           let portionMl = ServingMath.milliliters(forSelectedUnit: portionToken, quantity: parsedPortion.count),
+           portionMl > 0 {
+            return intakeMl / portionMl
+        }
+
+        // Same countable noun ("2 bars" against "1 bar (52g)").
+        if intakeToken == portionToken, parsedPortion.count > 0 {
+            return parsedIntake.count / parsedPortion.count
+        }
+
+        return 1.0
     }
 
     private func save() {

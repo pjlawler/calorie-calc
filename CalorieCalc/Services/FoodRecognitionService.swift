@@ -2,10 +2,21 @@ import Foundation
 
 nonisolated struct RecognizedMeal: Sendable, Hashable {
     let name: String
-    /// AI-supplied portion description like "1 bar", "1 burger", "1 medium bowl with chicken".
+    /// Brand / manufacturer for packaged foods (e.g. "Skippy"). nil for generic, restaurant,
+    /// or home-cooked items where a brand doesn't apply.
+    let brand: String?
+    /// AI-supplied portion description. Three shapes:
+    /// - Multi-item meals: exactly "1 meal" (with the breakdown of items in `notes`).
+    /// - Single packaged item with a labeled serving: "2 Tbsp (32g)", "1 bar (52g)".
+    /// - Single non-packaged item: "1 burger", "1 slice", "1 bowl".
     /// Used by the bridge layer to extract a `nativeUnit` and surface the verbose portion text
     /// in Notes when it's recipe-like.
     let portionDescription: String
+    /// The actual quantity being logged when it's clearly known — from a user-typed quantity
+    /// ("100g of peanut butter" → "100g"; "two bars" → "2 bars") or from a photo where a
+    /// specific amount is visible. Format: "<number> <unit>". nil when the user didn't specify
+    /// a quantity, in which case the bridge opens the picker at the canonical label serving.
+    let intakeAmount: String?
     /// Estimated grams of one *whole portion* — i.e. the mass of one "1 bar" / "1 burger". `nil`
     /// for items where a gram weight doesn't make sense (e.g. "1 small coffee") or when Claude
     /// can't estimate it confidently.

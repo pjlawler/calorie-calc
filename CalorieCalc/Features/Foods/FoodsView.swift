@@ -24,6 +24,8 @@ struct FoodsView: View {
     /// shows only favorites; when `false`, the full My Foods catalog.
     @AppStorage("foodsView.showFavoritesOnly") private var showFavoritesOnly: Bool = false
 
+    @State private var searchText: String = ""
+
     // Add-to-My-Foods flow state.
     @State private var showAddOptions = false
     @State private var showScanner = false
@@ -38,10 +40,10 @@ struct FoodsView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
-                    Color.clear.frame(height: 0).id("top").listRowSeparator(.hidden)
                     titleRow
+                        .id("top")
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 12, trailing: 16))
+                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
                     if myFoods.isEmpty {
                         Text(emptyStateText)
                             .foregroundStyle(.secondary)
@@ -79,6 +81,7 @@ struct FoodsView: View {
                     }
                 }
                 .listStyle(.plain)
+                .searchable(text: $searchText, prompt: "Search foods")
                 .navigationTitle("")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -187,12 +190,15 @@ struct FoodsView: View {
             Text("My Foods")
                 .font(.largeTitle.weight(.bold))
             Button {
-                showFavoritesOnly.toggle()
+                var t = Transaction()
+                t.disablesAnimations = true
+                withTransaction(t) { showFavoritesOnly.toggle() }
             } label: {
                 Image(systemName: showFavoritesOnly ? "star.fill" : "star")
                     .font(.title)
-                    .foregroundStyle(showFavoritesOnly ? Color.yellow : Color.accentColor)
+                    .foregroundStyle(showFavoritesOnly ? AnyShapeStyle(Color.yellow) : AnyShapeStyle(.secondary))
                     .contentTransition(.identity)
+                    .animation(nil, value: showFavoritesOnly)
             }
             .buttonStyle(.plain)
             .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only favorites")
@@ -201,12 +207,17 @@ struct FoodsView: View {
     }
 
     private var myFoods: [CachedFood] {
-        cachedFoods
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return cachedFoods
             .filter { $0.isInMyFoods && (!showFavoritesOnly || $0.isFavorite) }
+            .filter { query.isEmpty || $0.name.lowercased().contains(query) || ($0.brand?.lowercased().contains(query) ?? false) }
             .sorted(by: CachedFood.myFoodsSort)
     }
 
     private var emptyStateText: String {
+        if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "No foods match \"\(searchText)\"."
+        }
         if showFavoritesOnly {
             return "No favorites yet. Tap the star on a food to favorite it."
         }

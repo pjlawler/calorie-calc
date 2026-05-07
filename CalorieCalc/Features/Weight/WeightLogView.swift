@@ -13,6 +13,7 @@ struct WeightLogView: View {
 
     @State private var inputText: String = ""
     @State private var selectedUnit: WeightUnit = .pounds
+    @State private var selectedDate: Date = .now
 
     private var profile: UserProfile? { profiles.first }
 
@@ -38,8 +39,23 @@ struct WeightLogView: View {
                             .pickerStyle(.segmented)
                             .frame(width: 120)
                         }
-                        Button("Log weight") { save() }
-                            .disabled(Double(inputText) == nil)
+                        DatePicker(
+                            "Date",
+                            selection: $selectedDate,
+                            in: ...Date(),
+                            displayedComponents: .date
+                        )
+                        Button {
+                            save()
+                        } label: {
+                            Text("Log weight")
+                                .fontWeight(.semibold)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(Double(inputText) == nil)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16))
                     }
 
                     Section("History") {
@@ -76,15 +92,16 @@ struct WeightLogView: View {
 
     private func save() {
         guard let value = Double(inputText) else { return }
-        let entry = WeightEntry(weight: value, unit: selectedUnit, timestamp: .now)
+        let entry = WeightEntry(weight: value, unit: selectedUnit, timestamp: selectedDate)
         modelContext.insert(entry)
         if profile?.startingWeight == nil {
             profile?.startingWeight = profile?.weightUnit == selectedUnit
                 ? value
                 : selectedUnit.convert(value, to: profile?.weightUnit ?? selectedUnit)
-            profile?.startingWeightLoggedAt = .now
+            profile?.startingWeightLoggedAt = selectedDate
         }
         try? modelContext.save()
         inputText = ""
+        selectedDate = .now
     }
 }

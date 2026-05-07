@@ -223,9 +223,9 @@ struct DashboardView: View {
                 unit: "kcal"
             )
             averageTile(
-                title: "Avg weekly change",
+                title: "Trending change",
                 value: summary.avgWeeklyChange.map { weightChangeString($0) } ?? "—",
-                unit: profile.weightUnit.suffix,
+                unit: "\(profile.weightUnit.suffix)/wk",
                 valueColor: summary.avgWeeklyChange.map { weightChangeColor($0) } ?? .primary
             )
         }
@@ -481,7 +481,8 @@ struct DashboardView: View {
                     ForEach(points) { point in
                         LineMark(
                             x: .value("Date", point.date),
-                            y: .value("Weight", point.weight)
+                            y: .value("Weight", point.weight),
+                            series: .value("Series", "actual")
                         )
                         .interpolationMethod(.catmullRom)
                         .foregroundStyle(Color.accentColor)
@@ -490,6 +491,24 @@ struct DashboardView: View {
                             y: .value("Weight", point.weight)
                         )
                         .foregroundStyle(Color.accentColor)
+                    }
+                    if let trend = weightTrend,
+                       let firstDate = points.first?.date,
+                       let lastDate = points.last?.date {
+                        LineMark(
+                            x: .value("Date", firstDate),
+                            y: .value("Trend", trend.lineStart),
+                            series: .value("Series", "trend")
+                        )
+                        .foregroundStyle(Color.orange)
+                        .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
+                        LineMark(
+                            x: .value("Date", lastDate),
+                            y: .value("Trend", trend.lineEnd),
+                            series: .value("Series", "trend")
+                        )
+                        .foregroundStyle(Color.orange)
+                        .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
                     }
                 }
                 .frame(height: 240)
@@ -561,7 +580,7 @@ struct DashboardView: View {
                 )
                 if let trend {
                     weightTile(
-                        title: "Normalized for period",
+                        title: "Trend",
                         dateLabel: nil,
                         value: String(format: "%.1f", trend.lineEnd),
                         unit: unit,
