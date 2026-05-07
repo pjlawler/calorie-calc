@@ -161,18 +161,12 @@ private struct WeekCalendarBody: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(spacing: 8) {
+                    DayCellHeader()
                     ForEach(Array(zip(weekDates, calculation.dailyBudgets)), id: \.0) { date, budget in
-                        let log = dayLog(for: date)
                         Button { selectedDate = date } label: {
                             DayCellView(
                                 date: date,
                                 budget: budget,
-                                macros: DayCellView.Macros(
-                                    protein: log?.totalProtein ?? 0,
-                                    carbs: log?.totalCarbs ?? 0,
-                                    fat: log?.totalFat ?? 0
-                                ),
-                                workoutGoal: period.dailyWorkoutCalorieGoal,
                                 varianceValue: budget.status == .today ? displayMathData.totalVariance : nil
                             )
                         }
@@ -284,10 +278,6 @@ private struct WeekCalendarBody: View {
             dailyGrossGoal: period.dailyGrossCalorieGoal,
             remainingDays: futureBudgets.count
         )
-    }
-
-    private func dayLog(for date: Date) -> DayLog? {
-        DayLog.preferredForDay(dayLogs, on: date)
     }
 }
 

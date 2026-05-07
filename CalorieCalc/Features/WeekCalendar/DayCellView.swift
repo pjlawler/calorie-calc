@@ -3,19 +3,11 @@ import SwiftUI
 struct DayCellView: View {
     let date: Date
     let budget: DailyBudget
-    let macros: Macros
-    let workoutGoal: Int
-    /// When non-nil, shown inline next to "consumed / planned". Wired to today's cell only —
-    /// surfaces the same number that the variance card on the day view shows.
+    /// When non-nil, shows a bordered magnitude box in the Remaining column. Wired to
+    /// today's cell only — surfaces the same number the day view's variance card shows.
     var varianceValue: Int? = nil
 
-    struct Macros: Hashable {
-        var protein: Double
-        var carbs: Double
-        var fat: Double
-    }
-
-    private let exerciseColor = Color(red: 0.25, green: 0.70, blue: 0.35)
+    private let exerciseColor = Color.cyan
 
     private var dayNumber: String {
         date.formatted(.dateTime.day())
@@ -24,16 +16,22 @@ struct DayCellView: View {
     private var isToday: Bool { budget.status == .today }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .center, spacing: DayCellLayout.columnSpacing) {
             dayStack
             Divider()
-            consumedStack
-                .padding(.leading, 20)
-            Spacer(minLength: 0)
-            exerciseStack
+            Text(CalorieFormatter.whole(budget.consumed))
+                .font(DayCellLayout.dataFont)
+                .foregroundStyle(Color.accentColor)
+                .frame(maxWidth: .infinity)
+            Text(CalorieFormatter.whole(budget.burned))
+                .font(DayCellLayout.dataFont)
+                .foregroundStyle(exerciseColor)
+                .frame(maxWidth: .infinity)
+            remainingCell
+                .frame(maxWidth: .infinity)
         }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .padding(.horizontal, DayCellLayout.horizontalPadding)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.regularMaterial)
@@ -43,7 +41,10 @@ struct DayCellView: View {
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(isToday ? Color.accentColor.opacity(0.7) : Color.clear, lineWidth: 1.5)
+                        .strokeBorder(
+                            isToday ? Color.accentColor.opacity(0.7) : Color.primary.opacity(0.15),
+                            lineWidth: isToday ? 1.5 : 1
+                        )
                 )
         )
         .accessibilityElement(children: .combine)
@@ -51,9 +52,6 @@ struct DayCellView: View {
     }
 
     private var dayStack: some View {
-        // Both labels fill the 44pt slot and center within it. Without `maxWidth: .infinity`
-        // each Text would self-size to its glyph width, leaving a one-digit day ("1") sitting
-        // at the natural baseline of the wider "FRI" instead of centered under it.
         VStack(spacing: 2) {
             Text(budget.weekday.shortName.uppercased())
                 .font(.caption.weight(.semibold))
@@ -64,100 +62,64 @@ struct DayCellView: View {
                 .monospacedDigit()
                 .frame(maxWidth: .infinity)
         }
-        .frame(width: 44)
-        .frame(maxHeight: .infinity, alignment: .center)
+        .frame(width: DayCellLayout.dayColumnWidth)
     }
 
-    private var consumedStack: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(CalorieFormatter.whole(budget.consumed))
-                    .font(.headline.monospacedDigit())
-                if let gross = budget.grossBudget {
-                    Text("/ \(CalorieFormatter.whole(gross))")
-                        .font(.subheadline.monospacedDigit())
-                        .foregroundStyle(.secondary)
-                }
-            }
-            macroBar
-            varianceRow
-        }
-    }
-
-    /// Day-level variance shown only on today's cell (driven by `varianceValue` being non-nil).
-    /// Sits below the progress + macro bar, left-aligned, with a "Plan Remaining" label.
     @ViewBuilder
-    private var varianceRow: some View {
+    private var remainingCell: some View {
         if let variance = varianceValue {
             let magnitude = abs(variance).formatted(.number)
             let color: Color = variance >= 0 ? .green : .red
-            HStack(spacing: 6) {
-                Text(magnitude)
-                    .font(.system(size: 16.5, weight: .semibold).monospacedDigit())
-                    .foregroundStyle(color)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .stroke(color, lineWidth: 1)
-                    )
-                Text("Plan Remaining")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-            }
-            .padding(.vertical, 6)
-        }
-    }
-
-    @ViewBuilder
-    private var macroBar: some View {
-        if budget.status == .future {
-            // Solid gray placeholder for future days — keeps the row's vertical rhythm matching
-            // past/today cells without pretending to show a macro split that doesn't exist yet.
-            Capsule()
-                .fill(Color.secondary.opacity(0.25))
-                .frame(height: 4)
-                .frame(maxWidth: 120)
+            Text(magnitude)
+                .font(DayCellLayout.dataFont)
+                .foregroundStyle(color)
         } else {
-            let total = max(macros.protein + macros.carbs + macros.fat, 0.0001)
-            let pFrac = macros.protein / total
-            let cFrac = macros.carbs / total
-            let fFrac = macros.fat / total
-            GeometryReader { geo in
-                HStack(spacing: 1) {
-                    Rectangle().fill(.tint).frame(width: geo.size.width * pFrac)
-                    Rectangle().fill(Color.orange).frame(width: geo.size.width * cFrac)
-                    Rectangle().fill(Color.pink).frame(width: geo.size.width * fFrac)
-                }
-                .clipShape(Capsule())
-                .opacity(total > 0.001 ? 1 : 0.2)
-            }
-            .frame(height: 4)
-            .frame(maxWidth: 120)
+            // Reserve column space on non-today rows so the header stays aligned.
+            Color.clear.frame(height: 1)
         }
-    }
-
-    private var exerciseStack: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text("exercise")
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(CalorieFormatter.whole(budget.burned))
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(exerciseColor)
-                Text("/ \(workoutGoal)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxHeight: .infinity, alignment: .center)
     }
 
     private var accessibilityLabel: String {
-        let gross = budget.grossBudget.map { "of \(CalorieFormatter.whole($0)) budget" } ?? "(no budget)"
-        return "\(budget.weekday.fullName), \(CalorieFormatter.whole(budget.consumed)) calories consumed \(gross), exercise \(CalorieFormatter.whole(budget.burned)) of \(workoutGoal) goal"
+        var parts: [String] = [
+            budget.weekday.fullName,
+            "\(CalorieFormatter.whole(budget.consumed)) calories consumed",
+            "exercise \(CalorieFormatter.whole(budget.burned))",
+        ]
+        if let variance = varianceValue {
+            parts.append(variance >= 0
+                ? "\(abs(variance)) kcal remaining today"
+                : "\(abs(variance)) kcal over today")
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// Shared layout constants so `DayCellHeader` lines up exactly with each `DayCellView` column.
+enum DayCellLayout {
+    static let dayColumnWidth: CGFloat = 44
+    static let columnSpacing: CGFloat = 12
+    static let horizontalPadding: CGFloat = 14
+    static let dataFont: Font = .system(size: 20, weight: .semibold).monospacedDigit()
+}
+
+/// Column-label header rendered above the week's day cells. Mirrors `DayCellView`'s HStack
+/// structure (44-pt day slot + divider + three flex columns) so labels align with the
+/// numbers below.
+struct DayCellHeader: View {
+    var body: some View {
+        HStack(alignment: .center, spacing: DayCellLayout.columnSpacing) {
+            Color.clear.frame(width: DayCellLayout.dayColumnWidth, height: 1)
+            Divider().hidden()
+            Text("Consumed")
+                .frame(maxWidth: .infinity)
+            Text("Exercise")
+                .frame(maxWidth: .infinity)
+            Text("Remaining")
+                .frame(maxWidth: .infinity)
+        }
+        .font(.caption2.weight(.semibold))
+        .foregroundStyle(.secondary)
+        .textCase(.uppercase)
+        .padding(.horizontal, DayCellLayout.horizontalPadding)
     }
 }
