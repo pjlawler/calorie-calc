@@ -1,0 +1,42 @@
+# Cloudflare Worker that proxies the iOS app's Anthropic API calls.
+#
+# Setup (run from this directory):
+#   1. wrangler login
+#   2. wrangler kv namespace create DEVICES         # copy the id
+#   3. wrangler kv namespace create CHALLENGES      # copy the id
+#   4. wrangler kv namespace create RATE_LIMITS     # copy the id
+#      Paste the three ids into the [[kv_namespaces]] entries below.
+#   5. wrangler secret put ANTHROPIC_API_KEY        # paste the rotated key
+#   6. Set APPLE_APP_ID below to "<TEAMID>.<bundle.id>" — find TEAMID at
+#      developer.apple.com/account → Membership Details, bundle id matches
+#      Xcode's Signing & Capabilities pane.
+#   7. wrangler deploy
+
+name = "calorie-calc-proxy"
+main = "src/index.ts"
+compatibility_date = "2025-01-15"
+
+# Set this to "<TEAM_ID>.<BUNDLE_ID>" — used to verify App Attest attestations
+# come from this app and not some other one signed with stolen credentials.
+[vars]
+APPLE_APP_ID = "X8629DMYVG.com.lawlerinnovationsinc-calorie"
+# Per-device daily request quota. Set higher if you have power users.
+DAILY_REQUEST_LIMIT = "100"
+# When true, accept the App Attest "appattestdevelop" AAGUID. Flip to false
+# before App Store submission so dev-environment attestations are rejected.
+ALLOW_DEV_ATTESTATION = "true"
+
+[[kv_namespaces]]
+binding = "DEVICES"
+id = "5a6501f17e33481d92ae7a5a99edda58"
+
+[[kv_namespaces]]
+binding = "CHALLENGES"
+id = "cdb1656295a74c0a9c421bd931002b92"
+
+[[kv_namespaces]]
+binding = "RATE_LIMITS"
+id = "d46f3bb76bf342bcb283844b60bbb606"
+
+[observability]
+enabled = true

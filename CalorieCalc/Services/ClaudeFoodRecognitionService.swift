@@ -2,26 +2,36 @@ import Foundation
 
 final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
 
-    private let apiKey: String
+    private let attest: AppAttestService
     private let model: String
     private let session: URLSession
-    private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    private let endpoint: URL
 
     init(
-        apiKey: String? = nil,
+        proxyBaseURL: URL,
+        attest: AppAttestService,
         model: String = "claude-sonnet-4-6",
         session: URLSession = .shared
     ) {
-        self.apiKey = apiKey
-            ?? (Bundle.main.object(forInfoDictionaryKey: "ANTHROPIC_API_KEY") as? String)
-            ?? ""
+        self.attest = attest
+        self.endpoint = proxyBaseURL.appendingPathComponent("v1/messages")
         self.model = model
         self.session = session
     }
 
-    func recognize(imageData: Data, hint: String?) async throws -> RecognizedMeal {
-        guard !apiKey.isEmpty else { throw FoodRecognitionError.missingAPIKey }
+    /// Builds an authenticated POST to the proxy. The proxy adds the Anthropic API key
+    /// server-side; the device proves itself via App Attest assertion bound to `body`.
+    private func authedRequest(body: Data) async throws -> URLRequest {
+        var req = URLRequest(url: endpoint)
+        req.httpMethod = "POST"
+        req.addValue("application/json", forHTTPHeaderField: "content-type")
+        req.addValue(try await attest.deviceId(), forHTTPHeaderField: "X-Device-Id")
+        req.addValue(try await attest.assertion(for: body), forHTTPHeaderField: "X-Assertion")
+        req.httpBody = body
+        return req
+    }
 
+    func recognize(imageData: Data, hint: String?) async throws -> RecognizedMeal {
         let body = RequestBody(
             model: model,
             maxTokens: 1024,
@@ -39,12 +49,8 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             toolChoice: ToolChoice(type: "tool", name: "log_meal")
         )
 
-        var req = URLRequest(url: endpoint)
-        req.httpMethod = "POST"
-        req.addValue(apiKey, forHTTPHeaderField: "x-api-key")
-        req.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.addValue("application/json", forHTTPHeaderField: "content-type")
-        req.httpBody = try JSONEncoder().encode(body)
+        let bodyData = try JSONEncoder().encode(body)
+        let req = try await authedRequest(body: bodyData)
 
         do {
             let (data, response) = try await session.data(for: req)
@@ -90,7 +96,6 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
     }
 
     func estimate(description: String) async throws -> RecognizedMeal {
-        guard !apiKey.isEmpty else { throw FoodRecognitionError.missingAPIKey }
         let trimmed = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw FoodRecognitionError.noResult }
 
@@ -104,12 +109,8 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             toolChoice: ToolChoice(type: "tool", name: "log_meal")
         )
 
-        var req = URLRequest(url: endpoint)
-        req.httpMethod = "POST"
-        req.addValue(apiKey, forHTTPHeaderField: "x-api-key")
-        req.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.addValue("application/json", forHTTPHeaderField: "content-type")
-        req.httpBody = try JSONEncoder().encode(body)
+        let bodyData = try JSONEncoder().encode(body)
+        let req = try await authedRequest(body: bodyData)
 
         do {
             let (data, response) = try await session.data(for: req)
@@ -155,7 +156,6 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
     }
 
     func analyzeRecipe(_ input: RecipeAnalysisInput) async throws -> AnalyzedRecipe {
-        guard !apiKey.isEmpty else { throw FoodRecognitionError.missingAPIKey }
         guard !input.ingredients.isEmpty else { throw FoodRecognitionError.noResult }
 
         let body = RequestBody(
@@ -168,12 +168,8 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             toolChoice: ToolChoice(type: "tool", name: "log_recipe")
         )
 
-        var req = URLRequest(url: endpoint)
-        req.httpMethod = "POST"
-        req.addValue(apiKey, forHTTPHeaderField: "x-api-key")
-        req.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        req.addValue("application/json", forHTTPHeaderField: "content-type")
-        req.httpBody = try JSONEncoder().encode(body)
+        let bodyData = try JSONEncoder().encode(body)
+        let req = try await authedRequest(body: bodyData)
 
         do {
             let (data, response) = try await session.data(for: req)

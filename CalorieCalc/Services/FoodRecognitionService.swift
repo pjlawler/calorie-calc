@@ -145,7 +145,7 @@ nonisolated enum FoodRecognitionError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            "No Claude API key found. Add ANTHROPIC_API_KEY to Secrets.xcconfig."
+            "AI features are unavailable on this device right now. Please try again later."
         case .invalidResponse:
             "Claude returned an unexpected response."
         case .networkFailure(let message):

@@ -92,7 +92,14 @@ struct CalorieCalcApp: App {
             barcodeSources: [openFoodFacts, usda]
         )
         foodDataSource = FoodDataSourceEnvironment(dataSource: chained)
-        foodRecognition = FoodRecognitionEnvironment(service: ClaudeFoodRecognitionService())
+        let proxyURLString = (Bundle.main.object(forInfoDictionaryKey: "PROXY_BASE_URL") as? String) ?? ""
+        guard !proxyURLString.isEmpty, let proxyBaseURL = URL(string: proxyURLString) else {
+            fatalError("PROXY_BASE_URL must be set in Secrets.xcconfig — see proxy/README.md.")
+        }
+        let attest = AppAttestService(proxyBaseURL: proxyBaseURL)
+        foodRecognition = FoodRecognitionEnvironment(
+            service: ClaudeFoodRecognitionService(proxyBaseURL: proxyBaseURL, attest: attest)
+        )
     }
 
     var body: some Scene {
