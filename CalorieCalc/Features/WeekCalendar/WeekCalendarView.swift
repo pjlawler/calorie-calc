@@ -184,15 +184,25 @@ private struct WeekCalendarBody: View {
             FavoriteQuickAddListSheet(favorites: favoriteFoods)
         }
         .navigationDestination(item: $selectedDate) { date in
+            let isToday = Calendar.current.isDateInToday(date)
+            // Per-day plan, NOT the global bank-day goal: bonus days have a higher planned
+            // gross than `period.dailyGrossCalorieGoal`. Fall back to the bank-day goal only
+            // when the budget didn't compute one (past off-days with no logged data).
+            let budget = zip(weekDates, calculation.dailyBudgets)
+                .first { Calendar.current.isDate($0.0, inSameDayAs: date) }?.1
+            let plannedForDay = Int((budget?.grossBudget ?? Double(period.dailyGrossCalorieGoal)).rounded())
             DayDetailView(
                 date: date,
-                currentWeekMathData: Calendar.current.isDateInToday(date) ? displayMathData : nil
+                dailyPlanned: plannedForDay,
+                priorDaysVariance: isToday ? priorDaysVariance : nil,
+                weeklyRemaining: isToday ? displayMathData.totalVariance : nil
             )
         }
         .onAppear { captureStableData() }
         .onChange(of: mathCardData) { _, _ in captureStableData() }
         .onChange(of: isHealthBurnLoaded) { _, _ in captureStableData() }
         .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
+            selectedDate = nil
             withAnimation { proxy.scrollTo("top", anchor: .top) }
         }
         }
@@ -248,6 +258,30 @@ private struct WeekCalendarBody: View {
         calculation.dailyBudgets.prefix { $0.status != .future }
     }
 
+    /// Day-detail "Variance" — how prior-day plan adherence is tracking.
+    ///
+    /// Variance = (Σ priorPlannedEat − Σ priorActualEat)
+    ///          + (Σ priorActualBurn − Σ priorPlannedExercise)
+    ///          − todayPlannedExercise
+    ///
+    /// The trailing `− todayPlannedExercise` ties this number to the parent week's
+    /// `totalVariance` (used as Remaining) so that Remaining = todayPlanned −
+    /// todayConsumed + todayBurned + Variance holds.
+    private var priorDaysVariance: Int {
+        let priorDays = nonFutureBudgets.filter { $0.status == .past }
+        let priorPlannedEat = priorDays.reduce(0.0) { acc, day in
+            acc + (day.grossBudget ?? Double(period.dailyGrossCalorieGoal))
+        }
+        let priorActualEat = priorDays.reduce(0.0) { $0 + $1.consumed }
+        let priorPlannedExercise = Double(priorDays.count * period.dailyWorkoutCalorieGoal)
+        let priorActualBurn = priorDays.reduce(0.0) { $0 + $1.burned }
+        let todayPlannedExercise = Double(period.dailyWorkoutCalorieGoal)
+        let value = (priorPlannedEat - priorActualEat)
+                  + (priorActualBurn - priorPlannedExercise)
+                  - todayPlannedExercise
+        return Int(value.rounded())
+    }
+
     private var futureBudgets: [DailyBudget] {
         calculation.dailyBudgets.filter { $0.status == .future }
     }
@@ -290,14 +324,21 @@ private struct FavoriteQuickAddListSheet: View {
 
     @State private var selectedMeal: MealType = MealType.quickAddDefaultForCurrentTime()
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: .now)
+    @State private var searchText: String = ""
 
     private var sortedFavorites: [CachedFood] {
-        favorites.sorted { lhs, rhs in
+        let base = favorites.sorted { lhs, rhs in
             let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
             if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
             let lb = lhs.brand ?? ""
             let rb = rhs.brand ?? ""
             return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
+        }
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return base }
+        return base.filter { food in
+            food.name.localizedCaseInsensitiveContains(trimmed)
+                || (food.brand?.localizedCaseInsensitiveContains(trimmed) ?? false)
         }
     }
 
@@ -311,6 +352,25 @@ private struct FavoriteQuickAddListSheet: View {
                         }
                     }
                     DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
+                }
+
+                Section {
+                    HStack {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        TextField("Search favorites", text: $searchText)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        if !searchText.isEmpty {
+                            Button {
+                                searchText = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
 
                 Section("Favorites") {

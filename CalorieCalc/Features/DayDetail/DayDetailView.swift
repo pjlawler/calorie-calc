@@ -4,10 +4,14 @@ import SwiftData
 struct DayDetailView: View {
 
     let date: Date
-    /// When viewing today and provided by the parent week view, the "Today's Variance"
-    /// card renders at the top of the day. Nil for any other day or when math hasn't
-    /// finished computing yet.
-    var currentWeekMathData: MathCardData? = nil
+    /// Daily gross calorie goal from the user's plan. Shown on the "Planned" row.
+    var dailyPlanned: Int = 0
+    /// (Σ planned_eat + Σ planned_exercise) − (Σ actual_eaten + Σ actual_exercise) summed
+    /// across the prior days of the week. Non-nil only when `date` is today.
+    var priorDaysVariance: Int? = nil
+    /// Same number rendered in the weekly list's "Remaining" column for today —
+    /// `displayMathData.totalVariance`. Non-nil only when `date` is today.
+    var weeklyRemaining: Int? = nil
 
     @Environment(\.modelContext) private var modelContext
     @Environment(HealthKitService.self) private var healthKitService
@@ -15,7 +19,7 @@ struct DayDetailView: View {
     @Query private var profiles: [UserProfile]
 
     @State private var viewModel: DayDetailViewModel?
-    @State private var presentedMealSearch: MealType?
+    @State private var showAddSheet = false
     @State private var editingEntry: FoodEntry?
     @State private var showManualWorkout = false
     @State private var showSupplementPicker = false
@@ -29,16 +33,29 @@ struct DayDetailView: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            totalsHeader(log: dayLog)
-            if let mathData = currentWeekMathData,
-               Calendar.current.isDateInToday(date) {
-                MathCard(
-                    data: mathData,
-                    isLastDayOrPast: false,
-                    includeRemaining: false
-                )
-                .padding(.horizontal)
+            HStack(alignment: .bottom) {
+                Text(date.formatted(.dateTime.weekday(.wide).month().day()))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .textCase(.uppercase)
+                Spacer()
+                Button {
+                    showAddSheet = true
+                } label: {
+                    Label("Log", systemImage: "plus.circle.fill")
+                        .labelStyle(TitleAndIconLabelStyle())
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .accessibilityLabel("Log food")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
+            .padding(.top, 12)
+
+            dailyStatsPanel(log: dayLog)
+
             List {
                 mealsSections(log: dayLog)
                 if tracksSupplements {
@@ -54,10 +71,13 @@ struct DayDetailView: View {
                 }
             }
         }
-        .navigationTitle(date.formatted(.dateTime.weekday(.wide).month().day()))
+        .navigationTitle("Day Details")
         .navigationBarTitleDisplayMode(.inline)
-        .sheet(item: $presentedMealSearch) { meal in
-            FoodSearchView(mealType: meal, date: date)
+        .sheet(isPresented: $showAddSheet) {
+            // initialMealType defaults to MealType.quickAddDefaultForCurrentTime() so the
+            // meal picker lands on whichever slot matches "now". The user can change it
+            // inside the sheet.
+            FoodSearchView(date: date)
         }
         .sheet(item: $editingEntry) { entry in
             FoodPortionSheet(editing: entry) { editingEntry = nil }
@@ -77,69 +97,51 @@ struct DayDetailView: View {
     }
 
     @ViewBuilder
-    private func totalsHeader(log: DayLog?) -> some View {
+    private func dailyStatsPanel(log: DayLog?) -> some View {
         let hkBurn = viewModel?.includedHealthKitActiveEnergy ?? 0
         let manualBurn = log?.totalManualBurned ?? 0
-        let totalBurn = hkBurn + manualBurn
-        let consumed = log?.totalConsumedCalories ?? 0
-        let net = consumed - totalBurn
-        let roundedNet = net.rounded()
-        let netDisplay = roundedNet < 0
-            ? "(\(CalorieFormatter.whole(abs(roundedNet))))"
-            : CalorieFormatter.whole(roundedNet)
+        let totalBurn = Int((hkBurn + manualBurn).rounded())
+        let consumed = Int((log?.totalConsumedCalories ?? 0).rounded())
+        let isToday = Calendar.current.isDateInToday(date)
 
-        VStack(spacing: 12) {
-            HStack {
-                totalCell(title: "Consumed", value: CalorieFormatter.whole(consumed))
-                Divider().frame(height: 36)
-                totalCell(title: "Burned", value: CalorieFormatter.whole(totalBurn))
-                Divider().frame(height: 36)
-                totalCell(
-                    title: "Net",
-                    value: netDisplay,
-                    valueColor: roundedNet < 0 ? .red : .primary
+        VStack(alignment: .leading, spacing: 8) {
+            statRow(label: "Planned", value: dailyPlanned)
+            statRow(label: "Consumed (-)", value: consumed)
+            statRow(label: "Burned (+)", value: totalBurn)
+            if isToday, let variance = priorDaysVariance {
+                statRow(
+                    label: "Variance (+)",
+                    value: variance,
+                    color: variance >= 0 ? .green : .red
                 )
             }
-            macroRow(
-                protein: log?.totalProtein ?? 0,
-                carbs: log?.totalCarbs ?? 0,
-                fat: log?.totalFat ?? 0
-            )
+            if isToday, let remaining = weeklyRemaining {
+                Divider()
+                statRow(
+                    label: "Remaining",
+                    value: remaining,
+                    color: remaining >= 0 ? .green : .red
+                )
+            }
         }
+        .padding(.vertical, 14)
+        .padding(.horizontal, 16)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
         .padding(.horizontal)
-        .padding(.top, 12)
     }
 
-    private func totalCell(title: String, value: String, valueColor: Color = .primary) -> some View {
-        VStack(spacing: 2) {
-            Text(title)
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .textCase(.uppercase)
-            Text(value)
-                .font(.title3.weight(.bold).monospacedDigit())
-                .foregroundStyle(valueColor)
+    private func statRow(label: String, value: Int, color: Color = .primary) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            Text("\(value.formatted(.number)) \(Text("kcal").font(.system(size: 16, weight: .semibold)))")
+                .monospacedDigit()
+                .foregroundStyle(color)
         }
-        .frame(maxWidth: .infinity)
-    }
-
-    private func macroRow(protein: Double, carbs: Double, fat: Double) -> some View {
-        HStack(spacing: 16) {
-            macroPill(label: "P", value: protein, tint: .accentColor)
-            macroPill(label: "C", value: carbs, tint: .orange)
-            macroPill(label: "F", value: fat, tint: .pink)
-        }
-    }
-
-    private func macroPill(label: String, value: Double, tint: Color) -> some View {
-        HStack(spacing: 6) {
-            Circle().fill(tint).frame(width: 8, height: 8)
-            Text("\(label) \(CalorieFormatter.macro(value))g")
-                .font(.footnote.monospacedDigit())
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(Capsule().fill(.regularMaterial))
+        .font(.system(size: 20, weight: .semibold))
     }
 
     @ViewBuilder
@@ -148,7 +150,6 @@ struct DayDetailView: View {
             MealSectionView(
                 mealType: meal,
                 entries: log?.entries(for: meal) ?? [],
-                onAdd: { presentedMealSearch = meal },
                 onEdit: { entry in editingEntry = entry },
                 onDelete: { entry in delete(entry: entry) }
             )
@@ -207,29 +208,23 @@ struct DayDetailView: View {
         }
     }
 
-    /// Reference-only daily step count. Sits below the Workouts section. Steps are NOT folded
-    /// into burned-calorie math (Apple's activeEnergyBurned already accounts for them, so any
-    /// per-step formula here would double-count workouts that involve walking).
+    /// Reference-only daily step count. Steps are NOT folded into burned-calorie math
+    /// (Apple's activeEnergyBurned already accounts for them, so any per-step formula here
+    /// would double-count workouts that involve walking).
     @ViewBuilder
     private var stepsSection: some View {
         let steps = Int((viewModel?.dailySteps ?? 0).rounded())
         Section {
+            EmptyView()
+        } header: {
             HStack {
-                Image(systemName: "figure.walk")
-                    .foregroundStyle(.teal)
-                Text("Steps")
+                Label("Steps", systemImage: "figure.walk")
+                    .font(.headline)
                 Spacer()
                 Text(steps.formatted(.number))
-                    .monospacedDigit()
+                    .font(.subheadline.monospacedDigit())
+                    .foregroundStyle(.secondary)
             }
-            .font(.subheadline)
-        } header: {
-            Label("Steps", systemImage: "figure.walk")
-                .font(.headline)
-        } footer: {
-            Text("Reference only — Apple Health step count for the day. Doesn't contribute to burned calories.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
     }
 
@@ -247,10 +242,6 @@ struct DayDetailView: View {
         modelContext.delete(supplement)
         try? modelContext.save()
     }
-}
-
-extension MealType: Identifiable {
-    public var id: String { rawValue }
 }
 
 private struct HealthKitWorkoutRow: View {

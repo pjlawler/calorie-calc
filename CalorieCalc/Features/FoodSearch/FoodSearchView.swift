@@ -3,7 +3,6 @@ import SwiftData
 
 struct FoodSearchView: View {
 
-    let mealType: MealType
     let date: Date
 
     @Environment(\.modelContext) private var modelContext
@@ -13,6 +12,7 @@ struct FoodSearchView: View {
     @Query(sort: \CachedFood.lastUsed, order: .reverse)
     private var cachedFoods: [CachedFood]
 
+    @State private var mealType: MealType
     @State private var viewModel: FoodSearchViewModel?
     @State private var tab: Tab = .search
     @State private var showScanner = false
@@ -21,6 +21,13 @@ struct FoodSearchView: View {
     @State private var showDescribe = false
     @State private var quickAddBarcode: String?
     @State private var portionTarget: FoodSearchResult?
+
+    /// Defaults the meal picker to the time-of-day-appropriate slot (breakfast / lunch /
+    /// dinner / snack). Callers can override when they need a specific meal.
+    init(date: Date, initialMealType: MealType = .quickAddDefaultForCurrentTime()) {
+        self.date = date
+        _mealType = State(initialValue: initialMealType)
+    }
 
     /// Shared with the Foods tab via the same `@AppStorage` key — toggling in one place is
     /// reflected in the other so the user's "show only favorites" preference is global.
@@ -43,11 +50,28 @@ struct FoodSearchView: View {
 
                 tabContent
             }
-            .navigationTitle("Add to \(mealType.displayName)")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Done") { dismiss() }
+                }
+                ToolbarItem(placement: .principal) {
+                    Menu {
+                        Picker("Meal", selection: $mealType) {
+                            ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
+                                Label(meal.displayName, systemImage: meal.symbolName).tag(meal)
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Add to \(mealType.displayName)")
+                                .font(.headline)
+                            Image(systemName: "chevron.down")
+                                .font(.footnote)
+                        }
+                        .foregroundStyle(.primary)
+                    }
+                    .accessibilityLabel("Change meal")
                 }
                 if tab == .recents || tab == .myFoods {
                     ToolbarItem(placement: .topBarTrailing) {

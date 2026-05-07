@@ -5,40 +5,23 @@ struct MealSectionView: View {
 
     let mealType: MealType
     let entries: [FoodEntry]
-    let onAdd: () -> Void
     let onEdit: (FoodEntry) -> Void
     let onDelete: (FoodEntry) -> Void
 
     var body: some View {
         Section {
-            if entries.isEmpty {
-                Button(action: onAdd) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundStyle(.tint)
-                        Text("Add food")
-                            .foregroundStyle(.primary)
-                        Spacer()
-                    }
-                    .padding(.vertical, 4)
+            ForEach(entries) { entry in
+                Button { onEdit(entry) } label: {
+                    FoodEntryRow(entry: entry)
                 }
-            } else {
-                ForEach(entries) { entry in
-                    Button { onEdit(entry) } label: {
-                        FoodEntryRow(entry: entry)
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        onDelete(entry)
+                    } label: {
+                        Label("Delete", systemImage: "trash")
                     }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            onDelete(entry)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
-                    }
-                }
-                Button(action: onAdd) {
-                    Label("Add food", systemImage: "plus.circle")
                 }
             }
         } header: {

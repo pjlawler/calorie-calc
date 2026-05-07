@@ -20,11 +20,6 @@ struct WeightLogView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                WeightHistoryView(entries: entries, displayUnit: profile?.weightUnit ?? .pounds)
-                    .frame(height: 220)
-                    .padding(.horizontal)
-                    .padding(.top, 8)
-
                 Form {
                     Section("New entry") {
                         HStack {
