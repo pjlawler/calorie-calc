@@ -48,7 +48,25 @@ actor AppAttestService {
         }
         var input = keyIdData
         input.append(body)
-        let clientDataHash = Data(SHA256.hash(data: input))
+        return try await sign(keyId: keyId, clientData: input)
+    }
+
+    /// Signs a GET request that has no body. The proxy reconstructs the same byte string
+    /// (`keyId || "GET:" || path || ":" || timestampMs`) and verifies the assertion;
+    /// requests outside a 60s window are rejected. Use for read-only authenticated
+    /// endpoints like `/v1/account/state`.
+    func assertionForGet(path: String, timestampMs: Int64) async throws -> String {
+        let keyId = try await deviceId()
+        guard let keyIdData = Data(base64Encoded: keyId) else {
+            throw AppAttestError.malformedKeyId
+        }
+        var input = keyIdData
+        input.append(Data("GET:\(path):\(timestampMs)".utf8))
+        return try await sign(keyId: keyId, clientData: input)
+    }
+
+    private func sign(keyId: String, clientData: Data) async throws -> String {
+        let clientDataHash = Data(SHA256.hash(data: clientData))
         do {
             let assertion = try await attestService.generateAssertion(
                 keyId,

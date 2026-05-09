@@ -1,6 +1,21 @@
 import { Hono } from "hono";
 import { verifyAssertion, verifyAttestation } from "./attest";
+import { verifySSV } from "./admobssv";
+import {
+  decodeNotification,
+  decodeTransaction,
+  verifyJWS,
+  type AppleTransaction,
+} from "./applestore";
 import { b64decode, b64encode, concat } from "./crypto-utils";
+import {
+  grantInitialCreditsIfNeeded,
+  hasEntitlement,
+  isSubscriptionActive,
+  parseDevice,
+  serializeDevice,
+  type StoredDevice,
+} from "./entitlements";
 import { rateLimit } from "./ratelimit";
 
 type Env = {
@@ -8,15 +23,14 @@ type Env = {
   APPLE_APP_ID: string;
   ALLOW_DEV_ATTESTATION: string;
   DAILY_REQUEST_LIMIT: string;
+  CREDITS_PER_AD: string;
+  INITIAL_FREE_CREDITS: string;
+  SUBSCRIPTION_PRODUCT_ID: string;
+  APPSTORE_BUNDLE_ID: string;
+  APPSTORE_ENVIRONMENT: string;
   DEVICES: KVNamespace;
   CHALLENGES: KVNamespace;
   RATE_LIMITS: KVNamespace;
-};
-
-type StoredDevice = {
-  spki: string;     // base64-encoded SubjectPublicKeyInfo
-  counter: number;  // last assertion counter; new assertion must exceed
-  registeredAt: number;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -67,10 +81,263 @@ app.post("/v1/attest/register", async (c) => {
     spki: b64encode(result.publicKeySpki),
     counter: 0,
     registeredAt: Date.now(),
+    credits: 0,
+    subscriptionExpiresAt: null,
+    originalTransactionId: null,
+    grandfatheredAt: null,
   };
-  await c.env.DEVICES.put(`d:${keyId}`, JSON.stringify(stored));
+  await c.env.DEVICES.put(`d:${keyId}`, serializeDevice(stored));
   return c.json({ deviceId: keyId });
 });
+
+// Read-only entitlement state. Authenticated by an App Attest assertion bound to
+// `deviceId || "GET:/v1/account/state:" || X-Timestamp`. Timestamp must be within
+// 60s of server time to defeat capture-and-replay. Also runs the grandfather grant,
+// so opening the app on a TestFlight device that pre-dates this deploy is enough to
+// hand them their initial credits without making an AI call first.
+app.get("/v1/account/state", async (c) => {
+  const deviceId = c.req.header("X-Device-Id");
+  const assertion = c.req.header("X-Assertion");
+  const timestamp = c.req.header("X-Timestamp");
+  if (!deviceId || !assertion || !timestamp) {
+    return c.json({ error: "auth_required" }, 401);
+  }
+
+  const ts = parseInt(timestamp, 10);
+  if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > 60_000) {
+    return c.json({ error: "timestamp_skew" }, 401);
+  }
+
+  const stored = await c.env.DEVICES.get(`d:${deviceId}`);
+  if (!stored) return c.json({ error: "unknown_device" }, 401);
+  const device = parseDevice(stored);
+
+  // Reconstruct exactly the bytes the client hashed: keyId || "GET:..." || timestamp.
+  const clientData = concat(
+    b64decode(deviceId),
+    new TextEncoder().encode(`GET:/v1/account/state:${timestamp}`),
+  );
+
+  const v = await verifyAssertion({
+    publicKeySpki: b64decode(device.spki),
+    storedCounter: device.counter,
+    assertion,
+    clientData,
+    appId: c.env.APPLE_APP_ID,
+  });
+  if (!v.ok) return c.json({ error: v.error }, 401);
+
+  device.counter = v.newCounter;
+  const initial = parseInt(c.env.INITIAL_FREE_CREDITS, 10) || 0;
+  grantInitialCreditsIfNeeded(device, initial);
+  await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+
+  return c.json({
+    subscriptionActive: isSubscriptionActive(device, Date.now()),
+    creditsRemaining: device.credits,
+    subscriptionExpiresAt: device.subscriptionExpiresAt,
+  });
+});
+
+// Client-initiated subscription verification. iOS sends the JWS representation of a
+// StoreKit 2 transaction (returned by `Transaction.currentEntitlements` or right
+// after a purchase). We verify the JWS signature + chain to Apple Root CA G3,
+// confirm the bundle/product match, and update this device's entitlement record.
+//
+// Same auth as /v1/messages: an App Attest assertion bound to the request body.
+app.post("/v1/subscriptions/verify", async (c) => {
+  const deviceId = c.req.header("X-Device-Id");
+  const assertion = c.req.header("X-Assertion");
+  if (!deviceId || !assertion) return c.json({ error: "auth_required" }, 401);
+
+  const stored = await c.env.DEVICES.get(`d:${deviceId}`);
+  if (!stored) return c.json({ error: "unknown_device" }, 401);
+  const device = parseDevice(stored);
+
+  const rawBody = new Uint8Array(await c.req.raw.arrayBuffer());
+  const v = await verifyAssertion({
+    publicKeySpki: b64decode(device.spki),
+    storedCounter: device.counter,
+    assertion,
+    clientData: concat(b64decode(deviceId), rawBody),
+    appId: c.env.APPLE_APP_ID,
+  });
+  if (!v.ok) return c.json({ error: v.error }, 401);
+  device.counter = v.newCounter;
+
+  let body: { jwsRepresentation?: string };
+  try {
+    body = JSON.parse(new TextDecoder().decode(rawBody));
+  } catch {
+    await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+    return c.json({ error: "bad_json" }, 400);
+  }
+  if (!body.jwsRepresentation) {
+    await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+    return c.json({ error: "missing_jws" }, 400);
+  }
+
+  const jws = await verifyJWS(body.jwsRepresentation);
+  if (!jws.ok) {
+    await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+    return c.json({ error: jws.error }, 400);
+  }
+  const tx = decodeTransaction(jws.payload);
+  if (tx.bundleId !== c.env.APPSTORE_BUNDLE_ID) {
+    await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+    return c.json({ error: "wrong_bundle" }, 400);
+  }
+  if (tx.productId !== c.env.SUBSCRIPTION_PRODUCT_ID) {
+    await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+    return c.json({ error: "wrong_product" }, 400);
+  }
+
+  await applyTransactionToDevice(c.env, deviceId, device, tx);
+
+  console.log("subscriptions/verify ok", deviceId, tx.originalTransactionId, tx.expiresDate);
+  return c.json({
+    subscriptionActive: isSubscriptionActive(device, Date.now()),
+    creditsRemaining: device.credits,
+    subscriptionExpiresAt: device.subscriptionExpiresAt,
+  });
+});
+
+// Apple App Store Server Notifications V2. Apple POSTs us {"signedPayload": "<JWS>"};
+// the JWS contains the notification metadata and a nested signedTransactionInfo we
+// need to recover originalTransactionId + expiry. Auth is the JWS signature itself —
+// no App Attest, since Apple doesn't have our keys.
+app.post("/v1/subscriptions/notify", async (c) => {
+  let body: { signedPayload?: string };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "bad_json" }, 400);
+  }
+  if (!body.signedPayload) return c.json({ error: "missing_payload" }, 400);
+
+  const outer = await verifyJWS(body.signedPayload);
+  if (!outer.ok) {
+    console.log("notify outer JWS failed", outer.error);
+    // Apple retries on non-2xx indefinitely. Return 200 so a malformed payload
+    // doesn't pin Apple's retry queue forever; we've already logged it.
+    return c.json({ error: outer.error }, 200);
+  }
+  const note = decodeNotification(outer.payload);
+  if (!note.signedTransactionInfo) {
+    console.log("notify missing signedTransactionInfo", note.notificationType);
+    return c.json({ ok: true });
+  }
+
+  const inner = await verifyJWS(note.signedTransactionInfo);
+  if (!inner.ok) {
+    console.log("notify inner JWS failed", inner.error);
+    return c.json({ error: inner.error }, 200);
+  }
+  const tx = decodeTransaction(inner.payload);
+  if (tx.bundleId !== c.env.APPSTORE_BUNDLE_ID) {
+    console.log("notify bundle mismatch", tx.bundleId);
+    return c.json({ ok: true });
+  }
+  if (tx.productId !== c.env.SUBSCRIPTION_PRODUCT_ID) {
+    return c.json({ ok: true });
+  }
+
+  // Look up which devices own this originalTransactionId (populated by /verify).
+  const deviceListRaw = await c.env.DEVICES.get(`o:${tx.originalTransactionId}`);
+  if (!deviceListRaw) {
+    console.log("notify no devices for", tx.originalTransactionId);
+    return c.json({ ok: true });
+  }
+  const deviceIds = JSON.parse(deviceListRaw) as string[];
+
+  // Map notification type → effective expiry. EXPIRED/REFUND/REVOKE clear the sub
+  // by setting expiry to a past time; renewals push it forward to tx.expiresDate.
+  const clearTypes = new Set(["EXPIRED", "REVOKE", "REFUND", "GRACE_PERIOD_EXPIRED"]);
+  const effectiveExpiry = clearTypes.has(note.notificationType)
+    ? Date.now() - 1
+    : tx.expiresDate;
+
+  for (const deviceId of deviceIds) {
+    const stored = await c.env.DEVICES.get(`d:${deviceId}`);
+    if (!stored) continue;
+    const device = parseDevice(stored);
+    device.subscriptionExpiresAt = effectiveExpiry;
+    device.originalTransactionId = tx.originalTransactionId;
+    await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+    console.log("notify applied", note.notificationType, deviceId, effectiveExpiry);
+  }
+
+  return c.json({ ok: true });
+});
+
+// AdMob Server-Side Verification callback. AdMob hits this URL with a GET when a
+// user finishes a rewarded video. The signature on the query string proves the
+// callback came from Google. We grant `CREDITS_PER_AD` credits to the device id
+// we set on the ad request via `setUserId`.
+app.get("/v1/credits/grant", async (c) => {
+  const url = new URL(c.req.url);
+  const ssv = await verifySSV(url.search.slice(1)); // strip the leading '?'
+  if (!ssv.ok) {
+    console.log("ssv rejected", ssv.error);
+    return c.json({ error: ssv.error }, 403);
+  }
+
+  const txId = ssv.params.get("transaction_id");
+  const deviceId = ssv.params.get("user_id");
+  if (!txId || !deviceId) {
+    return c.json({ error: "missing_fields" }, 400);
+  }
+
+  // Idempotency: AdMob retries SSV callbacks on transient errors. A 30-day TTL is
+  // well past their retry window and well under our KV storage budget.
+  const seen = await c.env.RATE_LIMITS.get(`g:${txId}`);
+  if (seen) {
+    return c.json({ ok: true, alreadyGranted: true });
+  }
+  await c.env.RATE_LIMITS.put(`g:${txId}`, "1", { expirationTtl: 60 * 60 * 24 * 30 });
+
+  const stored = await c.env.DEVICES.get(`d:${deviceId}`);
+  if (!stored) {
+    console.log("ssv unknown device", deviceId);
+    return c.json({ error: "unknown_device" }, 404);
+  }
+  const device = parseDevice(stored);
+  const amount = parseInt(c.env.CREDITS_PER_AD, 10) || 5;
+  const before = device.credits;
+  device.credits += amount;
+  await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+
+  console.log("ssv granted", deviceId, txId, before, "->", device.credits);
+  return c.json({ ok: true });
+});
+
+// Persists `tx` against `device` and updates the originalTransactionId → [deviceId]
+// reverse-lookup KV entry used by /v1/subscriptions/notify. Mutates `device` and
+// writes its KV record. Idempotent — calling multiple times for the same tx is a
+// no-op beyond touching `subscriptionExpiresAt`.
+async function applyTransactionToDevice(
+  env: Env,
+  deviceId: string,
+  device: StoredDevice,
+  tx: AppleTransaction,
+): Promise<void> {
+  device.subscriptionExpiresAt = tx.expiresDate;
+  device.originalTransactionId = tx.originalTransactionId;
+  await env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+
+  // Append this deviceId to o:<originalTransactionId> if it isn't there already.
+  // Multiple devices on the same Apple ID share one originalTransactionId, so
+  // notifications can fan out to all of them.
+  const existing = await env.DEVICES.get(`o:${tx.originalTransactionId}`);
+  const list = existing ? (JSON.parse(existing) as string[]) : [];
+  if (!list.includes(deviceId)) {
+    list.push(deviceId);
+    await env.DEVICES.put(
+      `o:${tx.originalTransactionId}`,
+      JSON.stringify(list),
+    );
+  }
+}
 
 // Authenticated proxy. Body is a verbatim Anthropic /v1/messages payload — the worker
 // adds auth and rate-limits, but doesn't inspect or reshape the JSON.
@@ -81,7 +348,7 @@ app.post("/v1/messages", async (c) => {
 
   const stored = await c.env.DEVICES.get(`d:${deviceId}`);
   if (!stored) return c.json({ error: "unknown_device" }, 401);
-  const device = JSON.parse(stored) as StoredDevice;
+  const device = parseDevice(stored);
 
   const rawBody = new Uint8Array(await c.req.raw.arrayBuffer());
 
@@ -98,13 +365,38 @@ app.post("/v1/messages", async (c) => {
   });
   if (!v.ok) return c.json({ error: v.error }, 401);
 
-  const limit = parseInt(c.env.DAILY_REQUEST_LIMIT, 10) || 100;
-  const allowed = await rateLimit(c.env.RATE_LIMITS, deviceId, limit);
-  if (!allowed) return c.json({ error: "rate_limited" }, 429);
+  // Grant initial credits before checking entitlement so a brand-new device — or a
+  // pre-existing TestFlight device upgrading into this build — never sees a 402 on
+  // their very first AI call. Idempotent (no-op once `grandfatheredAt` is set).
+  const initial = parseInt(c.env.INITIAL_FREE_CREDITS, 10) || 0;
+  if (grantInitialCreditsIfNeeded(device, initial)) {
+    console.log("messages grandfather", deviceId, "+", initial, "->", device.credits);
+  }
 
-  // Persist new counter so a replayed (or older) assertion is rejected next time.
-  device.counter = v.newCounter;
-  await c.env.DEVICES.put(`d:${deviceId}`, JSON.stringify(device));
+  const now = Date.now();
+  const ent = hasEntitlement(device, now);
+  if (!ent.ok) {
+    // Persist the counter and any grandfather grant before bailing — otherwise a
+    // valid assertion gets "wasted" without storing the new counter, breaking the
+    // next request (which would fail counter-replay verification).
+    device.counter = v.newCounter;
+    await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+    return c.json({
+      error: "no_credits",
+      creditsRemaining: 0,
+      subscriptionActive: false,
+    }, 402);
+  }
+
+  // Abuse ceiling, not the paywall. Subscribers and credit users alike are bounded
+  // here so a compromised key can't run our Anthropic bill into the ground.
+  const limit = parseInt(c.env.DAILY_REQUEST_LIMIT, 10) || 50;
+  const allowed = await rateLimit(c.env.RATE_LIMITS, deviceId, limit);
+  if (!allowed) {
+    device.counter = v.newCounter;
+    await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+    return c.json({ error: "rate_limited" }, 429);
+  }
 
   const upstream = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -115,6 +407,23 @@ app.post("/v1/messages", async (c) => {
     },
     body: rawBody,
   });
+
+  // Persist counter regardless of upstream outcome — the assertion was valid and
+  // must not be replayable. Only debit credits when Anthropic actually served us a
+  // 2xx, so an upstream 5xx doesn't cost the user a search.
+  device.counter = v.newCounter;
+  const before = device.credits;
+  if (upstream.status >= 200 && upstream.status < 300 && ent.reason === "credits") {
+    device.credits -= 1;
+  }
+  await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+  console.log(
+    "messages",
+    deviceId,
+    "status", upstream.status,
+    "ent", ent.reason,
+    "credits", before, "->", device.credits,
+  );
 
   if (upstream.status >= 400) {
     const text = await upstream.text();

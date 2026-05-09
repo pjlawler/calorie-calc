@@ -3,6 +3,7 @@ import Foundation
 final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
 
     private let attest: AppAttestService
+    private let entitlements: EntitlementService?
     private let model: String
     private let session: URLSession
     private let endpoint: URL
@@ -10,10 +11,12 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
     init(
         proxyBaseURL: URL,
         attest: AppAttestService,
+        entitlements: EntitlementService? = nil,
         model: String = "claude-sonnet-4-6",
         session: URLSession = .shared
     ) {
         self.attest = attest
+        self.entitlements = entitlements
         self.endpoint = proxyBaseURL.appendingPathComponent("v1/messages")
         self.model = model
         self.session = session
@@ -29,6 +32,35 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         req.addValue(try await attest.assertion(for: body), forHTTPHeaderField: "X-Assertion")
         req.httpBody = body
         return req
+    }
+
+    /// Centralized request execution for all three AI methods. Handles the status-code
+    /// → `FoodRecognitionError` mapping (including the new 402 → `outOfCredits` case)
+    /// and notifies `entitlements` of the outcome so the in-app credit display stays
+    /// in sync with the proxy. Decrement is optimistic — `EntitlementService.refresh()`
+    /// after the call still authoritatively reconciles with the server.
+    private func executeAuthedRequest(body: Data) async throws -> Data {
+        let req = try await authedRequest(body: body)
+        let (data, response) = try await session.data(for: req)
+        guard let http = response as? HTTPURLResponse else {
+            throw FoodRecognitionError.invalidResponse
+        }
+        if http.statusCode == 401 || http.statusCode == 403 {
+            throw FoodRecognitionError.missingAPIKey
+        }
+        if http.statusCode == 402 {
+            await entitlements?.handle402()
+            throw FoodRecognitionError.outOfCredits
+        }
+        if http.statusCode == 429 {
+            throw FoodRecognitionError.overQuota("Rate limited — try again in a moment.")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw FoodRecognitionError.networkFailure(message)
+        }
+        await entitlements?.decrementOptimistically()
+        return data
     }
 
     func recognize(imageData: Data, hint: String?) async throws -> RecognizedMeal {
@@ -50,24 +82,9 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         )
 
         let bodyData = try JSONEncoder().encode(body)
-        let req = try await authedRequest(body: bodyData)
 
         do {
-            let (data, response) = try await session.data(for: req)
-            guard let http = response as? HTTPURLResponse else {
-                throw FoodRecognitionError.invalidResponse
-            }
-            if http.statusCode == 401 || http.statusCode == 403 {
-                throw FoodRecognitionError.missingAPIKey
-            }
-            if http.statusCode == 429 {
-                throw FoodRecognitionError.overQuota("Rate limited — try again in a moment.")
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-                throw FoodRecognitionError.networkFailure(message)
-            }
-
+            let data = try await executeAuthedRequest(body: bodyData)
             let decoded = try JSONDecoder().decode(ResponseBody.self, from: data)
             guard let toolUse = decoded.content.first(where: { $0.type == "tool_use" }),
                   let input = toolUse.input else {
@@ -110,24 +127,9 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         )
 
         let bodyData = try JSONEncoder().encode(body)
-        let req = try await authedRequest(body: bodyData)
 
         do {
-            let (data, response) = try await session.data(for: req)
-            guard let http = response as? HTTPURLResponse else {
-                throw FoodRecognitionError.invalidResponse
-            }
-            if http.statusCode == 401 || http.statusCode == 403 {
-                throw FoodRecognitionError.missingAPIKey
-            }
-            if http.statusCode == 429 {
-                throw FoodRecognitionError.overQuota("Rate limited — try again in a moment.")
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-                throw FoodRecognitionError.networkFailure(message)
-            }
-
+            let data = try await executeAuthedRequest(body: bodyData)
             let decoded = try JSONDecoder().decode(ResponseBody.self, from: data)
             guard let toolUse = decoded.content.first(where: { $0.type == "tool_use" }),
                   let input = toolUse.input else {
@@ -169,24 +171,9 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         )
 
         let bodyData = try JSONEncoder().encode(body)
-        let req = try await authedRequest(body: bodyData)
 
         do {
-            let (data, response) = try await session.data(for: req)
-            guard let http = response as? HTTPURLResponse else {
-                throw FoodRecognitionError.invalidResponse
-            }
-            if http.statusCode == 401 || http.statusCode == 403 {
-                throw FoodRecognitionError.missingAPIKey
-            }
-            if http.statusCode == 429 {
-                throw FoodRecognitionError.overQuota("Rate limited — try again in a moment.")
-            }
-            guard (200..<300).contains(http.statusCode) else {
-                let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
-                throw FoodRecognitionError.networkFailure(message)
-            }
-
+            let data = try await executeAuthedRequest(body: bodyData)
             let decoded = try JSONDecoder().decode(RecipeResponseBody.self, from: data)
             guard let toolUse = decoded.content.first(where: { $0.type == "tool_use" }),
                   let toolInput = toolUse.input else {

@@ -20,11 +20,26 @@ compatibility_date = "2025-01-15"
 # come from this app and not some other one signed with stolen credentials.
 [vars]
 APPLE_APP_ID = "X8629DMYVG.com.lawlerinnovationsinc-calorie"
-# Per-device daily request quota. Set higher if you have power users.
-DAILY_REQUEST_LIMIT = "100"
+# Per-device daily request quota. Abuse ceiling, not the paywall — sized so a
+# compromised App Attest key can only run up ~$30/mo of Anthropic cost.
+DAILY_REQUEST_LIMIT = "50"
 # When true, accept the App Attest "appattestdevelop" AAGUID. Flip to false
 # before App Store submission so dev-environment attestations are rejected.
 ALLOW_DEV_ATTESTATION = "true"
+# Credits granted per AdMob rewarded-video completion (verified via SSV in Phase 3).
+CREDITS_PER_AD = "5"
+# One-time grant fired on a device's first /v1/messages or /v1/account/state call
+# after this version of the worker shipped. Doubles as the new-user free trial and
+# the grandfather allotment for pre-existing TestFlight devices.
+INITIAL_FREE_CREDITS = "25"
+# StoreKit 2 product id for the monthly subscription. Must match the product
+# configured in App Store Connect exactly.
+SUBSCRIPTION_PRODUCT_ID = "com.lawlerinnovationsinc-calorie.ai.monthly"
+# Used to verify the `bundleId` claim in JWS receipts coming back from StoreKit.
+APPSTORE_BUNDLE_ID = "com.lawlerinnovationsinc-calorie"
+# Sandbox while testing TestFlight purchases; flip to "Production" before
+# App Store submission so forged sandbox notifications can't grant prod entitlements.
+APPSTORE_ENVIRONMENT = "Sandbox"
 
 [[kv_namespaces]]
 binding = "DEVICES"

@@ -141,6 +141,7 @@ nonisolated enum FoodRecognitionError: LocalizedError, Sendable {
     case networkFailure(String)
     case noResult
     case overQuota(String)
+    case outOfCredits
 
     var errorDescription: String? {
         switch self {
@@ -154,6 +155,8 @@ nonisolated enum FoodRecognitionError: LocalizedError, Sendable {
             "Claude couldn't identify a meal in this photo. Try a clearer shot or use Quick Add."
         case .overQuota(let message):
             "Claude rejected the request: \(message)"
+        case .outOfCredits:
+            "Out of AI credits. Watch a short ad to earn more, or upgrade for unlimited."
         }
     }
 }
