@@ -85,48 +85,24 @@ enum CachedFoodStoreMigrator {
     /// Open a container in the OLD shape (CachedFood living in `cacheSchema`), read every row,
     /// snapshot it, delete the rows, save, return the snapshots. Best-effort — any failure here
     /// just yields an empty list; the new app continues with no legacy data.
+    ///
+    /// Important: open ONLY the cache store, not the synced store. Earlier versions of this
+    /// migrator opened both configs with `cloudKitDatabase: .none`, which had the side effect of
+    /// touching the synced store's persistence metadata before the real container ever opened.
+    /// On a fresh reinstall that primed SwiftData's CloudKit state in a way that prevented some
+    /// newly-added synced entities (e.g. CachedFood) from being downloaded back from iCloud —
+    /// other entities that had been syncing for a long time were unaffected because their zones
+    /// were already established. Restricting the migrator to just the cache store keeps the
+    /// synced store pristine for the real container's CloudKit handshake.
     private static func readAndPurgeLegacy() -> [CachedFoodSnapshot] {
-        // Old shapes — these have to match the layout the previous build wrote to disk so SwiftData
-        // can open the existing files without a schema mismatch. CachedFood lives in the cache
-        // config; the synced config has the seven user-data models only.
-        let oldSyncedSchema = Schema([
-            UserProfile.self,
-            GoalPeriod.self,
-            DayLog.self,
-            FoodEntry.self,
-            ManualWorkout.self,
-            SupplementEntry.self,
-            WeightEntry.self,
-        ])
-        let oldCacheSchema = Schema([
+        let cacheOnlySchema = Schema([
             CachedFood.self,
             CachedWorkout.self,
             CachedDailySteps.self,
         ])
-        let oldFullSchema = Schema([
-            UserProfile.self,
-            GoalPeriod.self,
-            DayLog.self,
-            FoodEntry.self,
-            ManualWorkout.self,
-            SupplementEntry.self,
-            WeightEntry.self,
-            CachedFood.self,
-            CachedWorkout.self,
-            CachedDailySteps.self,
-        ])
-        // `.none` on both configs even though the synced store was originally `.automatic`: this
-        // is a transactional read, and we don't want CloudKit mirroring to kick in (or tear down)
-        // for a container we're going to drop within microseconds. Reduces side effects on the
-        // synced store's CloudKit state and avoids the teardown churn in the logs.
-        let oldSyncedConfig = ModelConfiguration(
-            schema: oldSyncedSchema,
-            isStoredInMemoryOnly: false,
-            cloudKitDatabase: .none
-        )
-        let oldCacheConfig = ModelConfiguration(
+        let cacheOnlyConfig = ModelConfiguration(
             "Cache",
-            schema: oldCacheSchema,
+            schema: cacheOnlySchema,
             isStoredInMemoryOnly: false,
             cloudKitDatabase: .none
         )
@@ -135,7 +111,7 @@ enum CachedFoodStoreMigrator {
         // SQLite handles) BEFORE we delete the underlying files — closing first lets the
         // file removal succeed even when WAL files are mid-write.
         do {
-            let container = try ModelContainer(for: oldFullSchema, configurations: oldSyncedConfig, oldCacheConfig)
+            let container = try ModelContainer(for: cacheOnlySchema, configurations: cacheOnlyConfig)
             let context = ModelContext(container)
             let foods = (try? context.fetch(FetchDescriptor<CachedFood>())) ?? []
             snapshots = foods.map(CachedFoodSnapshot.init(from:))

@@ -28,7 +28,7 @@ final class RewardedAdService {
 
     private let attest: AppAttestService
     private let adUnitId: String
-    private var rewardedAd: GADRewardedAd?
+    private var rewardedAd: RewardedAd?
     private var presentationCoordinator: AdPresentationCoordinator?
     private var didBootstrap = false
 
@@ -41,7 +41,7 @@ final class RewardedAdService {
         guard !didBootstrap else { return }
         didBootstrap = true
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            GADMobileAds.sharedInstance().start { _ in continuation.resume() }
+            MobileAds.shared.start { _ in continuation.resume() }
         }
     }
 
@@ -54,13 +54,17 @@ final class RewardedAdService {
     }
 
     func loadAd() async throws {
-        let request = GADRequest()
-        let ad = try await GADRewardedAd.load(withAdUnitID: adUnitId, request: request)
+        // Idempotent — guards against the paywall opening before RootView.task got
+        // around to bootstrapping the SDK. Without this, the very first load on a
+        // cold launch can race the GMA initializer and fail.
+        await bootstrap()
+        let request = Request()
+        let ad = try await RewardedAd.load(with: adUnitId, request: request)
         // Tag the ad with the App Attest keyId. AdMob includes this as the `user_id`
         // querystring param in the SSV callback, so the proxy knows which device
         // record to credit. Skipping this would mean every reward goes to /dev/null.
         let deviceId = try await attest.deviceId()
-        let options = GADServerSideVerificationOptions()
+        let options = ServerSideVerificationOptions()
         options.userIdentifier = deviceId
         ad.serverSideVerificationOptions = options
         rewardedAd = ad
@@ -74,7 +78,7 @@ final class RewardedAdService {
         guard let ad = rewardedAd else { throw RewardedAdError.notReady }
 
         // Coordinator must be retained for the duration of the presentation since
-        // GADRewardedAd holds the delegate weakly. Storing on `self` survives the
+        // RewardedAd holds the delegate weakly. Storing on `self` survives the
         // method's continuation suspension.
         let coordinator = AdPresentationCoordinator()
         presentationCoordinator = coordinator
@@ -88,7 +92,7 @@ final class RewardedAdService {
 
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             coordinator.continuation = continuation
-            ad.present(fromRootViewController: rootVC) {
+            ad.present(from: rootVC) {
                 // User qualified for the reward. Server-side verification will fire
                 // the actual credit grant — nothing to do here.
             }
@@ -96,16 +100,16 @@ final class RewardedAdService {
     }
 }
 
-private final class AdPresentationCoordinator: NSObject, GADFullScreenContentDelegate {
+private final class AdPresentationCoordinator: NSObject, FullScreenContentDelegate {
     var continuation: CheckedContinuation<Void, Error>?
 
-    func adDidDismissFullScreenContent(_ ad: GADFullScreenPresentingAd) {
+    func adDidDismissFullScreenContent(_ ad: FullScreenPresentingAd) {
         continuation?.resume()
         continuation = nil
     }
 
     func ad(
-        _ ad: GADFullScreenPresentingAd,
+        _ ad: FullScreenPresentingAd,
         didFailToPresentFullScreenContentWithError error: Error
     ) {
         continuation?.resume(throwing: error)

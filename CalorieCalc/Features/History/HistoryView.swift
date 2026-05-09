@@ -8,6 +8,7 @@ struct HistoryView: View {
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
     @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
     @Query(sort: \SupplementEntry.timestamp) private var supplementEntries: [SupplementEntry]
+    @Query(sort: \WeightEntry.timestamp) private var weightEntries: [WeightEntry]
 
     @AppStorage("history.timeframe") private var timeframe: HistoryTimeframe = .currentWeek
     @AppStorage("settings.showSteps") private var showSteps: Bool = true
@@ -141,6 +142,25 @@ struct HistoryView: View {
         let exercise = HistoryAggregator.summary(metric: .exercise, start: range.start, end: range.end, dailyTotals: totals, averageEnd: avgEnd)
         let net = HistoryAggregator.summary(metric: .net, start: range.start, end: range.end, dailyTotals: totals, averageEnd: avgEnd)
         let dayCount = max(1, (Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: range.start), to: Calendar.current.startOfDay(for: range.end)).day ?? 0) + 1)
+
+        let calendar = Calendar.current
+        let rangeStartDay = calendar.startOfDay(for: range.start)
+        let rangeEndDay = calendar.startOfDay(for: range.end)
+        let exerciseDayCount = totals
+            .filter { $0.key >= rangeStartDay && $0.key <= rangeEndDay && $0.value.exercise > 0 }
+            .count
+
+        // Pull a wider window of weight entries than the analysis range itself so the AI
+        // can comment on trend even when the user is looking at a short period (e.g.
+        // current week). 60 days back gives ~8 weeks of context, plenty for a confident
+        // read once enough samples accumulate.
+        let displayUnit = profiles.first?.weightUnit ?? .pounds
+        let weightWindowStart = calendar.date(byAdding: .day, value: -60, to: rangeStartDay) ?? rangeStartDay
+        let weightSamples = weightEntries
+            .filter { $0.timestamp >= weightWindowStart && $0.timestamp <= range.end }
+            .map { WeightSample(date: $0.timestamp, weight: $0.weight(in: displayUnit)) }
+        let goalWeightInDisplayUnit = profiles.first?.goalWeight
+
         return PeriodNutritionData(
             periodLabel: "\(timeframe.displayName) — \(rangeText)",
             dayCount: dayCount,
@@ -158,7 +178,11 @@ struct HistoryView: View {
             avgNetCalories: net.dayAvg,
             dailyCalorieGoal: currentGoalPeriod?.dailyGrossCalorieGoal,
             dailyNetCalorieGoal: currentGoalPeriod?.dailyNetCalorieGoal,
-            dailyExerciseGoal: currentGoalPeriod?.dailyWorkoutCalorieGoal
+            dailyExerciseGoal: currentGoalPeriod?.dailyWorkoutCalorieGoal,
+            weightSamples: weightSamples,
+            weightUnitSuffix: displayUnit.suffix,
+            goalWeight: goalWeightInDisplayUnit,
+            exerciseDayCount: exerciseDayCount
         )
     }
 

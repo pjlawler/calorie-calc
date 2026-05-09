@@ -5,16 +5,16 @@ struct NutritionAnalysisSheet: View {
     let data: PeriodNutritionData
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(NutritionAnalysisEnvironment.self) private var env
     @State private var phase: Phase = .loading
     @State private var hasStarted = false
+    @State private var showPaywall = false
 
     private enum Phase {
         case loading
         case ready(String)
         case failed(String)
     }
-
-    private let service = NutritionAnalysisService()
 
     var body: some View {
         NavigationStack {
@@ -46,6 +46,7 @@ struct NutritionAnalysisSheet: View {
                     .disabled(isLoading)
                 }
             }
+            .sheet(isPresented: $showPaywall) { PaywallSheet() }
         }
         .task {
             guard !hasStarted else { return }
@@ -102,10 +103,13 @@ struct NutritionAnalysisSheet: View {
     private func analyze() async {
         phase = .loading
         do {
-            let text = try await service.analyze(data)
+            let text = try await env.service.analyze(data)
             phase = .ready(text)
+        } catch NutritionAnalysisError.outOfCredits {
+            phase = .failed(NutritionAnalysisError.outOfCredits.localizedDescription)
+            showPaywall = true
         } catch {
-            phase = .failed(error.localizedDescription)
+            phase = .failed((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
         }
     }
 

@@ -500,19 +500,20 @@ struct DashboardView: View {
                             y: .value("Trend", trend.lineStart),
                             series: .value("Series", "trend")
                         )
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(Color.indigo)
                         .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
                         LineMark(
                             x: .value("Date", lastDate),
                             y: .value("Trend", trend.lineEnd),
                             series: .value("Series", "trend")
                         )
-                        .foregroundStyle(Color.orange)
+                        .foregroundStyle(Color.indigo)
                         .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
                     }
                 }
                 .frame(height: 240)
                 .chartXScale(domain: range.start...chartDomainEnd)
+                .chartYScale(domain: weightChartYDomain(points: points))
                 .chartXAxis { weightXAxis }
                 .chartYAxis {
                     AxisMarks(position: .leading) { value in
@@ -532,6 +533,22 @@ struct DashboardView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.regularMaterial)
         )
+    }
+
+    /// Y-axis domain for the weight chart. Tight around the data so visit-to-visit changes
+    /// are visible: pad 10 units beyond min/max when the swing is wide enough to read; for
+    /// narrower ranges (<40), centre on the average and show ±20 so a flat trend doesn't
+    /// collapse to a single line on the axis.
+    private func weightChartYDomain(points: [WeightPoint]) -> ClosedRange<Double> {
+        guard let minW = points.map(\.weight).min(),
+              let maxW = points.map(\.weight).max() else {
+            return 0...100
+        }
+        if maxW - minW >= 40 {
+            return (minW - 10)...(maxW + 10)
+        }
+        let avg = points.reduce(0.0) { $0 + $1.weight } / Double(points.count)
+        return (avg - 20)...(avg + 20)
     }
 
     @AxisContentBuilder
@@ -584,7 +601,8 @@ struct DashboardView: View {
                         dateLabel: nil,
                         value: String(format: "%.1f", trend.lineEnd),
                         unit: unit,
-                        change: trend.fitChange
+                        change: trend.fitChange,
+                        valueColor: .indigo
                     )
                 }
             }
@@ -596,7 +614,7 @@ struct DashboardView: View {
         date.formatted(.dateTime.month(.defaultDigits).day().year(.twoDigits))
     }
 
-    private func weightTile(title: String, dateLabel: String?, value: String, unit: String, change: Double?) -> some View {
+    private func weightTile(title: String, dateLabel: String?, value: String, unit: String, change: Double?, valueColor: Color = .primary) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(title.uppercased())
@@ -615,6 +633,7 @@ struct DashboardView: View {
                 Text(value)
                     .font(.title3.weight(.semibold))
                     .monospacedDigit()
+                    .foregroundStyle(valueColor)
                 Text(unit).font(.caption).foregroundStyle(.secondary)
                 if let change {
                     Spacer(minLength: 6)

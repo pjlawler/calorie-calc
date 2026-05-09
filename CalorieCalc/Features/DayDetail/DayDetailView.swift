@@ -107,6 +107,8 @@ struct DayDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             statRow(label: "Planned", value: dailyPlanned)
             statRow(label: "Consumed (-)", value: consumed)
+            macroRow(log: log)
+                .padding(.bottom, 8)
             statRow(label: "Burned (+)", value: totalBurn)
             if isToday, let variance = priorDaysVariance {
                 statRow(
@@ -137,11 +139,33 @@ struct DayDetailView: View {
         HStack {
             Text(label)
             Spacer()
-            Text("\(value.formatted(.number)) \(Text("kcal").font(.system(size: 16, weight: .semibold)))")
+            Text("\(value.formatted(.number)) \(Text("kcal").font(.system(size: 13, weight: .semibold)))")
                 .monospacedDigit()
                 .foregroundStyle(color)
         }
-        .font(.system(size: 20, weight: .semibold))
+        .font(.system(size: 17, weight: .semibold))
+    }
+
+    /// Single-row macronutrient totals: colored dot + initial + grams. Mirrors the
+    /// macro display elsewhere in the app and keeps the day-detail panel terse —
+    /// users get the calorie picture above the divider, the macro split below.
+    private func macroRow(log: DayLog?) -> some View {
+        HStack(spacing: 14) {
+            macroBadge(letter: "P", grams: log?.totalProtein ?? 0, color: .red)
+            macroBadge(letter: "C", grams: log?.totalCarbs ?? 0, color: .orange)
+            macroBadge(letter: "F", grams: log?.totalFat ?? 0, color: .blue)
+        }
+        .padding(.leading, 16)
+    }
+
+    private func macroBadge(letter: String, grams: Double, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+            Text("\(letter) \(Int(grams.rounded()))g")
+                .font(.subheadline.weight(.semibold).monospacedDigit())
+        }
     }
 
     @ViewBuilder

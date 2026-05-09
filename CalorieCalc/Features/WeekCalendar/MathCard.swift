@@ -170,10 +170,11 @@ struct MathCard: View {
     private var remainingCard: some View {
         cardShell(
             collapsed: $remainingCollapsed,
-            eyebrow: remainingEyebrow,
+            eyebrow: "REMAINING THIS WEEK",
             heroText: remainingHeroText,
             heroColor: remainingColor,
-            heroAnimationValue: Double(data.estimatedRemaining)
+            heroAnimationValue: Double(data.estimatedRemaining),
+            showsUnit: false
         ) {
             VStack(spacing: 0) {
                 inputRow(label: "Allocated net calories",
@@ -215,10 +216,11 @@ struct MathCard: View {
     @ViewBuilder
     private func cardShell<Content: View>(
         collapsed: Binding<Bool>,
-        eyebrow: String,
+        eyebrow: String?,
         heroText: String,
         heroColor: Color,
         heroAnimationValue: Double,
+        showsUnit: Bool = true,
         @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         CardShell(
@@ -227,6 +229,7 @@ struct MathCard: View {
             heroText: heroText,
             heroColor: heroColor,
             heroAnimationValue: heroAnimationValue,
+            showsUnit: showsUnit,
             content: content
         )
     }
@@ -295,10 +298,14 @@ struct MathCard: View {
 /// real `.frame(height:)` between 0 and that exact value, which interpolates cleanly.
 private struct CardShell<Content: View>: View {
     @Binding var collapsed: Bool
-    let eyebrow: String
+    /// `nil` hides the eyebrow row entirely (used by the projected-remaining card,
+    /// which the user asked to render as a number-only headline).
+    let eyebrow: String?
     let heroText: String
     let heroColor: Color
     let heroAnimationValue: Double
+    /// `false` suppresses the "kCal" suffix next to the hero number.
+    let showsUnit: Bool
     @ViewBuilder let content: () -> Content
 
     private var disclosedBody: some View {
@@ -320,26 +327,32 @@ private struct CardShell<Content: View>: View {
                 }
             } label: {
                 HStack(alignment: .center, spacing: 8) {
-                    Text(eyebrow)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                    Spacer(minLength: 8)
-                    HStack(alignment: .lastTextBaseline, spacing: 4) {
-                        Text(heroText)
-                            .font(.system(size: 24, weight: .regular, design: .rounded).monospacedDigit())
-                            .foregroundStyle(heroColor)
-                            .contentTransition(.numericText(value: heroAnimationValue))
-                        Text("kCal")
-                            .font(.caption.weight(.medium))
-                            .foregroundStyle(heroColor)
+                    if let eyebrow {
+                        Text(eyebrow)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
                     }
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(collapsed ? -90 : 0))
-                        .animation(.easeInOut(duration: 0.2), value: collapsed)
+                    Spacer(minLength: 8)
+                    HStack(alignment: .center, spacing: 4) {
+                        HStack(alignment: .lastTextBaseline, spacing: 4) {
+                            Text(heroText)
+                                .font(DayCellLayout.dataFont)
+                                .foregroundStyle(heroColor)
+                                .contentTransition(.numericText(value: heroAnimationValue))
+                            if showsUnit {
+                                Text("kCal")
+                                    .font(.caption.weight(.medium))
+                                    .foregroundStyle(heroColor)
+                            }
+                        }
+                        Image(systemName: "chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(collapsed ? -90 : 0))
+                            .animation(.easeInOut(duration: 0.2), value: collapsed)
+                    }
                 }
                 .contentShape(Rectangle())
             }

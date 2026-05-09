@@ -22,6 +22,7 @@ struct RecipeBuilderSheet: View {
 
     @State private var stage: Stage = .build
     @State private var errorMessage: String?
+    @State private var showPaywall: Bool = false
 
     /// Same options as the manual-ingredient sheet so units feel consistent across the recipe
     /// flows. "serving" is added at the front for the most common case where the user just
@@ -108,6 +109,7 @@ struct RecipeBuilderSheet: View {
                         lookupViewModel = FoodSearchViewModel(dataSource: dataSourceEnv.dataSource)
                     }
                 }
+                .sheet(isPresented: $showPaywall) { PaywallSheet() }
         }
     }
 
@@ -477,6 +479,9 @@ struct RecipeBuilderSheet: View {
             let analyzed = try await recognitionEnv.service.analyzeRecipe(serviceInput)
             prefillResult(from: analyzed, fallbackName: trimmedName)
             stage = .result
+        } catch FoodRecognitionError.outOfCredits {
+            stage = .build
+            showPaywall = true
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             stage = .build

@@ -8,6 +8,10 @@ struct CalorieCalcApp: App {
     private let healthKitService: HealthKitService
     private let foodDataSource: FoodDataSourceEnvironment
     private let foodRecognition: FoodRecognitionEnvironment
+    private let nutritionAnalysis: NutritionAnalysisEnvironment
+    private let entitlementService: EntitlementService
+    private let subscriptionService: SubscriptionService
+    private let rewardedAdService: RewardedAdService
 
     init() {
         // Auto-snapshot the previous session's store files BEFORE opening the container, so
@@ -97,8 +101,31 @@ struct CalorieCalcApp: App {
             fatalError("PROXY_BASE_URL must be set in Secrets.xcconfig — see proxy/README.md.")
         }
         let attest = AppAttestService(proxyBaseURL: proxyBaseURL)
+        let entitlements = EntitlementService(proxyBaseURL: proxyBaseURL, attest: attest)
+        entitlementService = entitlements
+        subscriptionService = SubscriptionService(
+            proxyBaseURL: proxyBaseURL,
+            attest: attest,
+            entitlements: entitlements
+        )
+        // Test rewarded unit when the xcconfig key is unset — lets dev builds run before
+        // a real AdMob unit is provisioned. Replace via Secrets.xcconfig for prod.
+        let configuredAdUnit = Bundle.main.object(forInfoDictionaryKey: "ADMOB_REWARDED_AD_UNIT_ID") as? String
+        let adUnitId = (configuredAdUnit?.isEmpty == false ? configuredAdUnit! : "ca-app-pub-3940256099942544/1712485313")
+        rewardedAdService = RewardedAdService(attest: attest, adUnitId: adUnitId)
         foodRecognition = FoodRecognitionEnvironment(
-            service: ClaudeFoodRecognitionService(proxyBaseURL: proxyBaseURL, attest: attest)
+            service: ClaudeFoodRecognitionService(
+                proxyBaseURL: proxyBaseURL,
+                attest: attest,
+                entitlements: entitlements
+            )
+        )
+        nutritionAnalysis = NutritionAnalysisEnvironment(
+            service: NutritionAnalysisService(
+                proxyBaseURL: proxyBaseURL,
+                attest: attest,
+                entitlements: entitlements
+            )
         )
     }
 
@@ -108,6 +135,10 @@ struct CalorieCalcApp: App {
                 .environment(healthKitService)
                 .environment(foodDataSource)
                 .environment(foodRecognition)
+                .environment(nutritionAnalysis)
+                .environment(entitlementService)
+                .environment(subscriptionService)
+                .environment(rewardedAdService)
         }
         .modelContainer(modelContainer)
     }

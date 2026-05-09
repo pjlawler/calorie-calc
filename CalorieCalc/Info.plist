@@ -10,6 +10,12 @@
 	<string>$(USDA_API_KEY)</string>
 	<key>PROXY_BASE_URL</key>
 	<string>$(PROXY_BASE_URL)</string>
+	<key>GADApplicationIdentifier</key>
+	<string>$(ADMOB_APP_ID)</string>
+	<key>ADMOB_REWARDED_AD_UNIT_ID</key>
+	<string>$(ADMOB_REWARDED_AD_UNIT_ID)</string>
+	<key>NSUserTrackingUsageDescription</key>
+	<string>We use this to show personalized rewarded ads when you choose to watch one in exchange for AI credits. You can earn credits without enabling tracking.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 </dict>

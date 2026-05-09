@@ -18,6 +18,21 @@ struct PeriodNutritionData: Sendable {
     let dailyCalorieGoal: Int?
     let dailyNetCalorieGoal: Int?
     let dailyExerciseGoal: Int?
+    /// Weight log entries the AI uses to estimate trend. Already converted to the
+    /// user's display unit (`weightUnitSuffix`). Chronologically ascending. The
+    /// window typically extends ~60 days before the analysis period start so the
+    /// AI can comment on trend even when the period itself is short.
+    let weightSamples: [WeightSample]
+    let weightUnitSuffix: String
+    let goalWeight: Double?
+    /// Number of days the workout history covers — passed so the AI can judge
+    /// exercise consistency (daily vs. spotty) honestly against the period length.
+    let exerciseDayCount: Int
+}
+
+struct WeightSample: Sendable {
+    let date: Date
+    let weight: Double
 }
 
 enum NutritionAnalysisError: LocalizedError {
@@ -26,11 +41,12 @@ enum NutritionAnalysisError: LocalizedError {
     case overQuota(String)
     case networkFailure(String)
     case noResult
+    case outOfCredits
 
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            "No Claude API key found. Add ANTHROPIC_API_KEY to Secrets.xcconfig."
+            "AI features are unavailable on this device right now. Please try again later."
         case .invalidResponse:
             "Claude returned an unexpected response."
         case .overQuota(let message):
@@ -39,45 +55,54 @@ enum NutritionAnalysisError: LocalizedError {
             "Network error: \(message)"
         case .noResult:
             "Claude didn't return any analysis text."
+        case .outOfCredits:
+            "Out of AI credits. Watch a short ad to earn more, or upgrade for unlimited."
         }
     }
 }
 
 final class NutritionAnalysisService: Sendable {
 
-    private let apiKey: String
+    private let attest: AppAttestService
+    private let entitlements: EntitlementService?
     private let model: String
     private let session: URLSession
-    private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
+    private let endpoint: URL
 
     init(
-        apiKey: String? = nil,
+        proxyBaseURL: URL,
+        attest: AppAttestService,
+        entitlements: EntitlementService? = nil,
         model: String = "claude-sonnet-4-6",
         session: URLSession = .shared
     ) {
-        self.apiKey = apiKey
-            ?? (Bundle.main.object(forInfoDictionaryKey: "ANTHROPIC_API_KEY") as? String)
-            ?? ""
+        self.attest = attest
+        self.entitlements = entitlements
+        self.endpoint = proxyBaseURL.appendingPathComponent("v1/messages")
         self.model = model
         self.session = session
     }
 
     func analyze(_ data: PeriodNutritionData) async throws -> String {
-        guard !apiKey.isEmpty else { throw NutritionAnalysisError.missingAPIKey }
-
         let body = RequestBody(
             model: model,
             maxTokens: 1024,
             system: systemPrompt,
             messages: [Message(role: "user", content: userPrompt(for: data))]
         )
+        let bodyData = try JSONEncoder().encode(body)
 
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
-        req.addValue(apiKey, forHTTPHeaderField: "x-api-key")
-        req.addValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
         req.addValue("application/json", forHTTPHeaderField: "content-type")
-        req.httpBody = try JSONEncoder().encode(body)
+        req.addValue(try await attest.deviceId(), forHTTPHeaderField: "X-Device-Id")
+        req.addValue(try await attest.assertion(for: bodyData), forHTTPHeaderField: "X-Assertion")
+        #if DEBUG
+        // Mirror of the same header sent on /v1/messages by ClaudeFoodRecognitionService —
+        // signals a debug iOS build so the proxy grants 1 initial credit instead of 50.
+        req.addValue("1", forHTTPHeaderField: "X-Debug-Build")
+        #endif
+        req.httpBody = bodyData
 
         do {
             let (responseData, response) = try await session.data(for: req)
@@ -87,12 +112,22 @@ final class NutritionAnalysisService: Sendable {
             if http.statusCode == 401 || http.statusCode == 403 {
                 throw NutritionAnalysisError.missingAPIKey
             }
+            if http.statusCode == 402 {
+                if let entitlements {
+                    await MainActor.run { entitlements.handle402() }
+                }
+                throw NutritionAnalysisError.outOfCredits
+            }
             if http.statusCode == 429 {
                 throw NutritionAnalysisError.overQuota("Rate limited — try again in a moment.")
             }
             guard (200..<300).contains(http.statusCode) else {
                 let message = String(data: responseData, encoding: .utf8) ?? "HTTP \(http.statusCode)"
                 throw NutritionAnalysisError.networkFailure(message)
+            }
+
+            if let entitlements {
+                await MainActor.run { entitlements.decrementOptimistically() }
             }
 
             let decoded = try JSONDecoder().decode(ResponseBody.self, from: responseData)
@@ -120,27 +155,73 @@ final class NutritionAnalysisService: Sendable {
         sentences, plain English. No clinical jargon, no disclaimers, no "as an AI". \
         Don't list raw numbers back at them unless one is genuinely notable.
 
+        Important — how to judge calorie adherence:
+          • The user's "daily calorie plan" is the planned intake on an ON-PLAN day \
+            (typically weekdays). It is NOT a daily average target. The whole point \
+            of this app is that they eat at the plan number on plan days and eat \
+            more on off days (weekends, social occasions), with exercise balancing \
+            the average down. So the period's average gross calories WILL be above \
+            the plan number by design — that is not a problem and you must not flag \
+            it as one. Do not say things like "you went over your calorie goal" \
+            based on gross intake.
+          • The number that actually matters is NET calories vs. the NET calorie \
+            goal. That is the adherence signal. Praise or coach against the net \
+            number, not the gross.
+          • If net is off-target, the levers are (in order): reduce off-day \
+            indulgences, add exercise, or — only if those don't fit the user's \
+            life — adjust the plan itself. Don't suggest lowering the gross plan \
+            number as a first move.
+
         Use exactly these two markdown sections, no more:
 
         ## How you did
-        One short paragraph (3–5 sentences) summarizing the period overall. Lead with \
-        the headline — e.g. "Solid week" / "Rough week on calories" / "Strong on \
-        protein, light on exercise". Mention how intake compared to their goal (if \
-        provided) and how exercise factored in. End with one sentence of context on \
-        what's driving the picture (carbs heavy? not enough protein? skipped \
-        workouts?).
+        Two short paragraphs.
+
+        Paragraph 1 — period summary (3–5 sentences). Lead with the headline (e.g. \
+        "Solid week on net" / "Net came in high" / "Strong on protein, light on \
+        exercise"). Compare AVERAGE NET calories to the net calorie goal — that's \
+        the adherence read. Do not compare gross intake to the gross plan number; \
+        treat the gross plan only as background context for what an on-plan day \
+        looks like. Then be honest about exercise — don't sugarcoat:
+          • Daily or near-daily workouts with a strong burn (≥500 kcal most days) → \
+            warm praise: "you're crushing it — daily workouts above 500 kcal is no \
+            joke, keep it up."
+          • Consistent but moderate (3–5 days/week, decent burn) → positive but \
+            note room to push if their goals warrant it.
+          • Spotty (a few random days, mostly zeros) → call it out kindly and suggest \
+            a steadier rhythm like 3–4 days/week.
+          • Almost none → encourage starting small (e.g. two 30-min walks this week).
+
+        Paragraph 2 — weight trend and outlook (3–5 sentences). Use the weight \
+        samples to estimate direction and a rough rate (e.g. "trending down ~0.4 \
+        lb/week", "up about 1 lb/week", "basically flat"). Tie the trend back to net \
+        calories where relevant (a ~500 kcal/day deficit ≈ 1 lb/week loss). Calibrate \
+        confidence by the data you have:
+          • No weight entries → say so plainly and encourage them to start logging \
+            ("we can't read a trend yet — weigh in once or twice a week and we'll \
+            have a clearer picture in a few weeks").
+          • Sparse (<4 samples or <~3 weeks span) → give your best read but flag it \
+            as preliminary, e.g. "we only have ~3 weeks of data but your weight has \
+            been trending down — keep going and keep logging, with more time we'll \
+            be able to make a sharper call."
+          • Ample (~4+ weeks with regular entries) → speak more confidently about \
+            direction and rate.
+        If they have a goal weight, briefly note whether the trend is moving toward \
+        or away from it.
 
         ## What to try next
         Three short, concrete recommendations as a markdown bulleted list. Each \
         bullet starts with an imperative verb and is one sentence max. Be specific \
-        and directive — say what to cut, swap, add, or do, not vague principles. \
-        Examples of the style:
+        and directive — say what to cut, swap, add, or do, not vague principles. If \
+        weight is trending the wrong way for their goal, one bullet should target \
+        net calories specifically (eat less of X, OR add more exercise — pick the \
+        lever that fits their pattern). Examples of the style:
         - "Reduce carbs by ~50 g/day — swap one daily snack for protein + veg."
         - "Add a 30-minute walk on Wednesday and Friday to lift your weekly burn."
         - "Bump protein to ~140 g/day — add a Greek yogurt or protein shake at \
           breakfast."
 
-        Always keep the response under 200 words total.
+        Always keep the response under 260 words total.
         """
     }
 
@@ -161,7 +242,7 @@ final class NutritionAnalysisService: Sendable {
         lines.append("- Protein: \(formatted(d.totalProtein)) g (avg \(formatted(d.avgProtein)) g/day)")
         lines.append("- Carbs: \(formatted(d.totalCarbs)) g (avg \(formatted(d.avgCarbs)) g/day)")
         lines.append("- Fat: \(formatted(d.totalFat)) g (avg \(formatted(d.avgFat)) g/day)")
-        lines.append("- Exercise burn: \(formatted(d.totalExercise)) kCal (avg \(formatted(d.avgExercise)) kCal/day)")
+        lines.append("- Exercise burn: \(formatted(d.totalExercise)) kCal (avg \(formatted(d.avgExercise)) kCal/day; logged on \(d.exerciseDayCount) of \(d.dayCount) day\(d.dayCount == 1 ? "" : "s"))")
         lines.append("- Net calories (consumed − exercise): \(formatted(d.totalNetCalories)) kCal (avg \(formatted(d.avgNetCalories)) kCal/day)")
         lines.append("")
         lines.append("Macro split by calorie share: protein \(proteinPct)%, carbs \(carbsPct)%, fat \(fatPct)%.")
@@ -170,10 +251,10 @@ final class NutritionAnalysisService: Sendable {
             lines.append("")
             lines.append("User's daily goals:")
             if let g = d.dailyCalorieGoal {
-                lines.append("- Calorie intake goal: \(g) kCal/day")
+                lines.append("- On-plan day calorie target: \(g) kCal (the planned intake on a typical weekday; the app expects higher intake on off days, so PERIOD AVERAGE GROSS WILL BE ABOVE THIS NUMBER BY DESIGN — do not flag that as a problem)")
             }
             if let g = d.dailyNetCalorieGoal {
-                lines.append("- Net calorie goal: \(g) kCal/day")
+                lines.append("- Net calorie goal: \(g) kCal/day (THIS is the adherence target — judge the period against this, not the gross number above)")
             }
             if let g = d.dailyExerciseGoal {
                 lines.append("- Exercise goal: \(g) kCal/day")
@@ -181,8 +262,52 @@ final class NutritionAnalysisService: Sendable {
         }
 
         lines.append("")
+        lines.append(weightSection(for: d))
+
+        lines.append("")
         lines.append("Analyze this period and give your assessment in the format described in the system prompt.")
         return lines.joined(separator: "\n")
+    }
+
+    private func weightSection(for d: PeriodNutritionData) -> String {
+        var out: [String] = []
+        if d.weightSamples.isEmpty {
+            out.append("Weight log: no entries logged yet.")
+            if let goal = d.goalWeight {
+                out.append("Goal weight: \(formatted(goal)) \(d.weightUnitSuffix).")
+            }
+            return out.joined(separator: "\n")
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withFullDate]
+        let sorted = d.weightSamples.sorted { $0.date < $1.date }
+        let firstDate = sorted.first!.date
+        let lastDate = sorted.last!.date
+        let spanDays = max(0, Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: firstDate), to: Calendar.current.startOfDay(for: lastDate)).day ?? 0)
+
+        let granularity: String
+        if sorted.count < 4 || spanDays < 21 {
+            granularity = "sparse — preliminary read only, encourage continued logging"
+        } else if spanDays >= 42 {
+            granularity = "ample — speak with confidence about trend"
+        } else {
+            granularity = "moderate"
+        }
+
+        out.append("Weight log (\(sorted.count) sample\(sorted.count == 1 ? "" : "s") spanning \(spanDays) day\(spanDays == 1 ? "" : "s"); data density: \(granularity)):")
+        for sample in sorted {
+            let date = formatter.string(from: sample.date)
+            out.append("- \(date): \(formattedWeight(sample.weight)) \(d.weightUnitSuffix)")
+        }
+        if let goal = d.goalWeight {
+            out.append("Goal weight: \(formattedWeight(goal)) \(d.weightUnitSuffix).")
+        }
+        return out.joined(separator: "\n")
+    }
+
+    private func formattedWeight(_ v: Double) -> String {
+        v.formatted(.number.precision(.fractionLength(1)))
     }
 
     private func formatted(_ v: Double) -> String {

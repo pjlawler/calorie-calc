@@ -20,7 +20,7 @@ import StoreKit
 @MainActor
 @Observable
 final class SubscriptionService {
-    static let productId = "com.lawlerinnovationsinc-calorie.ai.monthly"
+    static let productId = "com.lawlerinnovationsinc_calorie.ai.monthly"
 
     private(set) var product: Product?
     private(set) var purchaseInProgress: Bool = false

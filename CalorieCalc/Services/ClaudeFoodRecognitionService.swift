@@ -30,6 +30,13 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         req.addValue("application/json", forHTTPHeaderField: "content-type")
         req.addValue(try await attest.deviceId(), forHTTPHeaderField: "X-Device-Id")
         req.addValue(try await attest.assertion(for: body), forHTTPHeaderField: "X-Assertion")
+        #if DEBUG
+        // Hint to the proxy that this is a debug build so it grants 1 initial credit
+        // instead of the production amount, making the paywall flow easy to retest
+        // on a fresh device record. Header is outside the assertion's bound bytes,
+        // so this is purely a hint — App Attest still authenticates the device.
+        req.addValue("1", forHTTPHeaderField: "X-Debug-Build")
+        #endif
         req.httpBody = body
         return req
     }
@@ -49,7 +56,9 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             throw FoodRecognitionError.missingAPIKey
         }
         if http.statusCode == 402 {
-            await entitlements?.handle402()
+            if let entitlements {
+                await MainActor.run { entitlements.handle402() }
+            }
             throw FoodRecognitionError.outOfCredits
         }
         if http.statusCode == 429 {
@@ -59,7 +68,9 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             let message = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
             throw FoodRecognitionError.networkFailure(message)
         }
-        await entitlements?.decrementOptimistically()
+        if let entitlements {
+            await MainActor.run { entitlements.decrementOptimistically() }
+        }
         return data
     }
 

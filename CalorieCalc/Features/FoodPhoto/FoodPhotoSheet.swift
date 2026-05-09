@@ -24,6 +24,7 @@ struct FoodPhotoSheet: View {
     @State private var description: String = ""
     @State private var pickerItem: PhotosPickerItem?
     @State private var errorMessage: String?
+    @State private var showPaywall: Bool = false
 
     @State private var showCameraPicker = false
 
@@ -72,6 +73,7 @@ struct FoodPhotoSheet: View {
                     guard let newItem else { return }
                     Task { await loadPickerItem(newItem) }
                 }
+                .sheet(isPresented: $showPaywall) { PaywallSheet() }
         }
     }
 
@@ -359,6 +361,9 @@ struct FoodPhotoSheet: View {
             )
             prefill(from: meal)
             stage = .result
+        } catch FoodRecognitionError.outOfCredits {
+            stage = .ready
+            showPaywall = true
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             stage = .ready

@@ -73,6 +73,22 @@ struct DayCellView: View {
             Text(magnitude)
                 .font(DayCellLayout.dataFont)
                 .foregroundStyle(color)
+        } else if budget.status == .future, let planned = budget.grossBudget {
+            // Future days have no actual remaining number to show, so surface the
+            // day's planned allowance (banking-day goal or computed off-day share)
+            // in a subdued style — gives the week-at-a-glance an answer to "what
+            // am I aiming for on Saturday?" without competing visually with today's
+            // live variance number.
+            Text(CalorieFormatter.whole(planned))
+                .font(DayCellLayout.dataFont)
+                .foregroundStyle(.tertiary)
+        } else if budget.status == .past {
+            // Past days are "done" — the variance already rolled into the week's
+            // running total above. A subdued checkmark signals completion without
+            // re-printing a number the user already saw on the day-detail view.
+            Image(systemName: "checkmark")
+                .font(DayCellLayout.dataFont)
+                .foregroundStyle(.tertiary)
         } else {
             // Reserve column space on non-today rows so the header stays aligned.
             Color.clear.frame(height: 1)
@@ -89,6 +105,10 @@ struct DayCellView: View {
             parts.append(variance >= 0
                 ? "\(abs(variance)) kcal remaining today"
                 : "\(abs(variance)) kcal over today")
+        } else if budget.status == .future, let planned = budget.grossBudget {
+            parts.append("\(Int(planned.rounded())) kcal planned")
+        } else if budget.status == .past {
+            parts.append("complete")
         }
         return parts.joined(separator: ", ")
     }
@@ -112,7 +132,7 @@ struct DayCellHeader: View {
             Divider().hidden()
             Text("Consumed")
                 .frame(maxWidth: .infinity)
-            Text("Exercise")
+            Text("Burned")
                 .frame(maxWidth: .infinity)
             Text("Remaining")
                 .frame(maxWidth: .infinity)

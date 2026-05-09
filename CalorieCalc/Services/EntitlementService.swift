@@ -77,6 +77,12 @@ final class EntitlementService {
         req.addValue(deviceId, forHTTPHeaderField: "X-Device-Id")
         req.addValue(assertion, forHTTPHeaderField: "X-Assertion")
         req.addValue(String(timestampMs), forHTTPHeaderField: "X-Timestamp")
+        #if DEBUG
+        // Mirror of the same header sent on /v1/messages — see ClaudeFoodRecognitionService
+        // for the full rationale. Either endpoint can trip the initial credit grant for a
+        // fresh device, so both must signal the build mode for the smaller grant to apply.
+        req.addValue("1", forHTTPHeaderField: "X-Debug-Build")
+        #endif
 
         let (data, resp) = try await session.data(for: req)
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {

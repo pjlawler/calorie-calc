@@ -30,11 +30,12 @@ ALLOW_DEV_ATTESTATION = "true"
 CREDITS_PER_AD = "5"
 # One-time grant fired on a device's first /v1/messages or /v1/account/state call
 # after this version of the worker shipped. Doubles as the new-user free trial and
-# the grandfather allotment for pre-existing TestFlight devices.
-INITIAL_FREE_CREDITS = "25"
+# the grandfather allotment for pre-existing TestFlight devices. Debug iOS builds
+# override this to 1 via the X-Debug-Build header — see initialCreditsFor in index.ts.
+INITIAL_FREE_CREDITS = "50"
 # StoreKit 2 product id for the monthly subscription. Must match the product
 # configured in App Store Connect exactly.
-SUBSCRIPTION_PRODUCT_ID = "com.lawlerinnovationsinc-calorie.ai.monthly"
+SUBSCRIPTION_PRODUCT_ID = "com.lawlerinnovationsinc_calorie.ai.monthly"
 # Used to verify the `bundleId` claim in JWS receipts coming back from StoreKit.
 APPSTORE_BUNDLE_ID = "com.lawlerinnovationsinc-calorie"
 # Sandbox while testing TestFlight purchases; flip to "Production" before

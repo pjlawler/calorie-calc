@@ -55,6 +55,20 @@ struct WeekCalendarView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            // Leading-side jump button balances the gear icon on the trailing side
+            // when the user has navigated away from the current week. Putting it
+            // here (vs. trailing) keeps the principal date selector centred —
+            // a single button on each side gives the principal equal margins.
+            if showCurrentWeekButton {
+                Button {
+                    viewModel?.jumpToCurrentWeek()
+                } label: {
+                    Image(systemName: "calendar.badge.clock")
+                }
+                .accessibilityLabel("Jump to current week")
+            }
+        }
         ToolbarItem(placement: .principal) {
             HStack(spacing: 8) {
                 Button { viewModel?.shiftWeek(by: -1) } label: {
@@ -73,16 +87,6 @@ struct WeekCalendarView: View {
                     Image(systemName: "chevron.right")
                 }
                 .accessibilityLabel("Next week")
-            }
-        }
-        ToolbarItem(placement: .topBarTrailing) {
-            if showCurrentWeekButton {
-                Button {
-                    viewModel?.jumpToCurrentWeek()
-                } label: {
-                    Image(systemName: "calendar.badge.clock")
-                }
-                .accessibilityLabel("Jump to current week")
             }
         }
         ToolbarItem(placement: .topBarTrailing) {
@@ -204,6 +208,9 @@ private struct WeekCalendarBody: View {
         .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
             selectedDate = nil
             withAnimation { proxy.scrollTo("top", anchor: .top) }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jumpToCurrentWeek)) { _ in
+            viewModel.jumpToCurrentWeek()
         }
         }
     }

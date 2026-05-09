@@ -37,6 +37,16 @@ const app = new Hono<{ Bindings: Env }>();
 
 app.get("/", (c) => c.text("calorie-calc-proxy ok"));
 
+// Returns the per-request initial-credit grant. Production builds get the env-var
+// amount; debug iOS builds (signaled by the X-Debug-Build header) get exactly 1
+// so the paywall flow can be retested quickly on a fresh device record. The
+// header is purely a hint — App Attest still authenticates the device, and a
+// debug build can only lower its OWN starting credits, not anyone else's.
+function initialCreditsFor(env: Env, headers: Headers): number {
+  if (headers.get("X-Debug-Build") === "1") return 1;
+  return parseInt(env.INITIAL_FREE_CREDITS, 10) || 0;
+}
+
 // Step 1 of registration: server issues a fresh challenge that the client passes to
 // `attestKey(_:clientDataHash:)`. Single-use, 5-minute TTL.
 app.post("/v1/attest/challenge", async (c) => {
@@ -128,7 +138,7 @@ app.get("/v1/account/state", async (c) => {
   if (!v.ok) return c.json({ error: v.error }, 401);
 
   device.counter = v.newCounter;
-  const initial = parseInt(c.env.INITIAL_FREE_CREDITS, 10) || 0;
+  const initial = initialCreditsFor(c.env, c.req.raw.headers);
   grantInitialCreditsIfNeeded(device, initial);
   await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
 
@@ -276,16 +286,28 @@ app.post("/v1/subscriptions/notify", async (c) => {
 // we set on the ad request via `setUserId`.
 app.get("/v1/credits/grant", async (c) => {
   const url = new URL(c.req.url);
+
+  // AdMob's UI runs a reachability check on the SSV URL when you save it — a GET
+  // with no query string. Treat that as a health check and 200, otherwise the
+  // setup form flags the URL as broken and refuses to save it.
+  if (!url.search) {
+    return c.json({ ok: true });
+  }
+
   const ssv = await verifySSV(url.search.slice(1)); // strip the leading '?'
   if (!ssv.ok) {
+    // Per Google's SSV guidance, return 200 even on rejection — non-2xx puts the
+    // callback into AdMob's retry queue, which serves no purpose for malformed
+    // signatures. We log internally so the rejection is still observable.
     console.log("ssv rejected", ssv.error);
-    return c.json({ error: ssv.error }, 403);
+    return c.json({ ok: false, reason: ssv.error });
   }
 
   const txId = ssv.params.get("transaction_id");
   const deviceId = ssv.params.get("user_id");
   if (!txId || !deviceId) {
-    return c.json({ error: "missing_fields" }, 400);
+    console.log("ssv missing_fields", { txId, deviceId });
+    return c.json({ ok: false, reason: "missing_fields" });
   }
 
   // Idempotency: AdMob retries SSV callbacks on transient errors. A 30-day TTL is
@@ -298,8 +320,10 @@ app.get("/v1/credits/grant", async (c) => {
 
   const stored = await c.env.DEVICES.get(`d:${deviceId}`);
   if (!stored) {
+    // Same retry-suppression rationale as the SSV-rejection branch above: an
+    // unknown device id can't be fixed by retrying, so return 200 + log.
     console.log("ssv unknown device", deviceId);
-    return c.json({ error: "unknown_device" }, 404);
+    return c.json({ ok: false, reason: "unknown_device" });
   }
   const device = parseDevice(stored);
   const amount = parseInt(c.env.CREDITS_PER_AD, 10) || 5;
@@ -368,7 +392,7 @@ app.post("/v1/messages", async (c) => {
   // Grant initial credits before checking entitlement so a brand-new device — or a
   // pre-existing TestFlight device upgrading into this build — never sees a 402 on
   // their very first AI call. Idempotent (no-op once `grandfatheredAt` is set).
-  const initial = parseInt(c.env.INITIAL_FREE_CREDITS, 10) || 0;
+  const initial = initialCreditsFor(c.env, c.req.raw.headers);
   if (grantInitialCreditsIfNeeded(device, initial)) {
     console.log("messages grandfather", deviceId, "+", initial, "->", device.credits);
   }

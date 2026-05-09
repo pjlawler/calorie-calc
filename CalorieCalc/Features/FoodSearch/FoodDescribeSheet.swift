@@ -13,6 +13,7 @@ struct FoodDescribeSheet: View {
     @State private var description: String = ""
     @State private var isWorking: Bool = false
     @State private var errorMessage: String?
+    @State private var showPaywall: Bool = false
 
     private var canEstimate: Bool {
         !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isWorking
@@ -65,6 +66,7 @@ struct FoodDescribeSheet: View {
                         .disabled(isWorking)
                 }
             }
+            .sheet(isPresented: $showPaywall) { PaywallSheet() }
         }
     }
 
@@ -82,6 +84,11 @@ struct FoodDescribeSheet: View {
                     let result = makeSearchResult(from: meal, userDescription: trimmed)
                     onEstimated(result)
                     dismiss()
+                }
+            } catch FoodRecognitionError.outOfCredits {
+                await MainActor.run {
+                    isWorking = false
+                    showPaywall = true
                 }
             } catch {
                 await MainActor.run {
