@@ -328,25 +328,37 @@ private struct FavoriteQuickAddListSheet: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Query private var dayLogs: [DayLog]
+    @Query(sort: \FoodTag.name) private var allTags: [FoodTag]
 
     @State private var selectedMeal: MealType = MealType.quickAddDefaultForCurrentTime()
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: .now)
     @State private var searchText: String = ""
+    @State private var selectedTagIds: Set<UUID> = []
 
     private var sortedFavorites: [CachedFood] {
-        let base = favorites.sorted { lhs, rhs in
-            let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
-            if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
-            let lb = lhs.brand ?? ""
-            let rb = rhs.brand ?? ""
-            return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
-        }
+        let base = favorites
+            .filter { matchesTagFilter($0) }
+            .sorted { lhs, rhs in
+                let nameOrder = lhs.name.localizedCaseInsensitiveCompare(rhs.name)
+                if nameOrder != .orderedSame { return nameOrder == .orderedAscending }
+                let lb = lhs.brand ?? ""
+                let rb = rhs.brand ?? ""
+                return lb.localizedCaseInsensitiveCompare(rb) == .orderedAscending
+            }
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return base }
         return base.filter { food in
             food.name.localizedCaseInsensitiveContains(trimmed)
                 || (food.brand?.localizedCaseInsensitiveContains(trimmed) ?? false)
         }
+    }
+
+    /// AND semantics: a favorite passes only if it carries every selected tag id.
+    /// Mirrors the filter logic in FoodsView / FoodSearchView for consistency.
+    private func matchesTagFilter(_ food: CachedFood) -> Bool {
+        guard !selectedTagIds.isEmpty else { return true }
+        let foodTagIds = Set(food.tagsList.map(\.id))
+        return selectedTagIds.isSubset(of: foodTagIds)
     }
 
     var body: some View {
@@ -380,9 +392,47 @@ private struct FavoriteQuickAddListSheet: View {
                     }
                 }
 
+                if !allTags.isEmpty {
+                    Section("Filter by tag") {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(allTags) { tag in
+                                    Button {
+                                        if selectedTagIds.contains(tag.id) {
+                                            selectedTagIds.remove(tag.id)
+                                        } else {
+                                            selectedTagIds.insert(tag.id)
+                                        }
+                                    } label: {
+                                        TagChipView(name: tag.name, color: tag.color, isSelected: selectedTagIds.contains(tag.id))
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                if !selectedTagIds.isEmpty {
+                                    Button { selectedTagIds.removeAll() } label: {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "xmark.circle.fill")
+                                            Text("Clear")
+                                        }
+                                        .font(.subheadline.weight(.medium))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 6)
+                                        .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                    }
+                }
+
                 Section("Favorites") {
                     if sortedFavorites.isEmpty {
-                        Text("No favorites yet.")
+                        Text(selectedTagIds.isEmpty
+                            ? "No favorites yet."
+                            : "No favorites match the selected tags.")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(sortedFavorites, id: \.id) { favorite in

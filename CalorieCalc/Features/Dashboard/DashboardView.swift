@@ -34,20 +34,6 @@ struct DashboardView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Color.clear.frame(height: 0).id("top")
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Progress")
-                            .font(.largeTitle.weight(.bold))
-                        Spacer()
-                        Button {
-                            showWeightSheet = true
-                        } label: {
-                            Label("Log", systemImage: "plus.circle.fill")
-                                .labelStyle(TitleAndIconLabelStyle())
-                                .font(.subheadline.weight(.semibold))
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-                    }
                     if let profile = profiles.first {
                         progressSection(profile: profile)
                         Text("Plan Overview")
@@ -59,13 +45,20 @@ struct DashboardView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
-                .padding(.vertical, 8)
+                .padding(.bottom, 8)
             }
             .scrollBounceBehavior(.basedOnSize)
-            .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(.hidden, for: .navigationBar)
+            .navigationTitle("Progress")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showWeightSheet = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("Log weight")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showSettings = true
@@ -83,9 +76,6 @@ struct DashboardView: View {
             }
             .task { await ensureProfile() }
             .task(id: healthKitFetchKey) { await loadHealthKitBurns() }
-            .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
-                withAnimation { proxy.scrollTo("top", anchor: .top) }
-            }
             }
         }
     }

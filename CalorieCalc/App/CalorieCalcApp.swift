@@ -42,6 +42,7 @@ struct CalorieCalcApp: App {
             SupplementEntry.self,
             WeightEntry.self,
             CachedFood.self,
+            FoodTag.self,
         ])
         let cacheSchema = Schema([
             CachedWorkout.self,
@@ -56,6 +57,7 @@ struct CalorieCalcApp: App {
             SupplementEntry.self,
             WeightEntry.self,
             CachedFood.self,
+            FoodTag.self,
             CachedWorkout.self,
             CachedDailySteps.self,
         ])

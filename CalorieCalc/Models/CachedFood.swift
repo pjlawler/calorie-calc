@@ -57,6 +57,18 @@ final class CachedFood {
     var favoriteSelectedUnit: String?
     var favoriteSelectedQuantity: Double?
 
+    /// User-defined labels (e.g. "Thai Food", "Vegan", "Low Calorie"). Many-to-many — the
+    /// same `FoodTag` can be attached to many foods, and a food can carry many tags. The
+    /// `inverse` declaration tells SwiftData this is the same relationship as
+    /// `FoodTag.foods` — without it, edits from one side wouldn't reflect on the other.
+    /// Optional per the same CloudKit-requires-to-many-optional rule that DayLog's
+    /// relationships follow; `tagsList` below gives non-optional read access.
+    @Relationship(inverse: \FoodTag.foods)
+    var tags: [FoodTag]? = []
+
+    /// Non-optional read accessor — use everywhere except direct mutation.
+    var tagsList: [FoodTag] { tags ?? [] }
+
     // MARK: - Legacy fields (kept for one-shot migration)
     //
     // Pre-redesign schema fields. SwiftData's lightweight migration preserves them when they're

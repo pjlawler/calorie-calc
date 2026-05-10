@@ -509,6 +509,16 @@ private struct SettingsForm: View {
                 Text("Adds a Supplements section to the daily log between Snacks and Workouts. Doesn't affect calorie or macro totals.")
             }
 
+            Section {
+                NavigationLink {
+                    TagManagementView()
+                } label: {
+                    Label("Manage Tags", systemImage: "tag")
+                }
+            } footer: {
+                Text("Custom labels you can attach to foods (e.g. \"Thai\", \"Vegan\", \"Low Calorie\") to filter your saved catalog and recents.")
+            }
+
             #if DEBUG
             Section {
                 Button {

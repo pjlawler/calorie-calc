@@ -56,6 +56,19 @@ struct FoodPortionSheet: View {
     @State private var brandText: String = ""
     @State private var selectedMealType: MealType
     @State private var selectedDate: Date
+    @State private var showTagPicker: Bool = false
+    // Per-native-unit nutrition values, editable via the "Per serving" section.
+    // Initialised from `result.*PerServing` in `resolveDefaults`.
+    @State private var caloriesPerServingText: String = ""
+    @State private var proteinPerServingText: String = ""
+    @State private var carbsPerServingText: String = ""
+    @State private var fatPerServingText: String = ""
+    /// Staged tag selections — populated from the existing CachedFood (if any) on
+    /// open, then mutated freely while the user picks. On save these get attached
+    /// to the resulting CachedFood (whether updated or freshly created).
+    @State private var stagedTagIds: Set<UUID> = []
+
+    @Query(sort: \FoodTag.name) private var allTags: [FoodTag]
 
     private var trimmedName: String { nameText.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedBrand: String? {
@@ -74,6 +87,22 @@ struct FoodPortionSheet: View {
 
     private var amount: Double { parse(amountText) }
 
+    /// Per-serving values used by the macro display + save flow. Falls back to the
+    /// original result value when the field is blank or unparseable so a user who
+    /// clears a field doesn't accidentally log zero macros.
+    private var perServingCalories: Double {
+        Double(caloriesPerServingText.replacingOccurrences(of: ",", with: ".")) ?? result.caloriesPerServing
+    }
+    private var perServingProtein: Double {
+        Double(proteinPerServingText.replacingOccurrences(of: ",", with: ".")) ?? result.proteinPerServing
+    }
+    private var perServingCarbs: Double {
+        Double(carbsPerServingText.replacingOccurrences(of: ",", with: ".")) ?? result.carbsPerServing
+    }
+    private var perServingFat: Double {
+        Double(fatPerServingText.replacingOccurrences(of: ",", with: ".")) ?? result.fatPerServing
+    }
+
     /// Native units consumed at the current selection — the multiplier applied to per-native
     /// nutrient values to compute totals.
     private var nativeUnitsConsumed: Double {
@@ -89,7 +118,17 @@ struct FoodPortionSheet: View {
     private var isValid: Bool { amount > 0 }
 
     private var cachedFood: CachedFood? {
-        cachedFoods.first { $0.externalId == result.id }
+        // Match on externalId when set, otherwise fall back to the UUID string —
+        // that's the same key `cached.toSearchResult()` produces for legacy rows
+        // (e.g. CSV-imported foods) whose externalId is nil. Without the fallback,
+        // saving a unit change against such a row would silently create a duplicate
+        // CachedFood instead of updating the original in place.
+        cachedFoods.first { matches(food: $0, resultId: result.id) }
+    }
+
+    private func matches(food: CachedFood, resultId: String) -> Bool {
+        if let ext = food.externalId { return ext == resultId }
+        return food.id.uuidString == resultId
     }
 
     private var isFavorite: Bool { cachedFood?.isFavorite ?? false }
@@ -114,10 +153,10 @@ struct FoodPortionSheet: View {
                 nativeUnitMilliliters: result.nativeUnitMilliliters,
                 lastSelectedUnit: nil,
                 lastSelectedQuantity: nil,
-                caloriesPerServing: result.caloriesPerServing,
-                proteinPerServing: result.proteinPerServing,
-                carbsPerServing: result.carbsPerServing,
-                fatPerServing: result.fatPerServing,
+                caloriesPerServing: perServingCalories,
+                proteinPerServing: perServingProtein,
+                carbsPerServing: perServingCarbs,
+                fatPerServing: perServingFat,
                 saturatedFatPerServing: result.saturatedFatPerServing,
                 transFatPerServing: result.transFatPerServing,
                 monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,
@@ -167,10 +206,10 @@ struct FoodPortionSheet: View {
                 nativeUnitMilliliters: result.nativeUnitMilliliters,
                 lastSelectedUnit: nil,
                 lastSelectedQuantity: nil,
-                caloriesPerServing: result.caloriesPerServing,
-                proteinPerServing: result.proteinPerServing,
-                carbsPerServing: result.carbsPerServing,
-                fatPerServing: result.fatPerServing,
+                caloriesPerServing: perServingCalories,
+                proteinPerServing: perServingProtein,
+                carbsPerServing: perServingCarbs,
+                fatPerServing: perServingFat,
                 saturatedFatPerServing: result.saturatedFatPerServing,
                 transFatPerServing: result.transFatPerServing,
                 monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,
@@ -235,13 +274,24 @@ struct FoodPortionSheet: View {
 
                 Section {
                     MacroBreakdownView(
-                        calories: result.caloriesPerServing * nativeUnitsConsumed,
-                        carbs: result.carbsPerServing * nativeUnitsConsumed,
-                        fat: result.fatPerServing * nativeUnitsConsumed,
-                        protein: result.proteinPerServing * nativeUnitsConsumed
+                        calories: perServingCalories * nativeUnitsConsumed,
+                        carbs: perServingCarbs * nativeUnitsConsumed,
+                        fat: perServingFat * nativeUnitsConsumed,
+                        protein: perServingProtein * nativeUnitsConsumed
                     )
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
+                }
+
+                Section {
+                    perServingField(label: "Calories", text: $caloriesPerServingText, suffix: "kcal")
+                    perServingField(label: "Protein", text: $proteinPerServingText, suffix: "g")
+                    perServingField(label: "Carbs", text: $carbsPerServingText, suffix: "g")
+                    perServingField(label: "Fat", text: $fatPerServingText, suffix: "g")
+                } header: {
+                    Text("Per 1 \(result.nativeUnit)")
+                } footer: {
+                    Text("Edit if the search result's nutrition is off — totals above scale with whatever amount you log.")
                 }
 
                 Section {
@@ -290,6 +340,47 @@ struct FoodPortionSheet: View {
                     .controlSize(.large)
                     .disabled(!isValid)
                 }
+
+                // Tags work for both existing CachedFoods and fresh search results.
+                // For search results, picks are staged in `stagedTagIds` and attached
+                // to the new CachedFood when `upsertCached` runs in `save()`.
+                Section("Tags") {
+                    let stagedTags = allTags.filter { stagedTagIds.contains($0.id) }
+                    if stagedTags.isEmpty {
+                        Button {
+                            showTagPicker = true
+                        } label: {
+                            Label("Add tags", systemImage: "tag")
+                        }
+                    } else {
+                        FlowLayout(spacing: 8) {
+                            ForEach(stagedTags) { tag in
+                                Button {
+                                    stagedTagIds.remove(tag.id)
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        TagChipView(name: tag.name, color: tag.color)
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Button {
+                                showTagPicker = true
+                            } label: {
+                                Image(systemName: "plus.circle")
+                                    .font(.title3)
+                                    .foregroundStyle(.tint)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showTagPicker) {
+                TagPickerSheet(selectedIds: $stagedTagIds)
             }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -360,6 +451,39 @@ struct FoodPortionSheet: View {
         notesText = result.notes ?? cached?.notes ?? ""
         nameText = result.name
         brandText = result.brand ?? ""
+        // Per-serving fields seed from the result's per-native nutrition; user can
+        // override before saving to correct an inaccurate search hit.
+        caloriesPerServingText = formatPerServing(result.caloriesPerServing)
+        proteinPerServingText = formatPerServing(result.proteinPerServing)
+        carbsPerServingText = formatPerServing(result.carbsPerServing)
+        fatPerServingText = formatPerServing(result.fatPerServing)
+        // Pre-populate staged tag ids from the existing CachedFood (if there is one)
+        // so the picker/chip row reflects what's already attached. For fresh search
+        // results without a CachedFood, this stays empty and the user can attach
+        // tags that get applied on save.
+        stagedTagIds = Set(cachedFood?.tagsList.map(\.id) ?? [])
+    }
+
+    private func formatPerServing(_ value: Double) -> String {
+        if value.truncatingRemainder(dividingBy: 1) == 0 {
+            return String(Int(value))
+        }
+        return String(format: "%.2f", value)
+    }
+
+    private func perServingField(label: String, text: Binding<String>, suffix: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("0", text: text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .monospacedDigit()
+                .frame(maxWidth: 100)
+            Text(suffix)
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .leading)
+        }
     }
 
     private func parse(_ text: String) -> Double {
@@ -385,10 +509,10 @@ struct FoodPortionSheet: View {
             entry.nativeUnitMilliliters = result.nativeUnitMilliliters
             entry.selectedUnit = selectedUnit
             entry.quantity = amount
-            entry.caloriesPerServing = result.caloriesPerServing
-            entry.proteinPerServing = result.proteinPerServing
-            entry.carbsPerServing = result.carbsPerServing
-            entry.fatPerServing = result.fatPerServing
+            entry.caloriesPerServing = perServingCalories
+            entry.proteinPerServing = perServingProtein
+            entry.carbsPerServing = perServingCarbs
+            entry.fatPerServing = perServingFat
             entry.saturatedFatPerServing = result.saturatedFatPerServing
             entry.transFatPerServing = result.transFatPerServing
             entry.monounsaturatedFatPerServing = result.monounsaturatedFatPerServing
@@ -417,10 +541,10 @@ struct FoodPortionSheet: View {
                 nativeUnitMilliliters: result.nativeUnitMilliliters,
                 selectedUnit: selectedUnit,
                 quantity: amount,
-                caloriesPerServing: result.caloriesPerServing,
-                proteinPerServing: result.proteinPerServing,
-                carbsPerServing: result.carbsPerServing,
-                fatPerServing: result.fatPerServing,
+                caloriesPerServing: perServingCalories,
+                proteinPerServing: perServingProtein,
+                carbsPerServing: perServingCarbs,
+                fatPerServing: perServingFat,
                 saturatedFatPerServing: result.saturatedFatPerServing,
                 transFatPerServing: result.transFatPerServing,
                 monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,
@@ -503,7 +627,8 @@ struct FoodPortionSheet: View {
 
     private func upsertCached(name: String, brand: String?, notes: String?) {
         let id = result.id
-        if let existing = cachedFoods.first(where: { $0.externalId == id }) {
+        let resolvedTags = allTags.filter { stagedTagIds.contains($0.id) }
+        if let existing = cachedFoods.first(where: { matches(food: $0, resultId: id) }) {
             existing.lastUsed = .now
             if !addToMyFoods { existing.useCount += 1 }
             existing.notes = notes
@@ -511,7 +636,19 @@ struct FoodPortionSheet: View {
             existing.brand = brand
             existing.lastSelectedUnit = selectedUnit
             existing.lastSelectedQuantity = amount
+            // Persist any per-serving edits the user made so future opens reflect
+            // the corrected nutrition values, not the original search hit.
+            existing.caloriesPerServing = perServingCalories
+            existing.proteinPerServing = perServingProtein
+            existing.carbsPerServing = perServingCarbs
+            existing.fatPerServing = perServingFat
+            // Sync staged tags onto the existing food — assigning replaces the full
+            // set, so tag removals stage-side propagate to the CachedFood too.
+            existing.tags = resolvedTags
             if addToMyFoods { existing.isInMyFoods = true }
+            // Backfill externalId on legacy rows so subsequent saves can match by
+            // externalId directly without needing the UUID fallback. One-shot heal.
+            if existing.externalId == nil { existing.externalId = id }
         } else {
             let cached = CachedFood(
                 externalId: id,
@@ -522,10 +659,10 @@ struct FoodPortionSheet: View {
                 nativeUnitMilliliters: result.nativeUnitMilliliters,
                 lastSelectedUnit: selectedUnit,
                 lastSelectedQuantity: amount,
-                caloriesPerServing: result.caloriesPerServing,
-                proteinPerServing: result.proteinPerServing,
-                carbsPerServing: result.carbsPerServing,
-                fatPerServing: result.fatPerServing,
+                caloriesPerServing: perServingCalories,
+                proteinPerServing: perServingProtein,
+                carbsPerServing: perServingCarbs,
+                fatPerServing: perServingFat,
                 saturatedFatPerServing: result.saturatedFatPerServing,
                 transFatPerServing: result.transFatPerServing,
                 monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,
@@ -542,6 +679,8 @@ struct FoodPortionSheet: View {
                 notes: notes
             )
             modelContext.insert(cached)
+            // Attach staged tags after insert so the inverse relationship lands cleanly.
+            cached.tags = resolvedTags
         }
         trimRecents(limit: 100)
     }

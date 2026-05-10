@@ -12,6 +12,8 @@ struct FoodsView: View {
     @Environment(FoodDataSourceEnvironment.self) private var dataSourceEnv
     @Query(sort: \CachedFood.lastUsed, order: .reverse)
     private var cachedFoods: [CachedFood]
+    @Query(sort: \FoodTag.name) private var allTags: [FoodTag]
+    @State private var selectedTagIds: Set<UUID> = []
 
     @State private var portionTarget: FoodSearchResult?
     /// Distinct from `portionTarget` so the create-flow can flag the result as
@@ -40,10 +42,17 @@ struct FoodsView: View {
         NavigationStack {
             ScrollViewReader { proxy in
                 List {
-                    titleRow
+                    // Anchor row used by the scrollToTop notification — invisible, zero
+                    // height, just gives `proxy.scrollTo("top")` a target now that the
+                    // custom title row is gone.
+                    Color.clear
+                        .frame(height: 0)
                         .id("top")
                         .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 12, trailing: 16))
+                        .listRowInsets(EdgeInsets())
+                    filterBar
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
                     if myFoods.isEmpty {
                         Text(emptyStateText)
                             .foregroundStyle(.secondary)
@@ -70,20 +79,14 @@ struct FoodsView: View {
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
-                                Button {
-                                    editingFood = cached
-                                } label: {
-                                    Label("Edit", systemImage: "pencil")
-                                }
-                                .tint(.blue)
                             }
                         }
                     }
                 }
                 .listStyle(.plain)
                 .searchable(text: $searchText, prompt: "Search foods")
-                .navigationTitle("")
-                .navigationBarTitleDisplayMode(.inline)
+                .navigationTitle("My Foods")
+                .navigationBarTitleDisplayMode(.large)
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button {
@@ -167,9 +170,6 @@ struct FoodsView: View {
                 .sheet(isPresented: $showRecipeBuilder) {
                     RecipeBuilderSheet { }
                 }
-                .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
-                    withAnimation { proxy.scrollTo("top", anchor: .top) }
-                }
                 .task {
                     if addLookupViewModel == nil {
                         addLookupViewModel = FoodSearchViewModel(dataSource: dataSourceEnv.dataSource)
@@ -179,30 +179,55 @@ struct FoodsView: View {
         }
     }
 
-    /// Custom title row replacing the default large-title navbar — gives the favorites-filter
-    /// button a home alongside the "My Foods" headline instead of crowding the toolbar. The
-    /// button sits 20pt to the right of the title; trailing `Spacer` keeps the pair left-aligned
-    /// instead of stretching across the row. `.contentTransition(.identity)` disables the
-    /// symbol-morph animation so the star.fill ↔ star swap is a clean cut, not a brief
-    /// blue-flash through an intermediate accent-tinted frame.
-    private var titleRow: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 20) {
-            Text("My Foods")
-                .font(.largeTitle.weight(.bold))
-            Button {
-                var t = Transaction()
-                t.disablesAnimations = true
-                withTransaction(t) { showFavoritesOnly.toggle() }
-            } label: {
-                Image(systemName: showFavoritesOnly ? "star.fill" : "star")
-                    .font(.title)
-                    .foregroundStyle(showFavoritesOnly ? AnyShapeStyle(Color.yellow) : AnyShapeStyle(.secondary))
-                    .contentTransition(.identity)
-                    .animation(nil, value: showFavoritesOnly)
+    /// Filter bar — favorite star + every existing tag chip on a horizontal scroll
+    /// row directly under the nav bar. The star is the leading element so the whole
+    /// "show me a subset of My Foods" UI lives in one place, instead of splitting
+    /// favorites into a title-adjacent button and tags into a separate strip.
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Button {
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) { showFavoritesOnly.toggle() }
+                } label: {
+                    Image(systemName: showFavoritesOnly ? "star.fill" : "star")
+                        .font(.title3)
+                        .foregroundStyle(showFavoritesOnly ? AnyShapeStyle(Color.yellow) : AnyShapeStyle(.secondary))
+                        .contentTransition(.identity)
+                        .animation(nil, value: showFavoritesOnly)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only favorites")
+
+                ForEach(allTags) { tag in
+                    Button {
+                        if selectedTagIds.contains(tag.id) {
+                            selectedTagIds.remove(tag.id)
+                        } else {
+                            selectedTagIds.insert(tag.id)
+                        }
+                    } label: {
+                        TagChipView(name: tag.name, color: tag.color, isSelected: selectedTagIds.contains(tag.id))
+                    }
+                    .buttonStyle(.plain)
+                }
+                if !selectedTagIds.isEmpty {
+                    Button { selectedTagIds.removeAll() } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle.fill")
+                            Text("Clear")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only favorites")
-            Spacer()
+            .padding(.horizontal, 16)
         }
     }
 
@@ -210,13 +235,25 @@ struct FoodsView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return cachedFoods
             .filter { $0.isInMyFoods && (!showFavoritesOnly || $0.isFavorite) }
+            .filter { matchesTagFilter($0) }
             .filter { query.isEmpty || $0.name.lowercased().contains(query) || ($0.brand?.lowercased().contains(query) ?? false) }
             .sorted(by: CachedFood.myFoodsSort)
+    }
+
+    /// AND semantics: a food passes only if it carries every selected tag id.
+    /// An empty selection lets every food through.
+    private func matchesTagFilter(_ food: CachedFood) -> Bool {
+        guard !selectedTagIds.isEmpty else { return true }
+        let foodTagIds = Set(food.tagsList.map(\.id))
+        return selectedTagIds.isSubset(of: foodTagIds)
     }
 
     private var emptyStateText: String {
         if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "No foods match \"\(searchText)\"."
+        }
+        if !selectedTagIds.isEmpty {
+            return "No foods match the selected tags. Try removing one."
         }
         if showFavoritesOnly {
             return "No favorites yet. Tap the star on a food to favorite it."

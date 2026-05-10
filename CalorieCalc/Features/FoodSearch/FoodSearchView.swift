@@ -11,10 +11,12 @@ struct FoodSearchView: View {
 
     @Query(sort: \CachedFood.lastUsed, order: .reverse)
     private var cachedFoods: [CachedFood]
+    @Query(sort: \FoodTag.name) private var allTags: [FoodTag]
+    @State private var selectedTagIds: Set<UUID> = []
 
     @State private var mealType: MealType
     @State private var viewModel: FoodSearchViewModel?
-    @State private var tab: Tab = .search
+    @State private var tab: Tab = .myFoods
     @State private var showScanner = false
     @State private var showQuickAdd = false
     @State private var showPhotoAnalyzer = false
@@ -34,9 +36,9 @@ struct FoodSearchView: View {
     @AppStorage("foodsView.showFavoritesOnly") private var showFavoritesOnly: Bool = false
 
     enum Tab: String, CaseIterable, Hashable {
-        case search = "Search"
-        case recents = "Recents"
         case myFoods = "My Foods"
+        case recents = "Recents"
+        case search = "Search"
     }
 
     var body: some View {
@@ -46,7 +48,13 @@ struct FoodSearchView: View {
                     ForEach(Tab.allCases, id: \.self) { t in Text(t.rawValue).tag(t) }
                 }
                 .pickerStyle(.segmented)
-                .padding([.horizontal, .top])
+                .padding(.horizontal)
+                .padding(.top, 8)
+
+                if tab == .recents || tab == .myFoods {
+                    filterBar
+                        .padding(.vertical, 4)
+                }
 
                 tabContent
             }
@@ -72,17 +80,6 @@ struct FoodSearchView: View {
                         .foregroundStyle(.primary)
                     }
                     .accessibilityLabel("Change meal")
-                }
-                if tab == .recents || tab == .myFoods {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            showFavoritesOnly.toggle()
-                        } label: {
-                            Image(systemName: showFavoritesOnly ? "star.fill" : "star")
-                                .foregroundStyle(showFavoritesOnly ? Color.yellow : Color.accentColor)
-                        }
-                        .accessibilityLabel(showFavoritesOnly ? "Show all" : "Show only favorites")
-                    }
                 }
             }
             .task {
@@ -260,7 +257,69 @@ struct FoodSearchView: View {
     private var myFoods: [CachedFood] {
         cachedFoods
             .filter { $0.isInMyFoods && (!showFavoritesOnly || $0.isFavorite) }
+            .filter { matchesTagFilter($0) }
             .sorted(by: CachedFood.myFoodsSort)
+    }
+
+    /// AND semantics: a food passes only if it carries every selected tag id.
+    /// Mirrors the filter logic in FoodsView so behaviour is consistent across tabs.
+    private func matchesTagFilter(_ food: CachedFood) -> Bool {
+        guard !selectedTagIds.isEmpty else { return true }
+        let foodTagIds = Set(food.tagsList.map(\.id))
+        return selectedTagIds.isSubset(of: foodTagIds)
+    }
+
+    /// Favorite-toggle star + every existing tag chip on a horizontal scroll row.
+    /// Mirrors the `filterBar` used on the My Foods tab so the favourites-and-tags
+    /// filter UI behaves identically across the two surfaces. Only rendered on the
+    /// Recents and My Foods tabs (the Search tab queries the food database, which
+    /// neither favourite nor tag filters apply to).
+    private var filterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                Button {
+                    var t = Transaction()
+                    t.disablesAnimations = true
+                    withTransaction(t) { showFavoritesOnly.toggle() }
+                } label: {
+                    Image(systemName: showFavoritesOnly ? "star.fill" : "star")
+                        .font(.title3)
+                        .foregroundStyle(showFavoritesOnly ? AnyShapeStyle(Color.yellow) : AnyShapeStyle(.secondary))
+                        .contentTransition(.identity)
+                        .animation(nil, value: showFavoritesOnly)
+                        .frame(width: 32, height: 32)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only favorites")
+
+                ForEach(allTags) { tag in
+                    Button {
+                        if selectedTagIds.contains(tag.id) {
+                            selectedTagIds.remove(tag.id)
+                        } else {
+                            selectedTagIds.insert(tag.id)
+                        }
+                    } label: {
+                        TagChipView(name: tag.name, color: tag.color, isSelected: selectedTagIds.contains(tag.id))
+                    }
+                    .buttonStyle(.plain)
+                }
+                if !selectedTagIds.isEmpty {
+                    Button { selectedTagIds.removeAll() } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle.fill")
+                            Text("Clear")
+                        }
+                        .font(.subheadline.weight(.medium))
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16)
+        }
     }
 
     private func cachedRow(_ cached: CachedFood, forFavorites: Bool = false) -> some View {
@@ -277,6 +336,7 @@ struct FoodSearchView: View {
     private var recentFoods: [CachedFood] {
         cachedFoods
             .filter { $0.useCount > 0 && (!showFavoritesOnly || $0.isFavorite) }
+            .filter { matchesTagFilter($0) }
             .sorted(by: { $0.lastUsed > $1.lastUsed })
             .prefix(100)
             .map { $0 }
@@ -345,44 +405,40 @@ struct CachedFoodRow: View {
     let onToggleFavorite: () -> Void
 
     var body: some View {
-        HStack(spacing: 10) {
-            Button(action: onToggleFavorite) {
-                Image(systemName: cached.isFavorite ? "star.fill" : "star")
-                    .foregroundStyle(cached.isFavorite ? Color.yellow : Color.secondary)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(cached.isFavorite ? "Remove from favorites" : "Add to favorites")
+        VStack(alignment: .leading, spacing: 2) {
+            Text(cached.name)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(cached.name).lineLimit(1)
-                HStack(spacing: 6) {
-                    if let brand = cached.brand { Text(brand).lineLimit(1) }
-                    Text(cached.rowCaption).lineLimit(1)
+            HStack(spacing: 6) {
+                if let brand = cached.brand {
+                    Text(brand)
+                        .lineLimit(1)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                if !cached.tagsList.isEmpty {
+                    HStack(spacing: 3) {
+                        ForEach(cached.tagsList) { tag in
+                            Circle()
+                                .fill(tag.color.swiftUIColor)
+                                .frame(width: 8, height: 8)
+                                .accessibilityLabel(Text(tag.name))
+                        }
+                    }
+                }
+                Button(action: onToggleFavorite) {
+                    Image(systemName: cached.isFavorite ? "star.fill" : "star")
+                        .foregroundStyle(cached.isFavorite ? Color.yellow : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(cached.isFavorite ? "Remove from favorites" : "Add to favorites")
             }
-            Spacer()
-            Text("\(CalorieFormatter.whole(rowCalories)) kcal")
-                .font(.subheadline.monospacedDigit())
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var rowCalories: Double {
-        // For sticky-preset cached foods, show the calories at the user's last-picked serving so
-        // the row matches what reopening will load. Falls back to per-native otherwise.
-        if let unit = cached.lastSelectedUnit, let qty = cached.lastSelectedQuantity {
-            let factor = ServingMath.nativeUnitsConsumed(
-                selectedUnit: unit,
-                quantity: qty,
-                nativeUnit: cached.nativeUnit,
-                nativeUnitGrams: cached.nativeUnitGrams,
-                nativeUnitMilliliters: cached.nativeUnitMilliliters
-            )
-            return cached.caloriesPerServing * factor
-        }
-        return cached.caloriesPerServing
-    }
 }
 
 extension CachedFood {

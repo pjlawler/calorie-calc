@@ -18,6 +18,22 @@ struct EditCachedFoodSheet: View {
     @State private var carbsText: String = ""
     @State private var fatText: String = ""
     @State private var notesText: String = ""
+    @State private var showTagPicker: Bool = false
+
+    @Query(sort: \FoodTag.name) private var allTags: [FoodTag]
+
+    /// Bidirectional bridge between the picker's `Set<UUID>` API and the food's
+    /// `tags: [FoodTag]?` relationship. Reads project the current attachment;
+    /// writes resolve ids → `FoodTag` instances and reassign the relationship.
+    private var tagSelectionBinding: Binding<Set<UUID>> {
+        Binding(
+            get: { Set(food.tagsList.map(\.id)) },
+            set: { newIds in
+                food.tags = allTags.filter { newIds.contains($0.id) }
+                try? modelContext.save()
+            }
+        )
+    }
 
     private var canSave: Bool {
         !nameText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -45,10 +61,50 @@ struct EditCachedFoodSheet: View {
                     Text("Edits the per-serving values used everywhere this food is logged in the future. Already-logged entries are unchanged.")
                 }
 
+                Section("Tags") {
+                    if food.tagsList.isEmpty {
+                        Button {
+                            showTagPicker = true
+                        } label: {
+                            Label("Add tags", systemImage: "tag")
+                        }
+                    } else {
+                        // Wrap to multiple lines when the user has lots of tags. Each chip is
+                        // tappable to remove without entering the picker.
+                        FlowLayout(spacing: 8) {
+                            ForEach(food.tagsList) { tag in
+                                Button {
+                                    food.tags = food.tagsList.filter { $0.id != tag.id }
+                                    try? modelContext.save()
+                                } label: {
+                                    HStack(spacing: 4) {
+                                        TagChipView(name: tag.name, color: tag.color)
+                                        Image(systemName: "xmark.circle.fill")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            Button {
+                                showTagPicker = true
+                            } label: {
+                                Image(systemName: "plus.circle")
+                                    .font(.title3)
+                                    .foregroundStyle(.tint)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+
                 Section("Notes") {
                     TextField("Notes — prep, source, tweaks…", text: $notesText, axis: .vertical)
                         .lineLimit(2...6)
                 }
+            }
+            .sheet(isPresented: $showTagPicker) {
+                TagPickerSheet(selectedIds: tagSelectionBinding)
             }
             .navigationTitle("Edit Food")
             .navigationBarTitleDisplayMode(.inline)

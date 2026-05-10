@@ -54,8 +54,6 @@ struct DayDetailView: View {
             .padding(.horizontal)
             .padding(.top, 12)
 
-            dailyStatsPanel(log: dayLog)
-
             List {
                 mealsSections(log: dayLog)
                 if tracksSupplements {
@@ -66,12 +64,12 @@ struct DayDetailView: View {
                     )
                 }
                 workoutsSection(log: dayLog)
-                if showSteps {
-                    stepsSection
+                Section("Summary") {
+                    summarySectionRows(log: dayLog)
                 }
             }
         }
-        .navigationTitle("Day Details")
+        .navigationTitle("Daily Log")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showAddSheet) {
             // initialMealType defaults to MealType.quickAddDefaultForCurrentTime() so the
@@ -96,43 +94,39 @@ struct DayDetailView: View {
         }
     }
 
+    /// Summary rows rendered as individual `List` rows (default white background +
+    /// row separators) so the section reads consistently with Meals / Workouts above.
+    /// No outer card / padding / divider — `List` provides those.
     @ViewBuilder
-    private func dailyStatsPanel(log: DayLog?) -> some View {
+    private func summarySectionRows(log: DayLog?) -> some View {
         let hkBurn = viewModel?.includedHealthKitActiveEnergy ?? 0
         let manualBurn = log?.totalManualBurned ?? 0
         let totalBurn = Int((hkBurn + manualBurn).rounded())
         let consumed = Int((log?.totalConsumedCalories ?? 0).rounded())
         let isToday = Calendar.current.isDateInToday(date)
 
-        VStack(alignment: .leading, spacing: 8) {
-            statRow(label: "Planned", value: dailyPlanned)
+        statRow(label: "Planned", value: dailyPlanned)
+        // Consumed + its macro breakdown share a single row — the macros are a
+        // subpart of the consumed total, not a peer of Burned / Planned.
+        VStack(alignment: .leading, spacing: 6) {
             statRow(label: "Consumed (-)", value: consumed)
             macroRow(log: log)
-                .padding(.bottom, 8)
-            statRow(label: "Burned (+)", value: totalBurn)
-            if isToday, let variance = priorDaysVariance {
-                statRow(
-                    label: "Variance (+)",
-                    value: variance,
-                    color: variance >= 0 ? .green : .red
-                )
-            }
-            if isToday, let remaining = weeklyRemaining {
-                Divider()
-                statRow(
-                    label: "Remaining",
-                    value: remaining,
-                    color: remaining >= 0 ? .green : .red
-                )
-            }
         }
-        .padding(.vertical, 14)
-        .padding(.horizontal, 16)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(uiColor: .secondarySystemBackground))
-        )
-        .padding(.horizontal)
+        statRow(label: "Burned (+)", value: totalBurn)
+        if isToday, let variance = priorDaysVariance {
+            statRow(
+                label: "Variance (+)",
+                value: variance,
+                color: variance >= 0 ? .green : .red
+            )
+        }
+        if isToday, let remaining = weeklyRemaining {
+            statRow(
+                label: "Remaining",
+                value: remaining,
+                color: remaining >= 0 ? .green : .red
+            )
+        }
     }
 
     private func statRow(label: String, value: Int, color: Color = .primary) -> some View {
@@ -221,31 +215,26 @@ struct DayDetailView: View {
                 Label("Add workout", systemImage: "plus.circle")
             }
         } header: {
-            HStack {
-                Label("Workouts", systemImage: "figure.run")
-                    .font(.headline)
+            HStack(spacing: 6) {
+                Label {
+                    HStack(spacing: 4) {
+                        Text("Workouts")
+                        if showSteps {
+                            // Steps shown inline as a parenthetical reference — they're NOT
+                            // folded into burned-calorie math (Apple's activeEnergyBurned
+                            // already accounts for steps).
+                            let steps = Int((viewModel?.dailySteps ?? 0).rounded())
+                            Text("(\(steps.formatted(.number)) steps)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "figure.run")
+                }
+                .font(.headline)
                 Spacer()
                 Text("\(CalorieFormatter.whole(totalBurned)) kcal")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    /// Reference-only daily step count. Steps are NOT folded into burned-calorie math
-    /// (Apple's activeEnergyBurned already accounts for them, so any per-step formula here
-    /// would double-count workouts that involve walking).
-    @ViewBuilder
-    private var stepsSection: some View {
-        let steps = Int((viewModel?.dailySteps ?? 0).rounded())
-        Section {
-            EmptyView()
-        } header: {
-            HStack {
-                Label("Steps", systemImage: "figure.walk")
-                    .font(.headline)
-                Spacer()
-                Text(steps.formatted(.number))
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
             }

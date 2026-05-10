@@ -92,7 +92,7 @@ struct HistoryView: View {
                         .padding(.top, 8)
                 }
                 .padding(.horizontal)
-                .padding(.vertical, 8)
+                .padding(.bottom, 8)
             }
             .scrollBounceBehavior(.basedOnSize)
             .navigationTitle("History")
@@ -112,9 +112,6 @@ struct HistoryView: View {
             }
             .sheet(isPresented: $showAnalysis) {
                 NutritionAnalysisSheet(data: analysisInput)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .scrollToTop)) { _ in
-                withAnimation { proxy.scrollTo("top", anchor: .top) }
             }
             }
         }
