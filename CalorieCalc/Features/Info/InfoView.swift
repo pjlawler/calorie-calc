@@ -97,7 +97,7 @@ struct InfoView: View {
 
                         For exercise, Apple Health pulls active-energy automatically once you authorize it in Settings. Add manual workouts for anything Health misses — gym session without the watch, gardening, etc.
 
-                        Star anything you eat regularly and it surfaces on the Favorites tab for one-tap re-logging.
+                        Tap the bolt on anything you eat regularly to add it to Quick Add — it surfaces for one-tap re-logging from the Calc tab.
                         """
                     )
 

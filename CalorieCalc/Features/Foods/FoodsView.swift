@@ -40,19 +40,10 @@ struct FoodsView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollViewReader { proxy in
-                List {
-                    // Anchor row used by the scrollToTop notification — invisible, zero
-                    // height, just gives `proxy.scrollTo("top")` a target now that the
-                    // custom title row is gone.
-                    Color.clear
-                        .frame(height: 0)
-                        .id("top")
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets())
-                    filterBar
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 8, trailing: 0))
+            List {
+                filterBar
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 4, trailing: 0))
                     if myFoods.isEmpty {
                         Text(emptyStateText)
                             .foregroundStyle(.secondary)
@@ -170,10 +161,9 @@ struct FoodsView: View {
                 .sheet(isPresented: $showRecipeBuilder) {
                     RecipeBuilderSheet { }
                 }
-                .task {
-                    if addLookupViewModel == nil {
-                        addLookupViewModel = FoodSearchViewModel(dataSource: dataSourceEnv.dataSource)
-                    }
+            .task {
+                if addLookupViewModel == nil {
+                    addLookupViewModel = FoodSearchViewModel(dataSource: dataSourceEnv.dataSource)
                 }
             }
         }
@@ -191,15 +181,15 @@ struct FoodsView: View {
                     t.disablesAnimations = true
                     withTransaction(t) { showFavoritesOnly.toggle() }
                 } label: {
-                    Image(systemName: showFavoritesOnly ? "star.fill" : "star")
+                    Image(systemName: showFavoritesOnly ? "bolt.fill" : "bolt")
                         .font(.title3)
-                        .foregroundStyle(showFavoritesOnly ? AnyShapeStyle(Color.yellow) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(showFavoritesOnly ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
                         .contentTransition(.identity)
                         .animation(nil, value: showFavoritesOnly)
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only favorites")
+                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only Quick Add")
 
                 ForEach(allTags) { tag in
                     Button {
@@ -256,7 +246,7 @@ struct FoodsView: View {
             return "No foods match the selected tags. Try removing one."
         }
         if showFavoritesOnly {
-            return "No favorites yet. Tap the star on a food to favorite it."
+            return "Nothing in Quick Add yet. Tap the bolt on a food to add it."
         }
         return "No saved foods yet. Tap + to add one, or use the Save to My Foods button on a food you find via search."
     }

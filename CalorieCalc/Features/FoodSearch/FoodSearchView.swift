@@ -282,15 +282,15 @@ struct FoodSearchView: View {
                     t.disablesAnimations = true
                     withTransaction(t) { showFavoritesOnly.toggle() }
                 } label: {
-                    Image(systemName: showFavoritesOnly ? "star.fill" : "star")
+                    Image(systemName: showFavoritesOnly ? "bolt.fill" : "bolt")
                         .font(.title3)
-                        .foregroundStyle(showFavoritesOnly ? AnyShapeStyle(Color.yellow) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(showFavoritesOnly ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
                         .contentTransition(.identity)
                         .animation(nil, value: showFavoritesOnly)
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only favorites")
+                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only Quick Add")
 
                 ForEach(allTags) { tag in
                     Button {
@@ -429,11 +429,11 @@ struct CachedFoodRow: View {
                     }
                 }
                 Button(action: onToggleFavorite) {
-                    Image(systemName: cached.isFavorite ? "star.fill" : "star")
-                        .foregroundStyle(cached.isFavorite ? Color.yellow : Color.secondary)
+                    Image(systemName: cached.isFavorite ? "bolt.fill" : "bolt")
+                        .foregroundStyle(cached.isFavorite ? Color.orange : Color.secondary)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(cached.isFavorite ? "Remove from favorites" : "Add to favorites")
+                .accessibilityLabel(cached.isFavorite ? "Remove from Quick Add" : "Add to Quick Add")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

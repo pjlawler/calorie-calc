@@ -154,13 +154,13 @@ private struct WeekCalendarBody: View {
                     Button {
                         showFavoriteQuickAdd = true
                     } label: {
-                        Label("Add", systemImage: "star.fill")
+                        Label("Add", systemImage: "bolt.fill")
                             .labelStyle(TitleAndIconLabelStyle())
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .disabled(favoriteFoods.isEmpty)
-                    .accessibilityLabel("Quick add favorite food")
+                    .accessibilityLabel("Quick add")
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -377,7 +377,7 @@ private struct FavoriteQuickAddListSheet: View {
                     HStack {
                         Image(systemName: "magnifyingglass")
                             .foregroundStyle(.secondary)
-                        TextField("Search favorites", text: $searchText)
+                        TextField("Search Quick Add", text: $searchText)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                         if !searchText.isEmpty {
@@ -428,11 +428,11 @@ private struct FavoriteQuickAddListSheet: View {
                     }
                 }
 
-                Section("Favorites") {
+                Section("Quick Add") {
                     if sortedFavorites.isEmpty {
                         Text(selectedTagIds.isEmpty
-                            ? "No favorites yet."
-                            : "No favorites match the selected tags.")
+                            ? "Nothing in Quick Add yet."
+                            : "Nothing in Quick Add matches the selected tags.")
                             .foregroundStyle(.secondary)
                     } else {
                         ForEach(sortedFavorites, id: \.id) { favorite in
