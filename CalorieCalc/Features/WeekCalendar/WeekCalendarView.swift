@@ -338,6 +338,12 @@ private struct FavoriteQuickAddListSheet: View {
     @State private var selectedDate: Date = Calendar.current.startOfDay(for: .now)
     @State private var searchText: String = ""
     @State private var selectedTagIds: Set<UUID> = []
+    @State private var sheetTab: SheetTab = .quickAdd
+
+    private enum SheetTab: String, CaseIterable, Hashable {
+        case quickAdd = "Quick Add"
+        case manual = "Manual Entry"
+    }
 
     private var sortedFavorites: [CachedFood] {
         let base = favorites
@@ -365,106 +371,48 @@ private struct FavoriteQuickAddListSheet: View {
         return selectedTagIds.isSubset(of: foodTagIds)
     }
 
+    /// Total kcal for the food at its favourite-preset serving (or last-used, or 1
+    /// native unit if neither exists). `caloriesPerServing` on `CachedFood` is the
+    /// per-native value (per-gram, per-batch, etc.), so a 0.4-batch pancake row was
+    /// previously rendering 1,010 — the per-batch number — instead of 404.
+    /// Matches the unit/quantity used by `addFavoriteToLog` below so the row total
+    /// and the logged entry agree.
+    private func favoriteCalories(_ food: CachedFood) -> Double {
+        let unit = food.favoriteSelectedUnit ?? food.lastSelectedUnit ?? food.nativeUnit
+        let qty = food.favoriteSelectedQuantity ?? food.lastSelectedQuantity ?? 1
+        let factor = ServingMath.nativeUnitsConsumed(
+            selectedUnit: unit,
+            quantity: qty,
+            nativeUnit: food.nativeUnit,
+            nativeUnitGrams: food.nativeUnitGrams,
+            nativeUnitMilliliters: food.nativeUnitMilliliters
+        )
+        return food.caloriesPerServing * factor
+    }
+
     var body: some View {
         NavigationStack {
-            List {
-                Section("Add to") {
-                    Picker("Meal", selection: $selectedMeal) {
-                        ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
-                            Text(meal.displayName).tag(meal)
-                        }
-                    }
-                    DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
-                }
+            VStack(spacing: 0) {
+                metadataHeader
 
-                Section {
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundStyle(.secondary)
-                        TextField("Search Quick Add", text: $searchText)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                        if !searchText.isEmpty {
-                            Button {
-                                searchText = ""
-                            } label: {
-                                Image(systemName: "xmark.circle.fill")
-                                    .foregroundStyle(.secondary)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
+                Picker("Mode", selection: $sheetTab) {
+                    ForEach(SheetTab.allCases, id: \.self) { t in Text(t.rawValue).tag(t) }
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top, 4)
+                .padding(.bottom, 8)
 
-                if !allTags.isEmpty {
-                    Section("Filter by tag") {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(allTags) { tag in
-                                    Button {
-                                        if selectedTagIds.contains(tag.id) {
-                                            selectedTagIds.remove(tag.id)
-                                        } else {
-                                            selectedTagIds.insert(tag.id)
-                                        }
-                                    } label: {
-                                        TagChipView(name: tag.name, color: tag.color, isSelected: selectedTagIds.contains(tag.id))
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                if !selectedTagIds.isEmpty {
-                                    Button { selectedTagIds.removeAll() } label: {
-                                        HStack(spacing: 4) {
-                                            Image(systemName: "xmark.circle.fill")
-                                            Text("Clear")
-                                        }
-                                        .font(.subheadline.weight(.medium))
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 6)
-                                        .foregroundStyle(.secondary)
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                            }
-                            .padding(.vertical, 2)
-                        }
-                        .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                    }
-                }
-
-                Section("Quick Add") {
-                    if sortedFavorites.isEmpty {
-                        Text(selectedTagIds.isEmpty
-                            ? "Nothing in Quick Add yet."
-                            : "Nothing in Quick Add matches the selected tags.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(sortedFavorites, id: \.id) { favorite in
-                            Button {
-                                addFavoriteToLog(favorite)
-                                dismiss()
-                            } label: {
-                                HStack(alignment: .firstTextBaseline) {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(favorite.name)
-                                            .lineLimit(1)
-                                        HStack(spacing: 6) {
-                                            if let brand = favorite.brand {
-                                                Text(brand).lineLimit(1)
-                                            }
-                                            Text(favorite.rowCaption).lineLimit(1)
-                                        }
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    }
-                                    Spacer()
-                                    Text("\(CalorieFormatter.whole(favorite.caloriesPerServing)) kcal")
-                                        .font(.subheadline.monospacedDigit())
-                                }
-                                .padding(.vertical, 2)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                Group {
+                    switch sheetTab {
+                    case .quickAdd:
+                        quickAddList
+                    case .manual:
+                        QuickAddForm(
+                            mealType: selectedMeal,
+                            date: normalizedSelectedDay(from: selectedDate),
+                            onSaved: { dismiss() }
+                        )
                     }
                 }
             }
@@ -473,6 +421,133 @@ private struct FavoriteQuickAddListSheet: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
+                }
+            }
+        }
+    }
+
+    /// Persistent "Add to" controls displayed above the tab picker so both Quick Add
+    /// and Manual Entry log against the same meal + date selection. Compact inline
+    /// pickers — the menu/datepicker pair takes one row instead of a Form section.
+    private var metadataHeader: some View {
+        HStack {
+            Menu {
+                Picker("Meal", selection: $selectedMeal) {
+                    ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
+                        Label(meal.displayName, systemImage: meal.symbolName).tag(meal)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text("Add to \(selectedMeal.displayName)")
+                        .font(.subheadline.weight(.semibold))
+                    Image(systemName: "chevron.down")
+                        .font(.caption2.weight(.semibold))
+                }
+                .foregroundStyle(.primary)
+            }
+
+            Spacer()
+
+            DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
+                .labelsHidden()
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+    }
+
+    /// The original Quick Add list — search, tag filter, and the favourites list.
+    /// Pulled out so the manual-entry tab can swap in `QuickAddForm` cleanly.
+    private var quickAddList: some View {
+        List {
+            Section {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search Quick Add", text: $searchText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    if !searchText.isEmpty {
+                        Button {
+                            searchText = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
+            if !allTags.isEmpty {
+                Section("Filter by tag") {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(allTags) { tag in
+                                Button {
+                                    if selectedTagIds.contains(tag.id) {
+                                        selectedTagIds.remove(tag.id)
+                                    } else {
+                                        selectedTagIds.insert(tag.id)
+                                    }
+                                } label: {
+                                    TagChipView(name: tag.name, color: tag.color, isSelected: selectedTagIds.contains(tag.id))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            if !selectedTagIds.isEmpty {
+                                Button { selectedTagIds.removeAll() } label: {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: "xmark.circle.fill")
+                                        Text("Clear")
+                                    }
+                                    .font(.subheadline.weight(.medium))
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
+                }
+            }
+
+            Section("Quick Add") {
+                if sortedFavorites.isEmpty {
+                    Text(selectedTagIds.isEmpty
+                        ? "Nothing in Quick Add yet."
+                        : "Nothing in Quick Add matches the selected tags.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(sortedFavorites, id: \.id) { favorite in
+                        Button {
+                            addFavoriteToLog(favorite)
+                            dismiss()
+                        } label: {
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(favorite.name)
+                                        .lineLimit(1)
+                                    HStack(spacing: 6) {
+                                        if let brand = favorite.brand {
+                                            Text(brand).lineLimit(1)
+                                        }
+                                        Text(favorite.rowCaption).lineLimit(1)
+                                    }
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text("\(CalorieFormatter.whole(favoriteCalories(favorite))) kcal")
+                                    .font(.subheadline.monospacedDigit())
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
