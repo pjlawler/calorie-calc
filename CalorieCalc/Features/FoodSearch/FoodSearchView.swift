@@ -53,7 +53,7 @@ struct FoodSearchView: View {
 
                 if tab == .recents || tab == .myFoods {
                     filterBar
-                        .padding(.vertical, 4)
+                        .padding(.vertical, 12)
                 }
 
                 tabContent

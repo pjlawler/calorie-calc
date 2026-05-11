@@ -183,7 +183,11 @@ private struct WeekCalendarBody: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
-        .scrollBounceBehavior(.basedOnSize)
+        // `.always` (not `.basedOnSize`) so the ScrollView bounces even when the
+        // week's content fits in the viewport. Pull-to-refresh on the parent
+        // .refreshable needs the bounce to trigger, so without this the gesture
+        // does nothing on short weeks.
+        .scrollBounceBehavior(.always)
         .sheet(isPresented: $showFavoriteQuickAdd) {
             FavoriteQuickAddListSheet(favorites: favoriteFoods)
         }
