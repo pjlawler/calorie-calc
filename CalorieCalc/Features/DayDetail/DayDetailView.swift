@@ -25,6 +25,18 @@ struct DayDetailView: View {
     @State private var showSupplementPicker = false
     @AppStorage("settings.showSteps") private var showSteps: Bool = true
 
+    /// All sections start collapsed on every open of the day-detail screen. State is
+    /// view-local (not persisted) so leaving and coming back resets the view to a tidy
+    /// collapsed state. Adding a new entry auto-expands the relevant section via the
+    /// onChange handlers below.
+    @State private var collapsedMeals: Set<MealType> = Set(MealType.allCases)
+    @State private var workoutsCollapsed: Bool = true
+    @State private var summaryCollapsed: Bool = true
+    /// Last-observed counts so the onChange handlers can detect *additions* (which
+    /// expand the section) and ignore deletions (which leave the user's choice alone).
+    @State private var lastFoodCounts: [MealType: Int] = [:]
+    @State private var lastManualWorkoutCount: Int = 0
+
     private var tracksSupplements: Bool { profiles.first?.tracksSupplements ?? false }
 
     private var dayLog: DayLog? {
@@ -64,10 +76,9 @@ struct DayDetailView: View {
                     )
                 }
                 workoutsSection(log: dayLog)
-                Section("Summary") {
-                    summarySectionRows(log: dayLog)
-                }
+                summarySection(log: dayLog)
             }
+            .listSectionSpacing(0)
         }
         .navigationTitle("Daily Log")
         .navigationBarTitleDisplayMode(.inline)
@@ -92,6 +103,41 @@ struct DayDetailView: View {
             }
             await viewModel?.refresh()
         }
+        .onAppear {
+            // Seed last-seen counts so existing entries don't trigger an auto-expand
+            // on first paint — only NEW entries logged while this view is open do.
+            for meal in MealType.allCases {
+                lastFoodCounts[meal] = dayLog?.entries(for: meal).count ?? 0
+            }
+            lastManualWorkoutCount = dayLog?.manualWorkoutsList.count ?? 0
+        }
+        .onChange(of: mealEntryCountsSnapshot) { _, newSnapshot in
+            for meal in MealType.allCases {
+                let newCount = newSnapshot[meal] ?? 0
+                let previous = lastFoodCounts[meal] ?? newCount
+                if newCount > previous {
+                    withAnimation(.snappy) { collapsedMeals.remove(meal) }
+                }
+                lastFoodCounts[meal] = newCount
+            }
+        }
+        .onChange(of: dayLog?.manualWorkoutsList.count ?? 0) { _, newCount in
+            if newCount > lastManualWorkoutCount {
+                withAnimation(.snappy) { workoutsCollapsed = false }
+            }
+            lastManualWorkoutCount = newCount
+        }
+    }
+
+    /// Per-meal entry counts captured as an Equatable dictionary so `.onChange` can
+    /// react to entries being added (or removed). Recomputed each render — cheap because
+    /// it's just counting elements.
+    private var mealEntryCountsSnapshot: [MealType: Int] {
+        var snap: [MealType: Int] = [:]
+        for meal in MealType.allCases {
+            snap[meal] = dayLog?.entries(for: meal).count ?? 0
+        }
+        return snap
     }
 
     /// Summary rows rendered as individual `List` rows (default white background +
@@ -164,13 +210,30 @@ struct DayDetailView: View {
 
     @ViewBuilder
     private func mealsSections(log: DayLog?) -> some View {
-        ForEach(MealType.allCases.sorted { $0.order < $1.order }, id: \.self) { meal in
+        let collapsed = collapsedMeals
+        let sortedMeals = MealType.allCases.sorted { $0.order < $1.order }
+        ForEach(Array(sortedMeals.enumerated()), id: \.element) { idx, meal in
+            let entries = log?.entries(for: meal) ?? []
             MealSectionView(
                 mealType: meal,
-                entries: log?.entries(for: meal) ?? [],
+                entries: entries,
+                totalProtein: entries.reduce(0) { $0 + $1.totalProtein },
+                totalCarbs: entries.reduce(0) { $0 + $1.totalCarbs },
+                totalFat: entries.reduce(0) { $0 + $1.totalFat },
+                isCollapsed: collapsed.contains(meal),
+                showTopDivider: idx > 0,
+                onToggleCollapse: { toggleCollapse(meal) },
                 onEdit: { entry in editingEntry = entry },
                 onDelete: { entry in delete(entry: entry) }
             )
+        }
+    }
+
+    private func toggleCollapse(_ meal: MealType) {
+        if collapsedMeals.contains(meal) {
+            collapsedMeals.remove(meal)
+        } else {
+            collapsedMeals.insert(meal)
         }
     }
 
@@ -182,63 +245,120 @@ struct DayDetailView: View {
         }()
         let totalBurned = hkBurn + (log?.totalManualBurned ?? 0)
         Section {
-            if let vm = viewModel {
-                ForEach(vm.healthKitWorkouts) { workout in
-                    HealthKitWorkoutRow(
-                        workout: workout,
-                        isExcluded: vm.excludedHealthKitWorkoutIDs.contains(workout.id),
-                        onToggleExclude: { viewModel?.toggleExclude(workout.id) }
-                    )
-                }
-                if vm.healthKitActiveEnergy > 0 && vm.healthKitWorkouts.isEmpty {
-                    HStack {
-                        Label("Active energy (Health)", systemImage: "heart.fill")
-                        Spacer()
-                        Text("\(CalorieFormatter.whole(vm.healthKitActiveEnergy)) kcal")
-                            .monospacedDigit()
+            workoutsHeaderRow(totalBurned: totalBurned)
+            if !workoutsCollapsed {
+                if let vm = viewModel {
+                    ForEach(vm.healthKitWorkouts) { workout in
+                        HealthKitWorkoutRow(
+                            workout: workout,
+                            isExcluded: vm.excludedHealthKitWorkoutIDs.contains(workout.id),
+                            onToggleExclude: { viewModel?.toggleExclude(workout.id) }
+                        )
                     }
-                    .foregroundStyle(.secondary)
-                    .font(.subheadline)
-                }
-            }
-            ForEach(log?.manualWorkoutsList ?? []) { workout in
-                ManualWorkoutRow(workout: workout)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) { delete(workout: workout) } label: {
-                            Label("Delete", systemImage: "trash")
+                    if vm.healthKitActiveEnergy > 0 && vm.healthKitWorkouts.isEmpty {
+                        HStack {
+                            Label("Active energy (Health)", systemImage: "heart.fill")
+                            Spacer()
+                            Text("\(CalorieFormatter.whole(vm.healthKitActiveEnergy)) kcal")
+                                .monospacedDigit()
                         }
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
                     }
+                }
+                ForEach(log?.manualWorkoutsList ?? []) { workout in
+                    ManualWorkoutRow(workout: workout)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) { delete(workout: workout) } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                }
+                Button {
+                    showManualWorkout = true
+                } label: {
+                    Label("Add workout", systemImage: "plus.circle")
+                }
             }
-            Button {
-                showManualWorkout = true
-            } label: {
-                Label("Add workout", systemImage: "plus.circle")
-            }
-        } header: {
-            HStack(spacing: 6) {
-                Label {
+        }
+    }
+
+    private func workoutsHeaderRow(totalBurned: Double) -> some View {
+        Button {
+            withAnimation(.snappy) { workoutsCollapsed.toggle() }
+        } label: {
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.3))
+                    .frame(height: 1)
+                HStack(spacing: 10) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(workoutsCollapsed ? 0 : 90))
+                    Image(systemName: "figure.run")
+                        .font(.headline)
+                        .foregroundStyle(.tint)
+                        .frame(width: 22, alignment: .center)
                     HStack(spacing: 4) {
                         Text("Workouts")
+                            .font(.headline)
                         if showSteps {
-                            // Steps shown inline as a parenthetical reference — they're NOT
-                            // folded into burned-calorie math (Apple's activeEnergyBurned
-                            // already accounts for steps).
                             let steps = Int((viewModel?.dailySteps ?? 0).rounded())
                             Text("(\(steps.formatted(.number)) steps)")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
                     }
-                } icon: {
-                    Image(systemName: "figure.run")
+                    Spacer()
+                    Text("\(CalorieFormatter.whole(totalBurned)) kcal")
+                        .font(.subheadline.monospacedDigit())
                 }
-                .font(.headline)
-                Spacer()
-                Text("\(CalorieFormatter.whole(totalBurned)) kcal")
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
+                .padding(.vertical, 14)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
+    }
+
+    @ViewBuilder
+    private func summarySection(log: DayLog?) -> some View {
+        Section {
+            summaryHeaderRow
+            if !summaryCollapsed {
+                summarySectionRows(log: log)
             }
         }
+    }
+
+    private var summaryHeaderRow: some View {
+        Button {
+            withAnimation(.snappy) { summaryCollapsed.toggle() }
+        } label: {
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.3))
+                    .frame(height: 1)
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(summaryCollapsed ? 0 : 90))
+                    Text("Summary")
+                        .font(.headline)
+                    Spacer()
+                }
+                .padding(.vertical, 14)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20))
+        .listRowSeparator(.hidden)
+        .listRowBackground(Color.clear)
     }
 
     private func delete(entry: FoodEntry) {
