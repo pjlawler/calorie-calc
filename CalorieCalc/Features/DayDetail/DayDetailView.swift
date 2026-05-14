@@ -342,11 +342,15 @@ struct DayDetailView: View {
                 Rectangle()
                     .fill(Color.secondary.opacity(0.3))
                     .frame(height: 1)
-                HStack(spacing: 6) {
+                HStack(spacing: 10) {
                     Image(systemName: "chevron.right")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .rotationEffect(.degrees(summaryCollapsed ? 0 : 90))
+                    Image(systemName: "chart.bar.fill")
+                        .font(.headline)
+                        .foregroundStyle(.tint)
+                        .frame(width: 22, alignment: .center)
                     Text("Summary")
                         .font(.headline)
                     Spacer()
