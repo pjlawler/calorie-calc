@@ -76,7 +76,7 @@ struct WeightLogView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button("Cancel") { dismiss() }
                 }
             }
             .onAppear {
@@ -98,5 +98,6 @@ struct WeightLogView: View {
         try? modelContext.save()
         inputText = ""
         selectedDate = .now
+        dismiss()
     }
 }
