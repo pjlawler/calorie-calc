@@ -107,14 +107,13 @@ struct DashboardView: View {
             }
             weightChartCard(profile: profile)
 
-            // Current weight subsection sits between the chart and the averages, so the
-            // user's "where am I right now" tiles read first, before the period averages.
             Text("Current weight")
                 .font(.subheadline.weight(.semibold))
                 .padding(.top, 4)
-            summaryCard(profile: profile)
+            currentWeightCard(profile: profile)
 
-            averagesCard(profile: profile)
+            Divider()
+                .padding(.vertical, 4)
 
             ForEach(visibleMetrics) { metric in
                 metricSection(metric)
@@ -132,7 +131,8 @@ struct DashboardView: View {
     private var tracksSupplements: Bool { profiles.first?.tracksSupplements ?? false }
 
     private var visibleMetrics: [HistoryMetric] {
-        HistoryMetric.allCases.filter { showSteps || $0 != .steps }
+        let ordered: [HistoryMetric] = [.net, .calories, .carbs, .fat, .protein, .exercise, .steps]
+        return ordered.filter { showSteps || $0 != .steps }
     }
 
     private var dailyTotals: [Date: HistoryAggregator.DailyTotals] {
@@ -425,47 +425,6 @@ struct DashboardView: View {
         )
     }
 
-    /// Period-level insights: average daily net calories and average weekly weight change
-    /// across the same range as the chart. Helps the user see whether their banking math is
-    /// actually moving the scale at the rate they expect.
-    private func averagesCard(profile: UserProfile) -> some View {
-        let summary = periodAverages
-        return HStack(spacing: 12) {
-            averageTile(
-                title: "Avg net / day",
-                value: summary.avgDailyNet.map { $0.formatted(.number) } ?? "—",
-                unit: "kcal"
-            )
-            averageTile(
-                title: "Trending change",
-                value: summary.avgWeeklyChange.map { weightChangeString($0) } ?? "—",
-                unit: "\(profile.weightUnit.suffix)/wk",
-                valueColor: summary.avgWeeklyChange.map { weightChangeColor($0) } ?? .primary
-            )
-        }
-    }
-
-    private func averageTile(title: String, value: String, unit: String, valueColor: Color = .primary) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(value)
-                    .font(.title3.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(valueColor)
-                Text(unit).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.regularMaterial)
-        )
-    }
-
     private func weightChangeString(_ value: Double) -> String {
         // Always include a sign so a flat 0 shows as "0.0" without sign noise.
         if abs(value) < 0.05 { return "0.0" }
@@ -492,11 +451,6 @@ struct DashboardView: View {
         if abs(value) < 0.05 { return .secondary }
         let isLoss = value < 0
         return isLoss == weightLossDirection ? .green : .red
-    }
-
-    private struct PeriodAverages {
-        let avgDailyNet: Int?
-        let avgWeeklyChange: Double?
     }
 
     /// Best-fit line through the weigh-ins in the visible range. Smooths out daily noise so the
@@ -554,34 +508,10 @@ struct DashboardView: View {
     }
 
     /// Average daily net calories across the chart's date range, plus a weight trend smoothed
-    /// via linear regression. Going through the regression line instead of just first-vs-last
-    /// keeps the weekly-change number stable when the user logs a noisy weigh-in (post-meal,
-    /// dehydrated, etc.) — slope across all points is what matters.
-    ///
-    /// Net is computed via `HistoryAggregator` so this card stays consistent with the History
-    /// tab — same per-day-totals, same "tracked days" rule (count only days where food was
-    /// logged). Both views always show the same number for the same date range.
-    private var periodAverages: PeriodAverages {
-        let (start, end) = range
-
-        let totals = HistoryAggregator.dailyTotals(
-            dayLogs: dayLogs,
-            workoutBurnByDay: hkBurnsByDay
-        )
-        let summary = HistoryAggregator.summary(
-            metric: .net,
-            start: start,
-            end: end,
-            dailyTotals: totals
-        )
-        let avgDailyNet: Int? = summary.dayAvg == 0 ? nil : Int(summary.dayAvg.rounded())
-
-        // Avg weekly change: slope of the regression line × 7. Linear regression is the
-        // mean-of-changes the user described — a best-fit line through every weigh-in, robust
-        // to a single bad data point.
-        let avgWeeklyChange: Double? = weightTrend.map { $0.slopePerDay * 7 }
-
-        return PeriodAverages(avgDailyNet: avgDailyNet, avgWeeklyChange: avgWeeklyChange)
+    /// Weekly change derived from the regression slope. More stable than (last − first) when
+    /// a single noisy weigh-in lands at one end of the range.
+    private var avgWeeklyChange: Double? {
+        weightTrend.map { $0.slopePerDay * 7 }
     }
 
     private var preferredUnit: WeightUnit {
@@ -643,7 +573,12 @@ struct DashboardView: View {
     }
 
     private var timeframePicker: some View {
-        HStack {
+        HStack(spacing: 4) {
+            if timeframe != .custom {
+                Text("Last")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
             Picker("Timeframe", selection: $timeframe) {
                 ForEach(ProgressTrendTimeframe.allCases) { tf in
                     Text(tf.displayName).tag(tf)
@@ -792,77 +727,114 @@ struct DashboardView: View {
     }
 
     @ViewBuilder
-    private func summaryCard(profile: UserProfile) -> some View {
+    private func currentWeightCard(profile: UserProfile) -> some View {
         let points = weightPoints
-        if let first = points.first, let last = points.last {
+        if let last = points.last {
             let unit = preferredUnit.suffix
-            // LATEST ENTRY: most-recent weigh-in (raw), date in the title row, raw delta inline.
-            // NORMALIZED FOR PERIOD: end of the regression line (smoothed "true" weight),
-            // line-end − line-start as the inline change.
-            let rawChange = last.weight - first.weight
             let trend = weightTrend
-            HStack(spacing: 12) {
-                weightTile(
-                    title: "Latest entry",
-                    dateLabel: shortDate(last.date),
-                    value: String(format: "%.1f", last.weight),
-                    unit: unit,
-                    change: first.id == last.id ? nil : rawChange
-                )
-                if let trend {
-                    weightTile(
-                        title: "Trend",
-                        dateLabel: nil,
-                        value: String(format: "%.1f", trend.lineEnd),
+            let weeklyChange = avgWeeklyChange
+            let rawDelta: Double? = (points.first.map { $0.id == last.id } ?? true) ? nil : (last.weight - points.first!.weight)
+            let trendDelta: Double? = trend.map { $0.fitChange }
+
+            VStack(spacing: 6) {
+                HStack(spacing: 0) {
+                    weightStat(
+                        title: "LATEST (\(monthDayString(last.date)))",
+                        value: String(format: "%.1f", last.weight),
+                        unit: unit
+                    )
+                    weightDivider
+                    weightStat(
+                        title: "TREND",
+                        value: trend.map { String(format: "%.1f", $0.lineEnd) } ?? "—",
                         unit: unit,
-                        change: trend.fitChange,
                         valueColor: .indigo
                     )
+                    weightDivider
+                    weightStat(
+                        title: "PER WEEK",
+                        value: weeklyChange.map { weightChangeString($0) } ?? "—",
+                        unit: "\(unit)/wk",
+                        valueColor: weeklyChange.map { weightChangeColor($0) } ?? .primary
+                    )
+                }
+                if rawDelta != nil || trendDelta != nil {
+                    deltaRow(rawDelta: rawDelta, trendDelta: trendDelta, unit: unit)
                 }
             }
+            .padding(.vertical, 16)
+            .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 20, style: .continuous)
+                    .strokeBorder(Color.accentColor.opacity(0.25), lineWidth: 1)
+            )
         }
     }
 
-    /// Short numeric date used in tile headers, e.g. "5/1/26" in en-US locales.
-    private func shortDate(_ date: Date) -> String {
-        date.formatted(.dateTime.month(.defaultDigits).day().year(.twoDigits))
+    private var weightDivider: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.25))
+            .frame(width: 1, height: 36)
     }
 
-    private func weightTile(title: String, dateLabel: String?, value: String, unit: String, change: Double?, valueColor: Color = .primary) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(title.uppercased())
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer(minLength: 4)
-                if let dateLabel {
-                    Text(dateLabel)
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(.secondary)
+    /// Bottom row of the current-weight card: raw delta centered under LATEST, trend delta
+    /// centered on the divider between TREND and PER WEEK. The zero-width Color.clear in the
+    /// middle anchors the trend delta to that boundary x-position via overlay.
+    private func deltaRow(rawDelta: Double?, trendDelta: Double?, unit: String) -> some View {
+        HStack(spacing: 0) {
+            Group {
+                if let d = rawDelta {
+                    deltaLabel(d, unit: unit)
+                } else {
+                    Color.clear
                 }
             }
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+            .frame(maxWidth: .infinity)
+            Color.clear.frame(width: 1)
+            Color.clear.frame(maxWidth: .infinity)
+            Color.clear
+                .frame(width: 1)
+                .overlay {
+                    if let d = trendDelta {
+                        deltaLabel(d, unit: unit).fixedSize()
+                    }
+                }
+            Color.clear.frame(maxWidth: .infinity)
+        }
+    }
+
+    private func deltaLabel(_ value: Double, unit: String) -> some View {
+        Text("\(weightChangeString(value)) \(unit)")
+            .font(.caption.monospacedDigit().weight(.semibold))
+            .foregroundStyle(weightChangeColor(value))
+    }
+
+    private func weightStat(title: String, value: String, unit: String, valueColor: Color = .primary) -> some View {
+        VStack(alignment: .center, spacing: 4) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(0.5)
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value)
-                    .font(.title3.weight(.semibold))
+                    .font(.system(.title, design: .rounded).weight(.semibold))
                     .monospacedDigit()
                     .foregroundStyle(valueColor)
-                Text(unit).font(.caption).foregroundStyle(.secondary)
-                if let change {
-                    Spacer(minLength: 6)
-                    Text("\(weightChangeString(change)) \(unit)")
-                        .font(.caption.monospacedDigit().weight(.semibold))
-                        .foregroundStyle(weightChangeColor(change))
-                }
+                Text(unit)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.regularMaterial)
-        )
+        .frame(maxWidth: .infinity)
+    }
+
+    private func monthDayString(_ date: Date) -> String {
+        date.formatted(.dateTime.month(.defaultDigits).day())
     }
 
     // MARK: - Bootstrapping
