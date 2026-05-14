@@ -117,6 +117,9 @@ struct DashboardView: View {
 
             ForEach(visibleMetrics) { metric in
                 metricSection(metric)
+                if metric == .protein {
+                    Divider().padding(.vertical, 4)
+                }
             }
             if tracksSupplements && !supplementSummaries.isEmpty {
                 supplementsSection
