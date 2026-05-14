@@ -46,11 +46,10 @@ nonisolated enum HistoryMetric: String, CaseIterable, Identifiable, Hashable {
 }
 
 nonisolated enum HistoryTimeframe: String, CaseIterable, Identifiable, Hashable {
-    case day
-    case currentWeek
-    case lastWeek
-    case rolling7
-    case month
+    case days7
+    case days14
+    case days30
+    case days60
     case days90
     case days180
     case year
@@ -60,15 +59,27 @@ nonisolated enum HistoryTimeframe: String, CaseIterable, Identifiable, Hashable 
 
     var displayName: String {
         switch self {
-        case .day: "Day"
-        case .currentWeek: "This Week"
-        case .lastWeek: "Last Week"
-        case .rolling7: "Last 7 Days"
-        case .month: "Month"
+        case .days7: "7 Days"
+        case .days14: "14 Days"
+        case .days30: "30 Days"
+        case .days60: "60 Days"
         case .days90: "90 Days"
         case .days180: "180 Days"
         case .year: "Year"
         case .custom: "Custom"
+        }
+    }
+
+    /// `nil` for `.year` (calendar-month aligned) and `.custom` (explicit start/end).
+    var daysBack: Int? {
+        switch self {
+        case .days7: 7
+        case .days14: 14
+        case .days30: 30
+        case .days60: 60
+        case .days90: 90
+        case .days180: 180
+        case .year, .custom: nil
         }
     }
 }
@@ -157,26 +168,9 @@ enum HistoryAggregator {
     ) -> (start: Date, end: Date) {
         let today = calendar.startOfDay(for: reference)
         switch timeframe {
-        case .day:
-            return (today, today)
-        case .currentWeek:
-            let week = calendar.daysOfWeek(containing: today, firstWeekday: weekStart.calendarValue)
-            return (week.first ?? today, week.last ?? today)
-        case .lastWeek:
-            let priorReference = calendar.date(byAdding: .day, value: -7, to: today) ?? today
-            let week = calendar.daysOfWeek(containing: priorReference, firstWeekday: weekStart.calendarValue)
-            return (week.first ?? priorReference, week.last ?? priorReference)
-        case .rolling7:
-            let start = calendar.date(byAdding: .day, value: -6, to: today) ?? today
-            return (start, today)
-        case .month:
-            let start = calendar.date(byAdding: .day, value: -29, to: today) ?? today
-            return (start, today)
-        case .days90:
-            let start = calendar.date(byAdding: .day, value: -89, to: today) ?? today
-            return (start, today)
-        case .days180:
-            let start = calendar.date(byAdding: .day, value: -179, to: today) ?? today
+        case .days7, .days14, .days30, .days60, .days90, .days180:
+            let days = timeframe.daysBack ?? 7
+            let start = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
             return (start, today)
         case .year:
             let currentMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: today)) ?? today

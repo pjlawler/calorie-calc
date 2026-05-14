@@ -28,9 +28,6 @@ struct RootView: View {
             Tab(AppTab.dashboard.displayName, systemImage: AppTab.dashboard.systemImage, value: AppTab.dashboard) {
                 DashboardView()
             }
-            Tab(AppTab.history.displayName, systemImage: AppTab.history.systemImage, value: AppTab.history) {
-                HistoryView()
-            }
             Tab(AppTab.foods.displayName, systemImage: AppTab.foods.systemImage, value: AppTab.foods) {
                 FoodsView()
             }

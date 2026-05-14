@@ -2,10 +2,9 @@ import SwiftUI
 import SwiftData
 import Charts
 
-/// "My Plan" + "Progress" merged into a single scrolling view. Plan cards (current weight, plan
-/// summary) sit on top; Progress section (timeframe picker, weight chart, summary tiles) below.
-/// The "Log" CTA that used to live in the weight card header now sits next to the "Progress"
-/// section title to keep both screens collapsed into one.
+/// Progress tab: timeframe picker, weight chart, current weight tiles, period averages, then
+/// per-metric history rows (calories / macros / exercise / steps), supplements (if tracked),
+/// and an Analyze CTA. Driven by a single `progress.timeframe` selection.
 struct DashboardView: View {
 
     @Environment(\.modelContext) private var modelContext
@@ -15,18 +14,21 @@ struct DashboardView: View {
     @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
     @Query(sort: [SortDescriptor(\WeightEntry.timestamp, order: .reverse)]) private var weightEntries: [WeightEntry]
     @Query(sort: \DayLog.date) private var dayLogs: [DayLog]
+    @Query(sort: \SupplementEntry.timestamp) private var supplementEntries: [SupplementEntry]
 
     @State private var showWeightSheet = false
     @State private var showSettings = false
+    @State private var showAnalysis = false
     /// HealthKit workout active-energy bucketed by start-of-day for the current chart range.
     /// Refreshed via `.task(id:)` whenever the timeframe or custom range changes — one HK query
     /// covers the whole span.
     @State private var hkBurnsByDay: [Date: Double] = [:]
+    @State private var hkStepsByDay: [Date: Double] = [:]
 
     @AppStorage("progress.timeframe") private var timeframe: ProgressTrendTimeframe = .days90
     @AppStorage("progress.customStart") private var customStartTS: Double = (Calendar.current.date(byAdding: .day, value: -29, to: Calendar.current.startOfDay(for: .now)) ?? .now).timeIntervalSinceReferenceDate
     @AppStorage("progress.customEnd") private var customEndTS: Double = Calendar.current.startOfDay(for: .now).timeIntervalSinceReferenceDate
-    @AppStorage("dashboard.planCardExpanded") private var planCardExpanded: Bool = true
+    @AppStorage("settings.showSteps") private var showSteps: Bool = true
 
     var body: some View {
         NavigationStack {
@@ -36,9 +38,6 @@ struct DashboardView: View {
                     Color.clear.frame(height: 0).id("top")
                     if let profile = profiles.first {
                         progressSection(profile: profile)
-                        Text("Plan Overview")
-                            .font(.title2.weight(.bold))
-                        planCard(profile: profile)
                     } else {
                         ProgressView().padding(.top, 80)
                     }
@@ -74,110 +73,28 @@ struct DashboardView: View {
             .sheet(isPresented: $showSettings) {
                 SettingsView()
             }
+            .sheet(isPresented: $showAnalysis) {
+                NutritionAnalysisSheet(data: analysisInput)
+            }
             .task { await ensureProfile() }
-            .task(id: healthKitFetchKey) { await loadHealthKitBurns() }
+            .task(id: healthKitFetchKey) { await loadHealthKit() }
             }
         }
     }
 
     /// Single key combining everything that affects the chart's date range. `.task(id:)` re-runs
-    /// `loadHealthKitBurns` whenever this changes, so switching timeframe or editing a custom
+    /// `loadHealthKit` whenever this changes, so switching timeframe or editing a custom
     /// range triggers a fresh HK fetch.
     private var healthKitFetchKey: String {
         "\(timeframe.rawValue)|\(customStartTS)|\(customEndTS)"
     }
 
-    private func loadHealthKitBurns() async {
+    private func loadHealthKit() async {
         let (start, end) = range
-        do {
-            let burns = try await healthKitService.dailyWorkoutBurn(from: start, through: end)
-            hkBurnsByDay = burns
-        } catch {
-            // HK access denied or query failed — fall back to manual-only burns. Don't surface
-            // the error to the user here; the Settings page handles HK auth status.
-            hkBurnsByDay = [:]
-        }
-    }
-
-    // MARK: - Plan card
-
-    private func planCard(profile: UserProfile) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Header row: hero number + chevron toggle. Tapping the whole row flips
-            // `planCardExpanded`, which is persisted via @AppStorage.
-            Button {
-                withAnimation(.snappy) { planCardExpanded.toggle() }
-            } label: {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(profile.dailyNetCalorieGoal.formatted())
-                        .font(.system(size: 44, weight: .bold, design: .rounded).monospacedDigit())
-                    Text("net kcal / day")
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.down")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(planCardExpanded ? 0 : -90))
-                        .accessibilityLabel(planCardExpanded ? "Collapse plan details" : "Expand plan details")
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            Text("Weekly target \(profile.dailyNetCalorieGoal * 7) kcal")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            if planCardExpanded {
-                VStack(spacing: 6) {
-                    planRow(label: "Plan-day gross", value: "\(profile.dailyGrossCalorieGoal) kcal")
-                    planRow(label: "Workout goal", value: "\(profile.dailyWorkoutCalorieGoal) kcal/day")
-                    planRow(label: "Week split", value: profile.bankSplit.displayName)
-                }
-
-                Divider().overlay(Color.accentColor.opacity(0.2))
-
-                planExplainer(profile: profile)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(20)
-        .background(
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-    }
-
-    private func planExplainer(profile: UserProfile) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles").foregroundStyle(.tint)
-                Text("How it works")
-                    .font(.subheadline.weight(.semibold))
-            }
-            Text(explainerBody(profile: profile))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
-    private func explainerBody(profile: UserProfile) -> String {
-        """
-        To reach your goal weight, we're targeting an average of \(profile.dailyNetCalorieGoal) net calories per day — the weekly total is your true budget, not a strict daily ceiling. Early in the week, hit your bank-day goal of \(profile.dailyGrossCalorieGoal) kcal eaten and \(profile.dailyWorkoutCalorieGoal) kcal burned. Every day you eat under target builds up calories you can spend later in the week, so a dinner out, a drink, or a treat on your bonus days won't derail your progress.
-        """
-    }
-
-    private func planRow(label: String, value: String) -> some View {
-        HStack {
-            Text(label)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .font(.subheadline.weight(.semibold).monospacedDigit())
-        }
+        async let burnsTask = healthKitService.dailyWorkoutBurn(from: start, through: end)
+        async let stepsTask = healthKitService.dailyStepsByDay(from: start, through: end)
+        hkBurnsByDay = (try? await burnsTask) ?? [:]
+        hkStepsByDay = (try? await stepsTask) ?? [:]
     }
 
     // MARK: - Progress section
@@ -198,7 +115,314 @@ struct DashboardView: View {
             summaryCard(profile: profile)
 
             averagesCard(profile: profile)
+
+            ForEach(visibleMetrics) { metric in
+                metricSection(metric)
+            }
+            if tracksSupplements && !supplementSummaries.isEmpty {
+                supplementsSection
+            }
+            analyzeButton
+                .padding(.top, 8)
         }
+    }
+
+    // MARK: - History rows
+
+    private var tracksSupplements: Bool { profiles.first?.tracksSupplements ?? false }
+
+    private var visibleMetrics: [HistoryMetric] {
+        HistoryMetric.allCases.filter { showSteps || $0 != .steps }
+    }
+
+    private var dailyTotals: [Date: HistoryAggregator.DailyTotals] {
+        HistoryAggregator.dailyTotals(
+            dayLogs: dayLogs,
+            workoutBurnByDay: hkBurnsByDay,
+            stepsByDay: hkStepsByDay
+        )
+    }
+
+    private var supplementSummaries: [SupplementHistorySummary] {
+        HistoryAggregator.supplementSummaries(
+            entries: supplementEntries,
+            start: range.start,
+            end: range.end
+        )
+    }
+
+    @ViewBuilder
+    private func metricSection(_ metric: HistoryMetric) -> some View {
+        let summary = HistoryAggregator.summary(
+            metric: metric,
+            start: range.start,
+            end: range.end,
+            dailyTotals: dailyTotals
+        )
+        let cards = cardsFor(metric: metric, summary: summary)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(metric == .steps ? metric.displayName : "\(metric.displayName) (\(metric.unit))")
+                .font(.subheadline.weight(.semibold))
+            if cards.count > 2 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(cards) { card in
+                            metricTile(card, metric: metric).frame(width: 140)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 12) {
+                    ForEach(cards) { card in
+                        metricTile(card, metric: metric).frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+    }
+
+    private func cardsFor(metric: HistoryMetric, summary: HistorySummary) -> [MetricSummaryCard] {
+        let unit = metric.unit
+        switch timeframe {
+        case .days7, .days14, .custom:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "total", title: totalTitleForShortRange, value: summary.total, unit: unit)
+            ]
+        case .days30, .days60:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                MetricSummaryCard(id: "range-total", title: totalTitleForShortRange, value: summary.total, unit: unit)
+            ]
+        case .days90:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                MetricSummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                MetricSummaryCard(id: "range-total", title: "90-Day Total", value: summary.total, unit: unit)
+            ]
+        case .days180:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                MetricSummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                MetricSummaryCard(id: "range-total", title: "180-Day Total", value: summary.total, unit: unit)
+            ]
+        case .year:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                MetricSummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                MetricSummaryCard(id: "year-total", title: "Year Total", value: summary.total, unit: unit)
+            ]
+        }
+    }
+
+    private var totalTitleForShortRange: String {
+        switch timeframe {
+        case .days7: "7-Day Total"
+        case .days14: "14-Day Total"
+        case .days30: "30-Day Total"
+        case .days60: "60-Day Total"
+        case .custom: "Total"
+        default: "Total"
+        }
+    }
+
+    private func metricTile(_ card: MetricSummaryCard, metric: HistoryMetric) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(card.title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(formattedMetric(card.value, metric: metric))
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(metric.color)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.regularMaterial)
+        )
+    }
+
+    private func formattedMetric(_ value: Double, metric: HistoryMetric) -> String {
+        switch metric {
+        case .protein, .carbs, .fat:
+            return CalorieFormatter.macro(value)
+        case .steps:
+            return Int(value.rounded()).formatted(.number)
+        default:
+            return CalorieFormatter.whole(value)
+        }
+    }
+
+    // MARK: - Supplements
+
+    private var supplementsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Supplements")
+                .font(.headline)
+            ForEach(supplementSummaries) { summary in
+                supplementRow(summary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func supplementRow(_ summary: SupplementHistorySummary) -> some View {
+        let cards = supplementCards(for: summary)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("\(summary.name) (\(summary.unit))")
+                .font(.subheadline.weight(.semibold))
+            if cards.count > 2 {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 12) {
+                        ForEach(cards) { card in
+                            supplementTile(card).frame(width: 140)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: 12) {
+                    ForEach(cards) { card in
+                        supplementTile(card).frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+    }
+
+    private func supplementCards(for summary: SupplementHistorySummary) -> [MetricSummaryCard] {
+        let unit = summary.unit
+        switch timeframe {
+        case .days7, .days14, .custom:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "total", title: totalTitleForShortRange, value: summary.total, unit: unit),
+            ]
+        case .days30, .days60:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                MetricSummaryCard(id: "range-total", title: totalTitleForShortRange, value: summary.total, unit: unit),
+            ]
+        case .days90:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                MetricSummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                MetricSummaryCard(id: "range-total", title: "90-Day Total", value: summary.total, unit: unit),
+            ]
+        case .days180:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                MetricSummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                MetricSummaryCard(id: "range-total", title: "180-Day Total", value: summary.total, unit: unit),
+            ]
+        case .year:
+            return [
+                MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
+                MetricSummaryCard(id: "week-avg", title: "Week Avg", value: summary.weekAvg, unit: unit),
+                MetricSummaryCard(id: "month-avg", title: "Month Avg", value: summary.monthAvg, unit: unit),
+                MetricSummaryCard(id: "year-total", title: "Year Total", value: summary.total, unit: unit),
+            ]
+        }
+    }
+
+    private func supplementTile(_ card: MetricSummaryCard) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(card.title.uppercased())
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Text(formatSupplementValue(card.value))
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.purple)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(.regularMaterial)
+        )
+    }
+
+    private func formatSupplementValue(_ value: Double) -> String {
+        if value.truncatingRemainder(dividingBy: 1) == 0 {
+            return Int(value).formatted(.number)
+        }
+        return value.formatted(.number.precision(.fractionLength(0...2)))
+    }
+
+    // MARK: - Analyze
+
+    private var analyzeButton: some View {
+        Button {
+            showAnalysis = true
+        } label: {
+            Label("Analyze", systemImage: "sparkles")
+                .labelStyle(TitleAndIconLabelStyle())
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.regular)
+    }
+
+    private var analysisInput: PeriodNutritionData {
+        let totals = dailyTotals
+        let calories = HistoryAggregator.summary(metric: .calories, start: range.start, end: range.end, dailyTotals: totals)
+        let protein = HistoryAggregator.summary(metric: .protein, start: range.start, end: range.end, dailyTotals: totals)
+        let carbs = HistoryAggregator.summary(metric: .carbs, start: range.start, end: range.end, dailyTotals: totals)
+        let fat = HistoryAggregator.summary(metric: .fat, start: range.start, end: range.end, dailyTotals: totals)
+        let exercise = HistoryAggregator.summary(metric: .exercise, start: range.start, end: range.end, dailyTotals: totals)
+        let net = HistoryAggregator.summary(metric: .net, start: range.start, end: range.end, dailyTotals: totals)
+        let dayCount = max(1, (Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: range.start), to: Calendar.current.startOfDay(for: range.end)).day ?? 0) + 1)
+
+        let calendar = Calendar.current
+        let rangeStartDay = calendar.startOfDay(for: range.start)
+        let rangeEndDay = calendar.startOfDay(for: range.end)
+        let exerciseDayCount = totals
+            .filter { $0.key >= rangeStartDay && $0.key <= rangeEndDay && $0.value.exercise > 0 }
+            .count
+
+        // Pull a wider window of weight entries than the analysis range itself so the AI
+        // can comment on trend even when the user is looking at a short period. 60 days back
+        // gives ~8 weeks of context.
+        let displayUnit = profiles.first?.weightUnit ?? .pounds
+        let weightWindowStart = calendar.date(byAdding: .day, value: -60, to: rangeStartDay) ?? rangeStartDay
+        let weightSamples = weightEntries
+            .filter { $0.timestamp >= weightWindowStart && $0.timestamp <= range.end }
+            .sorted { $0.timestamp < $1.timestamp }
+            .map { WeightSample(date: $0.timestamp, weight: $0.weight(in: displayUnit)) }
+        let currentGoalPeriod = GoalPeriod.current(in: goalPeriods)
+
+        return PeriodNutritionData(
+            periodLabel: "\(timeframe.displayName) — \(rangeText)",
+            dayCount: dayCount,
+            totalCalories: calories.total,
+            avgCalories: calories.dayAvg,
+            totalProtein: protein.total,
+            avgProtein: protein.dayAvg,
+            totalCarbs: carbs.total,
+            avgCarbs: carbs.dayAvg,
+            totalFat: fat.total,
+            avgFat: fat.dayAvg,
+            totalExercise: exercise.total,
+            avgExercise: exercise.dayAvg,
+            totalNetCalories: net.total,
+            avgNetCalories: net.dayAvg,
+            dailyCalorieGoal: currentGoalPeriod?.dailyGrossCalorieGoal,
+            dailyNetCalorieGoal: currentGoalPeriod?.dailyNetCalorieGoal,
+            dailyExerciseGoal: currentGoalPeriod?.dailyWorkoutCalorieGoal,
+            weightSamples: weightSamples,
+            weightUnitSuffix: displayUnit.suffix,
+            goalWeight: profiles.first?.goalWeight,
+            exerciseDayCount: exerciseDayCount
+        )
     }
 
     /// Period-level insights: average daily net calories and average weekly weight change
@@ -652,4 +876,11 @@ struct DashboardView: View {
             GoalPeriod.ensureBootstrapped(in: modelContext, profile: profile, existing: goalPeriods)
         }
     }
+}
+
+private struct MetricSummaryCard: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let value: Double
+    let unit: String
 }

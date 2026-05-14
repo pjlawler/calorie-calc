@@ -4,7 +4,10 @@ import Foundation
 /// enum so its `@AppStorage` keys (which use the raw value) survive across rebuilds — moving it
 /// to a different namespace would invalidate any saved preference.
 nonisolated enum ProgressTrendTimeframe: String, CaseIterable, Identifiable, Hashable {
-    case month
+    case days7
+    case days14
+    case days30
+    case days60
     case days90
     case days180
     case year
@@ -14,7 +17,10 @@ nonisolated enum ProgressTrendTimeframe: String, CaseIterable, Identifiable, Has
 
     var displayName: String {
         switch self {
-        case .month: "Month"
+        case .days7: "7 Days"
+        case .days14: "14 Days"
+        case .days30: "30 Days"
+        case .days60: "60 Days"
         case .days90: "90 Days"
         case .days180: "180 Days"
         case .year: "Year"
@@ -25,7 +31,10 @@ nonisolated enum ProgressTrendTimeframe: String, CaseIterable, Identifiable, Has
     /// `nil` for `.custom`, where the range comes from explicit start/end pickers.
     var daysBack: Int? {
         switch self {
-        case .month: 30
+        case .days7: 7
+        case .days14: 14
+        case .days30: 30
+        case .days60: 60
         case .days90: 90
         case .days180: 180
         case .year: 365
