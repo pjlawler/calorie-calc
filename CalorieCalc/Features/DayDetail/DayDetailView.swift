@@ -145,9 +145,9 @@ struct DayDetailView: View {
     /// users get the calorie picture above the divider, the macro split below.
     private func macroRow(log: DayLog?) -> some View {
         HStack(spacing: 14) {
-            macroBadge(letter: "P", grams: log?.totalProtein ?? 0, color: .red)
-            macroBadge(letter: "C", grams: log?.totalCarbs ?? 0, color: .orange)
-            macroBadge(letter: "F", grams: log?.totalFat ?? 0, color: .blue)
+            macroBadge(letter: "P", grams: log?.totalProtein ?? 0, color: HistoryMetric.protein.color)
+            macroBadge(letter: "C", grams: log?.totalCarbs ?? 0, color: HistoryMetric.carbs.color)
+            macroBadge(letter: "F", grams: log?.totalFat ?? 0, color: HistoryMetric.fat.color)
         }
         .padding(.leading, 16)
     }

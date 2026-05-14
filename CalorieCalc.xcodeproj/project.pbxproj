@@ -45,6 +45,7 @@
 		68E837242F9D6742008FC02B /* Exceptions for "CalorieCalc" folder in "CalorieCalcTests" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				docs/MY_LEARNING_DESIGN.md,
 				docs/PlanProgressCards_Prompt.md,
 				docs/two_cards.png,
 			);

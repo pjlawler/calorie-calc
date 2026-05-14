@@ -50,13 +50,14 @@ struct FoodPortionSheet: View {
 
     @State private var selectedUnit: String = ""
     @State private var amountText: String = "1"
-    @State private var isNutritionFactsExpanded: Bool = true
     @State private var notesText: String = ""
     @State private var nameText: String = ""
     @State private var brandText: String = ""
     @State private var selectedMealType: MealType
     @State private var selectedDate: Date
     @State private var showTagPicker: Bool = false
+    @State private var showEditEntryNutrition: Bool = false
+    @State private var showEditCachedFoodNutrition: Bool = false
     // Per-native-unit nutrition values, editable via the "Per serving" section.
     // Initialised from `result.*PerServing` in `resolveDefaults`.
     /// Staged tag selections — populated from the existing CachedFood (if any) on
@@ -119,33 +120,86 @@ struct FoodPortionSheet: View {
             existing.isInMyFoods.toggle()
             existing.name = effectiveName
             existing.brand = trimmedBrand
+            // Promoting back into My Foods — refresh the saved food's identity from whatever
+            // source is most live. When editing an entry, the entry is the canonical state
+            // (its `result` snapshot can be stale if Edit Nutrition just ran); otherwise the
+            // `result` snapshot is the only thing we have.
+            if existing.isInMyFoods {
+                if let entry = editingEntry {
+                    existing.nativeUnit = entry.nativeUnit
+                    existing.nativeUnitGrams = entry.nativeUnitGrams
+                    existing.nativeUnitMilliliters = entry.nativeUnitMilliliters
+                    existing.caloriesPerServing = entry.caloriesPerServing
+                    existing.proteinPerServing = entry.proteinPerServing
+                    existing.carbsPerServing = entry.carbsPerServing
+                    existing.fatPerServing = entry.fatPerServing
+                    existing.saturatedFatPerServing = entry.saturatedFatPerServing
+                    existing.transFatPerServing = entry.transFatPerServing
+                    existing.monounsaturatedFatPerServing = entry.monounsaturatedFatPerServing
+                    existing.polyunsaturatedFatPerServing = entry.polyunsaturatedFatPerServing
+                    existing.cholesterolPerServing = entry.cholesterolPerServing
+                    existing.sodiumPerServing = entry.sodiumPerServing
+                    existing.fiberPerServing = entry.fiberPerServing
+                    existing.sugarsPerServing = entry.sugarsPerServing
+                    existing.addedSugarsPerServing = entry.addedSugarsPerServing
+                    existing.lastSelectedUnit = entry.selectedUnit
+                    existing.lastSelectedQuantity = entry.quantity
+                } else {
+                    existing.nativeUnit = result.nativeUnit
+                    existing.nativeUnitGrams = result.nativeUnitGrams
+                    existing.nativeUnitMilliliters = result.nativeUnitMilliliters
+                    existing.caloriesPerServing = result.caloriesPerServing
+                    existing.proteinPerServing = result.proteinPerServing
+                    existing.carbsPerServing = result.carbsPerServing
+                    existing.fatPerServing = result.fatPerServing
+                    existing.saturatedFatPerServing = result.saturatedFatPerServing
+                    existing.transFatPerServing = result.transFatPerServing
+                    existing.monounsaturatedFatPerServing = result.monounsaturatedFatPerServing
+                    existing.polyunsaturatedFatPerServing = result.polyunsaturatedFatPerServing
+                    existing.cholesterolPerServing = result.cholesterolPerServing
+                    existing.sodiumPerServing = result.sodiumPerServing
+                    existing.fiberPerServing = result.fiberPerServing
+                    existing.sugarsPerServing = result.sugarsPerServing
+                    existing.addedSugarsPerServing = result.addedSugarsPerServing
+                    existing.lastSelectedUnit = selectedUnit
+                    existing.lastSelectedQuantity = amount
+                }
+                // The favorite preset captures macros at favorite-time — clearing it lets
+                // the next "open from Quick Add" scale from the fresh per-native values.
+                existing.favoriteSelectedUnit = nil
+                existing.favoriteSelectedQuantity = nil
+            }
             if !existing.isInMyFoods && !existing.isFavorite && existing.useCount == 0 {
                 modelContext.delete(existing)
             }
         } else {
+            // No matching CachedFood — create one. When editing an entry, prefer the entry's
+            // live fields over the (possibly stale) result snapshot so a just-edited entry
+            // saves the right values to My Foods.
             let trimmedNotes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let entry = editingEntry
             let cached = CachedFood(
                 externalId: result.id,
                 name: effectiveName,
                 brand: trimmedBrand,
-                nativeUnit: result.nativeUnit,
-                nativeUnitGrams: result.nativeUnitGrams,
-                nativeUnitMilliliters: result.nativeUnitMilliliters,
-                lastSelectedUnit: nil,
-                lastSelectedQuantity: nil,
-                caloriesPerServing: result.caloriesPerServing,
-                proteinPerServing: result.proteinPerServing,
-                carbsPerServing: result.carbsPerServing,
-                fatPerServing: result.fatPerServing,
-                saturatedFatPerServing: result.saturatedFatPerServing,
-                transFatPerServing: result.transFatPerServing,
-                monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,
-                polyunsaturatedFatPerServing: result.polyunsaturatedFatPerServing,
-                cholesterolPerServing: result.cholesterolPerServing,
-                sodiumPerServing: result.sodiumPerServing,
-                fiberPerServing: result.fiberPerServing,
-                sugarsPerServing: result.sugarsPerServing,
-                addedSugarsPerServing: result.addedSugarsPerServing,
+                nativeUnit: entry?.nativeUnit ?? result.nativeUnit,
+                nativeUnitGrams: entry?.nativeUnitGrams ?? result.nativeUnitGrams,
+                nativeUnitMilliliters: entry?.nativeUnitMilliliters ?? result.nativeUnitMilliliters,
+                lastSelectedUnit: entry?.selectedUnit,
+                lastSelectedQuantity: entry?.quantity,
+                caloriesPerServing: entry?.caloriesPerServing ?? result.caloriesPerServing,
+                proteinPerServing: entry?.proteinPerServing ?? result.proteinPerServing,
+                carbsPerServing: entry?.carbsPerServing ?? result.carbsPerServing,
+                fatPerServing: entry?.fatPerServing ?? result.fatPerServing,
+                saturatedFatPerServing: entry?.saturatedFatPerServing ?? result.saturatedFatPerServing,
+                transFatPerServing: entry?.transFatPerServing ?? result.transFatPerServing,
+                monounsaturatedFatPerServing: entry?.monounsaturatedFatPerServing ?? result.monounsaturatedFatPerServing,
+                polyunsaturatedFatPerServing: entry?.polyunsaturatedFatPerServing ?? result.polyunsaturatedFatPerServing,
+                cholesterolPerServing: entry?.cholesterolPerServing ?? result.cholesterolPerServing,
+                sodiumPerServing: entry?.sodiumPerServing ?? result.sodiumPerServing,
+                fiberPerServing: entry?.fiberPerServing ?? result.fiberPerServing,
+                sugarsPerServing: entry?.sugarsPerServing ?? result.sugarsPerServing,
+                addedSugarsPerServing: entry?.addedSugarsPerServing ?? result.addedSugarsPerServing,
                 source: result.source,
                 isFavorite: false,
                 isInMyFoods: true,
@@ -263,11 +317,31 @@ struct FoodPortionSheet: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
                 }
 
-                Section {
-                    DisclosureGroup(isExpanded: $isNutritionFactsExpanded) {
-                        NutritionFactsContent(result: result, factor: nativeUnitsConsumed)
-                    } label: {
-                        Text("Nutrition Facts").font(.subheadline.weight(.semibold))
+                if editingEntry != nil {
+                    Section {
+                        Button {
+                            showEditEntryNutrition = true
+                        } label: {
+                            Label("Edit Nutrition", systemImage: "pencil")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                    } footer: {
+                        Text("Adjust this log entry's serving and macros without changing other logs or your saved foods.")
+                    }
+                } else if pickMealAndDate && cachedFood != nil {
+                    Section {
+                        Button {
+                            showEditCachedFoodNutrition = true
+                        } label: {
+                            Label("Edit Nutrition", systemImage: "pencil")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                    } footer: {
+                        Text("Adjust the saved food's serving and macros. Already-logged entries are unchanged.")
                     }
                 }
 
@@ -350,6 +424,24 @@ struct FoodPortionSheet: View {
             }
             .sheet(isPresented: $showTagPicker) {
                 TagPickerSheet(selectedIds: $stagedTagIds)
+            }
+            .sheet(isPresented: $showEditEntryNutrition) {
+                if let entry = editingEntry {
+                    EditEntryFoodSheet(entry: entry) {
+                        // Portion sheet's `result` is a frozen snapshot — close it after the
+                        // modal saves so re-opening picks up the new identity rather than
+                        // showing stale macros.
+                        dismiss()
+                    }
+                }
+            }
+            .sheet(isPresented: $showEditCachedFoodNutrition) {
+                if let cached = cachedFood {
+                    EditCachedFoodSheet(food: cached) {
+                        // Same staleness rule as the entry-edit path.
+                        dismiss()
+                    }
+                }
             }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -554,6 +646,12 @@ struct FoodPortionSheet: View {
         cached.lastSelectedUnit = unit
         cached.lastSelectedQuantity = quantity
         cached.notes = notes
+        // Apply staged tags from the edit-entry flow — without this, picking tags in
+        // the sheet would be silently discarded on save. Tagging promotes to My Foods
+        // (monotonic — un-tagging never un-saves).
+        let resolvedTags = allTags.filter { stagedTagIds.contains($0.id) }
+        cached.tags = resolvedTags
+        if !resolvedTags.isEmpty { cached.isInMyFoods = true }
     }
 
     private func ensureDayLog(for date: Date) -> DayLog {
@@ -569,6 +667,10 @@ struct FoodPortionSheet: View {
     private func upsertCached(name: String, brand: String?, notes: String?) {
         let id = result.id
         let resolvedTags = allTags.filter { stagedTagIds.contains($0.id) }
+        // Attaching a tag is treated as the user curating the food — promote into My Foods
+        // so tagged foods stop disappearing into the auto-trimmed Recents bucket. Monotonic:
+        // un-tagging never un-saves.
+        let promoteForTags = !resolvedTags.isEmpty
         if let existing = cachedFoods.first(where: { matches(food: $0, resultId: id) }) {
             existing.lastUsed = .now
             if !addToMyFoods { existing.useCount += 1 }
@@ -580,7 +682,7 @@ struct FoodPortionSheet: View {
             // Sync staged tags onto the existing food — assigning replaces the full
             // set, so tag removals stage-side propagate to the CachedFood too.
             existing.tags = resolvedTags
-            if addToMyFoods { existing.isInMyFoods = true }
+            if addToMyFoods || promoteForTags { existing.isInMyFoods = true }
             // Backfill externalId on legacy rows so subsequent saves can match by
             // externalId directly without needing the UUID fallback. One-shot heal.
             if existing.externalId == nil { existing.externalId = id }
@@ -608,7 +710,7 @@ struct FoodPortionSheet: View {
                 sugarsPerServing: result.sugarsPerServing,
                 addedSugarsPerServing: result.addedSugarsPerServing,
                 source: result.source,
-                isInMyFoods: addToMyFoods,
+                isInMyFoods: addToMyFoods || promoteForTags,
                 lastUsed: .now,
                 useCount: addToMyFoods ? 0 : 1,
                 notes: notes
@@ -685,7 +787,7 @@ private struct MacroBreakdownView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            tile(label: "Calories", value: CalorieFormatter.whole(calories), unit: "cal", subtitle: nil, tint: .accentColor)
+            tile(label: "Calories", value: CalorieFormatter.whole(calories), unit: "kcal", subtitle: nil, tint: .accentColor)
             Divider().frame(height: 44)
             tile(label: "Carbs", value: CalorieFormatter.macro(carbs), unit: "g", subtitle: "\(percent(carbs * 4))%", tint: .teal)
             Divider().frame(height: 44)
@@ -717,68 +819,3 @@ private struct MacroBreakdownView: View {
     }
 }
 
-// MARK: - Nutrition facts
-
-private struct NutritionFactsContent: View {
-    let result: FoodSearchResult
-    /// Native units consumed — multiplier applied to per-native nutrients to get totals.
-    let factor: Double
-
-    var body: some View {
-        VStack(spacing: 6) {
-            row("Calories", value: result.caloriesPerServing * factor, unit: "")
-            row("Total Fat", value: result.fatPerServing * factor, unit: "g", bold: true)
-            indentedRow("Saturated", value: result.saturatedFatPerServing.map { $0 * factor }, unit: "g")
-            indentedRow("Trans", value: result.transFatPerServing.map { $0 * factor }, unit: "g")
-            indentedRow("Polyunsaturated", value: result.polyunsaturatedFatPerServing.map { $0 * factor }, unit: "g")
-            indentedRow("Monounsaturated", value: result.monounsaturatedFatPerServing.map { $0 * factor }, unit: "g")
-            optionalRow("Cholesterol", value: result.cholesterolPerServing.map { $0 * factor }, unit: "mg")
-            optionalRow("Sodium", value: result.sodiumPerServing.map { $0 * factor }, unit: "mg")
-            row("Total Carbohydrate", value: result.carbsPerServing * factor, unit: "g", bold: true)
-            indentedRow("Dietary Fiber", value: result.fiberPerServing.map { $0 * factor }, unit: "g")
-            indentedRow("Total Sugars", value: result.sugarsPerServing.map { $0 * factor }, unit: "g")
-            indentedRow("Added Sugars", value: result.addedSugarsPerServing.map { $0 * factor }, unit: "g")
-            row("Protein", value: result.proteinPerServing * factor, unit: "g", bold: true)
-        }
-    }
-
-    @ViewBuilder
-    private func row(_ label: String, value: Double, unit: String, bold: Bool = false) -> some View {
-        HStack {
-            Text(label).font(bold ? .subheadline.weight(.semibold) : .subheadline)
-            Spacer()
-            Text(formatted(value, unit: unit))
-                .font(.subheadline.monospacedDigit())
-        }
-    }
-
-    @ViewBuilder
-    private func indentedRow(_ label: String, value: Double?, unit: String) -> some View {
-        if let value {
-            HStack {
-                Text(label)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 16)
-                Spacer()
-                Text(formatted(value, unit: unit))
-                    .font(.subheadline.monospacedDigit())
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func optionalRow(_ label: String, value: Double?, unit: String) -> some View {
-        if let value {
-            row(label, value: value, unit: unit)
-        }
-    }
-
-    private func formatted(_ value: Double, unit: String) -> String {
-        if unit.isEmpty {
-            return CalorieFormatter.whole(value)
-        }
-        return "\(CalorieFormatter.macro(value)) \(unit)"
-    }
-}
