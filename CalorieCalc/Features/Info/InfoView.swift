@@ -73,15 +73,24 @@ struct InfoView: View {
                         icon: "flame",
                         body:
                         """
-                        The Calc tab shows the current week, one row per day. For each day you'll see calories **consumed** and **burned**. For today (and any prior day) you'll see **Remaining** — what's left in today's budget given how the rest of the week is going.
+                        The Calc tab shows the current week, one row per day. Each row gives you three numbers:
 
-                        If you went over yesterday it pulls from today. If you ate light, today's remaining grows. The number always reflects your *current* variance across the week, not where you started this morning.
+                        • **Consumed** — what you've logged eating that day
+                        • **Burned** — workouts (manual + HealthKit)
+                        • **Remaining** — calories left in *today's* budget given how the rest of the week is going
 
-                        Two headline numbers sit above the days:
+                        Remaining is the headline number. It says how many more calories you can eat *right now* and still be on plan. Drops when you log food, rises when you log a workout. It does *not* pre-credit a workout you haven't done. If you went over yesterday it pulls from today; if you ate light, today's Remaining grows. The number always reflects your *current* variance across the week, not where you started this morning.
 
-                        • **Eat Today** — how many more calories you can eat *right now* and still be on plan. Drops when you log food, rises when you log a workout. It does *not* pre-credit a workout you haven't done.
+                        Below the days you'll find the **Remaining This Week** card — the headline number for the whole tab. It's how many calories you have left to eat through the rest of the week *if you stick to your planned workouts*.
 
-                        • **Projected Remaining** — where the week will land if today's pace continues. Eat Today says "right now"; Projected Remaining says "how Sunday looks from here."
+                        The math (tap the card to expand it):
+
+                        • **Allocated net calories** — your weekly budget (daily net × 7).
+                        • **− Actual consumed** — everything you've logged eating this week.
+                        • **+ Actual exercise** — workouts you've already done this week.
+                        • **+ Projected exercise** — the burn you're planning to do on the remaining days.
+
+                        Because Projected Exercise is in there, the number assumes you'll actually do the planned workouts. Skip a workout and Projected Exercise drops, so Remaining shrinks. Do an extra workout and Actual Exercise climbs, so Remaining grows. The hero number is always live with what you've actually logged.
 
                         If you're over on the last day of the week, it's not the end of the world. Reset Sunday and go again.
                         """

@@ -351,6 +351,20 @@ struct GoalDraft: Equatable {
 
     func differs(from other: GoalDraft) -> Bool { self != other }
 
+    /// What each bonus day allows once the week's math averages out: the weekly gross
+    /// allowance (7 × (net + workout)) minus everything spoken-for on bank days, divided
+    /// across the remaining off days. Same formula `CalorieBankCalculator` uses for the
+    /// at-plan per-off-day budget; mirrored here so Settings can preview it live.
+    /// Returns 0 for a 7/0 split (no off days). May go negative if Target × bank days
+    /// already exceeds the weekly allowance — that's a signal the plan is inconsistent.
+    var bonusDayTarget: Int {
+        let offCount = bankSplit.offDayCount
+        guard offCount > 0 else { return 0 }
+        let weeklyAllowance = (dailyNetCalorieGoal + dailyWorkoutCalorieGoal) * 7
+        let bankingCommit = bankSplit.bankingDayCount * dailyGrossCalorieGoal
+        return (weeklyAllowance - bankingCommit) / offCount
+    }
+
     /// Mirrors the draft onto `UserProfile` so views that still bind to the profile (Dashboard
     /// planCard, legacy readers) see today's goals without needing to know about periods.
     func mirror(onto profile: UserProfile) {
@@ -423,14 +437,14 @@ private struct SettingsForm: View {
             Section {
                 // Week shape comes first so the bank/bonus split is set before the user dials
                 // in calorie targets — the targets only make sense once the shape is decided.
-                Picker("Week split", selection: $draft.bankSplit) {
-                    ForEach(BankSplit.allCases, id: \.self) { split in
-                        Text(split.displayName).tag(split)
-                    }
-                }
                 Picker("Week starts on", selection: $draft.weekStart) {
                     ForEach(Weekday.allCases) { day in
                         Text(day.shortName).tag(day)
+                    }
+                }
+                Picker("Week split", selection: $draft.bankSplit) {
+                    ForEach(BankSplit.allCases, id: \.self) { split in
+                        Text(split.displayName).tag(split)
                     }
                 }
                 BankingDaysPreview(weekStart: draft.weekStart, bankSplit: draft.bankSplit)
@@ -438,16 +452,21 @@ private struct SettingsForm: View {
                 Stepper(value: $draft.dailyNetCalorieGoal, in: 800...5000, step: 50) {
                     LabeledContent("Daily net") { Text("\(draft.dailyNetCalorieGoal) kcal").monospacedDigit() }
                 }
-                Stepper(value: $draft.dailyGrossCalorieGoal, in: 800...6000, step: 50) {
-                    LabeledContent("Daily gross (bank days)") { Text("\(draft.dailyGrossCalorieGoal) kcal").monospacedDigit() }
-                }
                 Stepper(value: $draft.dailyWorkoutCalorieGoal, in: 0...3000, step: 25) {
                     LabeledContent("Daily workout goal") { Text("\(draft.dailyWorkoutCalorieGoal) kcal").monospacedDigit() }
+                }
+                Stepper(value: $draft.dailyGrossCalorieGoal, in: 800...6000, step: 50) {
+                    LabeledContent("Target") { Text("\(draft.dailyGrossCalorieGoal) kcal").monospacedDigit() }
+                }
+                if draft.bankSplit.offDayCount > 0 {
+                    LabeledContent("Bonus day(s)") {
+                        Text("\(draft.bonusDayTarget) kcal").monospacedDigit()
+                    }
                 }
             } header: {
                 Text("My Plan")
             } footer: {
-                Text("Bank days are the first \(draft.bankSplit.bankingDayCount) days of your week — tighter targets so you build up calories. Bonus days are the rest, with a higher allowance so you can spend what you banked. Calorie changes apply to the current week and forward; past weeks keep the goals that were in effect at the time.")
+                Text("Bank days are the first \(draft.bankSplit.bankingDayCount) days of your week — eat to Target while burning your daily workout. Bonus days are the rest — the kcal value above is what each bonus day allows once the math averages out across the week. Calorie changes apply to the current week and forward; past weeks keep the goals that were in effect at the time.")
             }
 
             Section("Units") {
