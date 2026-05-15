@@ -224,12 +224,12 @@ struct InfoView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "tray.and.arrow.down").foregroundStyle(.tint)
-                Text("Bank, then spend")
+                Text("Average the week, not the day")
                     .font(.headline)
             }
             Text(
                 """
-                Your daily-net-calorie goal is a *weekly average*, not a daily ceiling. Eat under earlier in the week to bank calories; spend them on a bigger day later. As long as the week averages out, you're on plan — and a single big meal can't derail you.
+                Lose weight — or hold a weight — without the all-or-nothing trap that kills most diets. CalorieCalc tracks your calories in and out and averages the **week**, so one real dinner doesn't undo five disciplined days. Set a daily net goal, log food and workouts, and the Calc tab shows exactly how many calories you have left to eat right now. Same system I used to lose 60+ lbs — twice — and now use to stay there.
                 """
             )
             .font(.subheadline)

@@ -402,6 +402,7 @@ private struct FoodResultRow: View {
 
 struct CachedFoodRow: View {
     let cached: CachedFood
+    var showServingSize: Bool = false
     let onToggleFavorite: () -> Void
 
     var body: some View {
@@ -411,6 +412,17 @@ struct CachedFoodRow: View {
                 .multilineTextAlignment(.leading)
 
             HStack(spacing: 6) {
+                if showServingSize {
+                    Text(cached.rowCaption)
+                        .lineLimit(1)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if cached.brand != nil {
+                        Text("|")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
                 if let brand = cached.brand {
                     Text(brand)
                         .lineLimit(1)

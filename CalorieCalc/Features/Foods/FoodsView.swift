@@ -55,7 +55,7 @@ struct FoodsView: View {
                             Button {
                                 portionTarget = cached.toSearchResult(forFavorites: cached.isFavorite)
                             } label: {
-                                CachedFoodRow(cached: cached) {
+                                CachedFoodRow(cached: cached, showServingSize: true) {
                                     CachedFood.toggleFavorite(cached, in: modelContext)
                                 }
                             }
