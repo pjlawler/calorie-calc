@@ -48,7 +48,7 @@ struct MealSectionView: View {
                         }
                         Spacer()
                         Text("\(CalorieFormatter.whole(totalCalories)) kcal")
-                            .font(.subheadline.monospacedDigit())
+                            .font(.subheadline.monospacedDigit().bold())
                     }
                     .padding(.vertical, 14)
                 }

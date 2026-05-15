@@ -17,21 +17,21 @@ final class WeekCalendarViewModel {
         self.calendar = calendar
     }
 
-    func assembler(for period: GoalPeriod) -> WeekAssembler {
-        WeekAssembler(period: period, referenceDate: referenceDate, calendar: calendar)
+    func assembler(for period: GoalPeriod, weekStart: Weekday) -> WeekAssembler {
+        WeekAssembler(period: period, weekStart: weekStart, referenceDate: referenceDate, calendar: calendar)
     }
 
-    func calculation(period: GoalPeriod, dayLogs: [DayLog]) -> WeeklyCalculation {
-        let assembler = assembler(for: period)
+    func calculation(period: GoalPeriod, weekStart: Weekday, dayLogs: [DayLog]) -> WeeklyCalculation {
+        let assembler = assembler(for: period, weekStart: weekStart)
         let weekStarts = Set(assembler.weekDates.map { calendar.startOfDay(for: $0) })
         let relevantLogs = dayLogs.filter { weekStarts.contains(calendar.startOfDay(for: $0.date)) }
         return assembler.calculate(dayLogs: relevantLogs, healthKitBurn: healthKitBurn)
     }
 
-    func refreshHealthKit(for period: GoalPeriod) async {
+    func refreshHealthKit(for period: GoalPeriod, weekStart: Weekday) async {
         isRefreshing = true
         defer { isRefreshing = false }
-        let dates = assembler(for: period).weekDates
+        let dates = assembler(for: period, weekStart: weekStart).weekDates
         // Merge into the existing dict instead of replacing — re-visiting a previously
         // loaded week then becomes instant (no flicker while HK re-fetches).
         var burns = healthKitBurn

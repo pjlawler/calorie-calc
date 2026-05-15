@@ -104,6 +104,10 @@ struct DashboardView: View {
             timeframePicker
             if timeframe == .custom {
                 customRangeEditor
+            } else {
+                Toggle("Include today", isOn: includesTodayBinding)
+                    .font(.subheadline)
+                    .tint(.accentColor)
             }
             weightChartCard(profile: profile)
 
@@ -456,61 +460,119 @@ struct DashboardView: View {
         return isLoss == weightLossDirection ? .green : .red
     }
 
-    /// Best-fit line through the weigh-ins in the visible range. Smooths out daily noise so the
-    /// "true" trend isn't whipped around by a single high or low reading.
+    /// Best-fit line through the weigh-ins in the visible range. Uses Theil–Sen (median of
+    /// pairwise slopes) rather than OLS so a single noisy weigh-in — water retention, missed
+    /// scale reset, post-meal weigh — doesn't drag the line around. Endpoints are projected
+    /// to the chart's window edges, not the first/last weigh-in, so a 7-day window's
+    /// `fitChange` equals `slopePerDay × 7` regardless of when within the window the user
+    /// happened to log.
     private struct WeightTrend {
         /// Slope (weight units per day). Positive = gaining, negative = losing.
         let slopePerDay: Double
-        /// Predicted weight at the line's leftmost point in the range.
+        /// Regression value at the chart window's left edge.
         let lineStart: Double
-        /// Predicted weight at the line's rightmost point in the range — the user's current
+        /// Regression value at the chart window's right edge — the user's current
         /// "trend weight," i.e. what the regression says you weigh today after filtering out
         /// daily water-retention noise. This is the number to show as `current avg`.
         let lineEnd: Double
 
-        /// Net change implied by the line from start to end. Use this instead of (lastRaw −
-        /// firstRaw) when you want a reading that ignores noise from a single weigh-in.
+        /// Net change implied by the line across the chart window. Equals slopePerDay × days
+        /// in the window, so a 7-day view's fitChange matches the weekly-rate readout.
         var fitChange: Double { lineEnd - lineStart }
     }
 
-    /// Linear-regression fit of weight vs. days-since-first-point. Needs at least two distinct
-    /// timestamps to produce a slope; returns `nil` for empty/single-point ranges or any case
-    /// where every measurement landed on the same day (denominator → 0).
+    /// Theil–Sen fit of weight vs. fractional days since the first weigh-in. Needs at least
+    /// two weigh-ins with distinct timestamps; returns nil otherwise. Robust to outliers:
+    /// the slope is the median of slopes between every (i, j) pair, so a lone spike can't
+    /// pivot the line.
     private var weightTrend: WeightTrend? {
         let points = weightPoints
         guard points.count >= 2 else { return nil }
-        let calendar = Calendar.current
         let firstDate = points.first!.date
 
-        // x = days since first weigh-in (Double for fractional smoothing if a future timestamp
-        // ever carries hours/minutes precision). y = weight in user's preferred unit.
-        let xs: [Double] = points.map {
-            Double(calendar.dateComponents([.day], from: firstDate, to: $0.date).day ?? 0)
-        }
+        // x = fractional days since first weigh-in (so two weigh-ins on the same calendar
+        // day at different times still get distinct x's). y = weight in user's preferred unit.
+        let xs: [Double] = points.map { $0.date.timeIntervalSince(firstDate) / 86_400.0 }
         let ys: [Double] = points.map(\.weight)
 
-        let n = Double(points.count)
-        let sumX = xs.reduce(0, +)
-        let sumY = ys.reduce(0, +)
-        let sumXY = zip(xs, ys).reduce(0) { $0 + ($1.0 * $1.1) }
-        let sumX2 = xs.reduce(0) { $0 + ($1 * $1) }
+        // Theil–Sen slope: median of (y_j − y_i)/(x_j − x_i) over all i<j with distinct x.
+        var pairSlopes: [Double] = []
+        pairSlopes.reserveCapacity(xs.count * (xs.count - 1) / 2)
+        for i in 0..<xs.count {
+            for j in (i + 1)..<xs.count {
+                let dx = xs[j] - xs[i]
+                guard dx != 0 else { continue }
+                pairSlopes.append((ys[j] - ys[i]) / dx)
+            }
+        }
+        guard !pairSlopes.isEmpty else { return nil }
+        let slope = Self.median(of: pairSlopes)
+        let intercept = Self.median(of: zip(xs, ys).map { $1 - slope * $0 })
 
-        let denom = n * sumX2 - sumX * sumX
-        guard denom != 0 else { return nil }
-
-        let slope = (n * sumXY - sumX * sumY) / denom
-        let intercept = (sumY - slope * sumX) / n
-
-        let xStart = xs.min() ?? 0
-        let xEnd = xs.max() ?? 0
+        // Project to the chart-window edges (not the data extremes) so fitChange reflects the
+        // selected window, and so the dashed line on the chart spans the full x-axis.
+        let windowStartX = range.start.timeIntervalSince(firstDate) / 86_400.0
+        let windowEndX = chartDomainEnd.timeIntervalSince(firstDate) / 86_400.0
         return WeightTrend(
             slopePerDay: slope,
-            lineStart: slope * xStart + intercept,
-            lineEnd: slope * xEnd + intercept
+            lineStart: slope * windowStartX + intercept,
+            lineEnd: slope * windowEndX + intercept
         )
     }
 
-    /// Average daily net calories across the chart's date range, plus a weight trend smoothed
+    private static func median(of values: [Double]) -> Double {
+        let sorted = values.sorted()
+        let n = sorted.count
+        if n.isMultiple(of: 2) {
+            return (sorted[n / 2 - 1] + sorted[n / 2]) / 2
+        }
+        return sorted[n / 2]
+    }
+
+    /// Visible portion of the regression line after clipping to the chart's Y domain.
+    /// When the unclipped endpoints fall outside the visible Y range — common on long
+    /// windows where the regression extrapolates far past the actual data — this returns
+    /// just the segment intersecting the plot area, so the dashed line never escapes the
+    /// chart. Returns nil if the entire line lies outside the visible Y range.
+    private struct TrendSegment {
+        let startDate: Date
+        let startY: Double
+        let endDate: Date
+        let endY: Double
+    }
+
+    private func clippedTrendSegment(trend: WeightTrend, yDomain: ClosedRange<Double>) -> TrendSegment? {
+        let xStart = range.start.timeIntervalSinceReferenceDate
+        let xEnd = chartDomainEnd.timeIntervalSinceReferenceDate
+        let yStart = trend.lineStart
+        let yEnd = trend.lineEnd
+        let dy = yEnd - yStart
+
+        // Horizontal line: either entirely in the Y domain or entirely out.
+        if abs(dy) < 1e-9 {
+            guard yDomain.contains(yStart) else { return nil }
+            return TrendSegment(
+                startDate: range.start, startY: yStart,
+                endDate: chartDomainEnd, endY: yEnd
+            )
+        }
+
+        // Parametric clip on t ∈ [0, 1] where (x, y) = (xStart + t·Δx, yStart + t·dy).
+        let t1 = (yDomain.lowerBound - yStart) / dy
+        let t2 = (yDomain.upperBound - yStart) / dy
+        let tMin = max(0.0, min(t1, t2))
+        let tMax = min(1.0, max(t1, t2))
+        guard tMin < tMax else { return nil }
+
+        let dx = xEnd - xStart
+        return TrendSegment(
+            startDate: Date(timeIntervalSinceReferenceDate: xStart + tMin * dx),
+            startY: yStart + tMin * dy,
+            endDate: Date(timeIntervalSinceReferenceDate: xStart + tMax * dx),
+            endY: yStart + tMax * dy
+        )
+    }
+
     /// Weekly change derived from the regression slope. More stable than (last − first) when
     /// a single noisy weigh-in lands at one end of the range.
     private var avgWeeklyChange: Double? {
@@ -537,10 +599,30 @@ struct DashboardView: View {
             let e = calendar.startOfDay(for: customEnd)
             return s <= e ? (s, e) : (e, s)
         }
-        let end = calendar.startOfDay(for: .now)
+        var end = calendar.startOfDay(for: .now)
+        if !includesTodayInProgress {
+            end = calendar.date(byAdding: .day, value: -1, to: end) ?? end
+        }
         let days = timeframe.daysBack ?? 30
         let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
         return (start, end)
+    }
+
+    private var includesTodayInProgress: Bool {
+        profiles.first?.includesTodayInProgress ?? true
+    }
+
+    /// Two-way binding into `UserProfile.includesTodayInProgress`. SwiftData @Model objects
+    /// are reference types, so the mutation flows through CloudKit sync automatically.
+    private var includesTodayBinding: Binding<Bool> {
+        Binding(
+            get: { profiles.first?.includesTodayInProgress ?? true },
+            set: { newValue in
+                guard let profile = profiles.first else { return }
+                profile.includesTodayInProgress = newValue
+                profile.updatedAt = .now
+            }
+        )
     }
 
     private var rangeDayCount: Int {
@@ -629,6 +711,13 @@ struct DashboardView: View {
                     .frame(maxWidth: .infinity, minHeight: 160, alignment: .center)
                     .multilineTextAlignment(.center)
             } else {
+                if let trend = weightTrend {
+                    HStack {
+                        trendEndpointLabel(trend.lineStart)
+                        Spacer()
+                        trendEndpointLabel(trend.lineEnd)
+                    }
+                }
                 Chart {
                     ForEach(points) { point in
                         LineMark(
@@ -645,18 +734,20 @@ struct DashboardView: View {
                         .foregroundStyle(Color.accentColor)
                     }
                     if let trend = weightTrend,
-                       let firstDate = points.first?.date,
-                       let lastDate = points.last?.date {
+                       let segment = clippedTrendSegment(
+                            trend: trend,
+                            yDomain: weightChartYDomain(points: points)
+                       ) {
                         LineMark(
-                            x: .value("Date", firstDate),
-                            y: .value("Trend", trend.lineStart),
+                            x: .value("Date", segment.startDate),
+                            y: .value("Trend", segment.startY),
                             series: .value("Series", "trend")
                         )
                         .foregroundStyle(Color.indigo)
                         .lineStyle(StrokeStyle(lineWidth: 2, dash: [5, 3]))
                         LineMark(
-                            x: .value("Date", lastDate),
-                            y: .value("Trend", trend.lineEnd),
+                            x: .value("Date", segment.endDate),
+                            y: .value("Trend", segment.endY),
                             series: .value("Series", "trend")
                         )
                         .foregroundStyle(Color.indigo)
@@ -731,19 +822,26 @@ struct DashboardView: View {
 
     @ViewBuilder
     private func currentWeightCard(profile: UserProfile) -> some View {
-        let points = weightPoints
-        if let last = points.last {
+        // LATEST is the all-time newest weigh-in regardless of the visible window — it's a
+        // "your current number" readout, not a per-range stat. Comes from the descending-sort
+        // @Query, so first == newest by timestamp.
+        if let latestEntry = weightEntries.first {
             let unit = preferredUnit.suffix
+            let latestWeight = latestEntry.weight(in: preferredUnit)
+            let latestDate = latestEntry.timestamp
             let trend = weightTrend
             let weeklyChange = avgWeeklyChange
-            let rawDelta: Double? = (points.first.map { $0.id == last.id } ?? true) ? nil : (last.weight - points.first!.weight)
+            // Lifetime change: LATEST minus the user's recorded starting weight. Also
+            // window-independent — it's the "how far have I come" stat that always anchors
+            // to the same baseline regardless of which range is being viewed.
+            let rawDelta: Double? = profiles.first?.startingWeight.map { latestWeight - $0 }
             let trendDelta: Double? = trend.map { $0.fitChange }
 
             VStack(spacing: 6) {
                 HStack(spacing: 0) {
                     weightStat(
-                        title: "LATEST (\(monthDayString(last.date)))",
-                        value: String(format: "%.1f", last.weight),
+                        title: "LATEST (\(monthDayString(latestDate)))",
+                        value: String(format: "%.1f", latestWeight),
                         unit: unit
                     )
                     weightDivider
@@ -815,6 +913,18 @@ struct DashboardView: View {
         Text("\(weightChangeString(value)) \(unit)")
             .font(.caption.monospacedDigit().weight(.semibold))
             .foregroundStyle(weightChangeColor(value))
+    }
+
+    /// Regression-line endpoint readout shown above the chart. Colored indigo to match the
+    /// dashed trend line on the chart so the eye connects them.
+    private func trendEndpointLabel(_ value: Double) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            Text(String(format: "%.1f", value))
+                .font(.caption.monospacedDigit().weight(.semibold))
+            Text(preferredUnit.suffix)
+                .font(.caption2)
+        }
+        .foregroundStyle(Color.indigo)
     }
 
     private func weightStat(title: String, value: String, unit: String, valueColor: Color = .primary) -> some View {

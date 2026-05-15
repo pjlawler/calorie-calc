@@ -19,6 +19,13 @@ struct WeekCalendarView: View {
         GoalPeriod.period(covering: date, in: goalPeriods)
     }
 
+    /// Single source of truth for which weekday anchors the visible 7-day window. Always the
+    /// *current* setting, so changing weekStart re-anchors every historical week the user
+    /// scrolls back to (same range as the header + same banking-day layout in cells).
+    private var displayWeekStart: Weekday {
+        currentPeriod?.weekStart ?? profiles.first?.weekStart ?? .monday
+    }
+
     var body: some View {
         NavigationStack {
             content
@@ -37,7 +44,8 @@ struct WeekCalendarView: View {
         if let vm = viewModel,
            let current = currentPeriod,
            let weekPeriod = period(for: vm.referenceDate) {
-            let calculation = vm.calculation(period: weekPeriod, dayLogs: dayLogs)
+            let ws = displayWeekStart
+            let calculation = vm.calculation(period: weekPeriod, weekStart: ws, dayLogs: dayLogs)
             WeekCalendarBody(
                 period: weekPeriod,
                 currentPeriod: current,
@@ -46,8 +54,8 @@ struct WeekCalendarView: View {
                 selectedDate: $selectedDate,
                 viewModel: vm
             )
-            .task(id: vm.referenceDate) { await vm.refreshHealthKit(for: weekPeriod) }
-            .refreshable { await vm.refreshHealthKit(for: weekPeriod) }
+            .task(id: vm.referenceDate) { await vm.refreshHealthKit(for: weekPeriod, weekStart: ws) }
+            .refreshable { await vm.refreshHealthKit(for: weekPeriod, weekStart: ws) }
         } else {
             ProgressView().controlSize(.large)
         }
@@ -78,7 +86,7 @@ struct WeekCalendarView: View {
 
                 Button { viewModel?.jumpToCurrentWeek() } label: {
                     if let reference = viewModel?.referenceDate {
-                        WeekRangeLabel(date: reference, weekStart: currentPeriod?.weekStart ?? .monday)
+                        WeekRangeLabel(date: reference, weekStart: displayWeekStart)
                     }
                 }
                 .buttonStyle(.plain)
@@ -102,7 +110,7 @@ struct WeekCalendarView: View {
     private var showCurrentWeekButton: Bool {
         guard let current = currentPeriod,
               let vm = viewModel else { return false }
-        let dates = vm.assembler(for: current).weekDates
+        let dates = vm.assembler(for: current, weekStart: displayWeekStart).weekDates
         return !dates.contains { Calendar.current.isDate($0, inSameDayAs: .now) }
     }
 
@@ -140,7 +148,9 @@ private struct WeekCalendarBody: View {
     /// previous week's value to the new one instead of flashing through `—`.
     @State private var stableMathData: MathCardData?
 
-    private var weekDates: [Date] { viewModel.assembler(for: period).weekDates }
+    private var weekDates: [Date] {
+        viewModel.assembler(for: period, weekStart: currentPeriod.weekStart).weekDates
+    }
 
     var body: some View {
         ScrollViewReader { proxy in

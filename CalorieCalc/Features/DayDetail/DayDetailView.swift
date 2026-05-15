@@ -312,7 +312,7 @@ struct DayDetailView: View {
                     }
                     Spacer()
                     Text("\(CalorieFormatter.whole(totalBurned)) kcal")
-                        .font(.subheadline.monospacedDigit())
+                        .font(.subheadline.monospacedDigit().bold())
                 }
                 .padding(.vertical, 14)
             }

@@ -23,6 +23,11 @@ final class UserProfile {
     /// vitamins/supplements separately from food.
     var tracksSupplements: Bool = false
 
+    /// When `true`, the Progress tab's preset windows (7d/30d/etc.) end at today; when
+    /// `false`, they end at yesterday and shift back one day so the same number of days
+    /// is covered. Lets the user drop a still-developing morning weigh-in from the trend.
+    var includesTodayInProgress: Bool = true
+
     var startingWeight: Double?
     var startingWeightLoggedAt: Date?
     var goalWeight: Double?
