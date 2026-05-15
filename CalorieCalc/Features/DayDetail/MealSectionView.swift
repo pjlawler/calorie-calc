@@ -35,20 +35,22 @@ struct MealSectionView: View {
                             .rotationEffect(.degrees(isCollapsed ? 0 : 90))
                         Image(systemName: mealType.symbolName)
                             .font(.headline)
-                            .foregroundStyle(.tint)
+                            .foregroundStyle(entries.isEmpty ? Color.secondary : Color.accentColor)
                             .frame(width: 22, alignment: .center)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(mealType.displayName)
                                 .font(.headline)
+                                .foregroundStyle(entries.isEmpty ? .secondary : .primary)
                             HStack(spacing: 10) {
-                                macroBadge(letter: "P", grams: totalProtein, color: HistoryMetric.protein.color)
-                                macroBadge(letter: "C", grams: totalCarbs, color: HistoryMetric.carbs.color)
-                                macroBadge(letter: "F", grams: totalFat, color: HistoryMetric.fat.color)
+                                macroBadge(letter: "P", grams: totalProtein, color: HistoryMetric.protein.color, isEmpty: entries.isEmpty)
+                                macroBadge(letter: "C", grams: totalCarbs, color: HistoryMetric.carbs.color, isEmpty: entries.isEmpty)
+                                macroBadge(letter: "F", grams: totalFat, color: HistoryMetric.fat.color, isEmpty: entries.isEmpty)
                             }
                         }
                         Spacer()
                         Text("\(CalorieFormatter.whole(totalCalories)) kcal")
                             .font(.subheadline.monospacedDigit().bold())
+                            .foregroundStyle(entries.isEmpty ? .secondary : .primary)
                     }
                     .padding(.vertical, 14)
                 }
@@ -85,13 +87,14 @@ struct MealSectionView: View {
         entries.reduce(0) { $0 + $1.totalCalories }
     }
 
-    private func macroBadge(letter: String, grams: Double, color: Color) -> some View {
+    private func macroBadge(letter: String, grams: Double, color: Color, isEmpty: Bool) -> some View {
         HStack(spacing: 5) {
             Circle()
-                .fill(color)
+                .fill(isEmpty ? color.opacity(0.35) : color)
                 .frame(width: 8, height: 8)
             Text("\(letter) \(Int(grams.rounded()))g")
                 .font(.subheadline.weight(.semibold).monospacedDigit())
+                .foregroundStyle(isEmpty ? .secondary : .primary)
         }
     }
 }

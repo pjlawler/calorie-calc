@@ -298,11 +298,12 @@ struct DayDetailView: View {
                         .rotationEffect(.degrees(workoutsCollapsed ? 0 : 90))
                     Image(systemName: "figure.run")
                         .font(.headline)
-                        .foregroundStyle(.tint)
+                        .foregroundStyle(totalBurned > 0 ? Color.accentColor : Color.secondary)
                         .frame(width: 22, alignment: .center)
                     HStack(spacing: 4) {
                         Text("Workouts")
                             .font(.headline)
+                            .foregroundStyle(totalBurned > 0 ? .primary : .secondary)
                         if showSteps {
                             let steps = Int((viewModel?.dailySteps ?? 0).rounded())
                             Text("(\(steps.formatted(.number)) steps)")
@@ -313,6 +314,7 @@ struct DayDetailView: View {
                     Spacer()
                     Text("\(CalorieFormatter.whole(totalBurned)) kcal")
                         .font(.subheadline.monospacedDigit().bold())
+                        .foregroundStyle(totalBurned > 0 ? .primary : .secondary)
                 }
                 .padding(.vertical, 14)
             }

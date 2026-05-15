@@ -13,13 +13,35 @@ struct InfoView: View {
                     bigIdeaCard
 
                     section(
+                        title: "Calories in vs calories out",
+                        icon: "arrow.left.arrow.right",
+                        body:
+                        """
+                        Your body burns calories all day just to keep you alive — breathing, circulating blood, regulating temperature, digesting. The U.S. Dietary Guidelines for Americans (2020–2025) put a typical adult's daily burn, *before* any workouts, at:
+
+                        • **Women, ages 19–60, sedentary:** 1,600–2,000 kcal/day
+                        • **Men, ages 19–60, sedentary:** 2,200–2,600 kcal/day
+
+                        "Sedentary" here means normal daily moving around — not bedridden. Once you add an active lifestyle the numbers climb roughly 400–600 kcal/day. Workouts pile on more burn on top of *that*, plus the obvious heart, sleep, mood, and mobility upside that the scale can't measure.
+
+                        Weight loss isn't a mystery: eat fewer calories than you burn and the difference comes off your body. That gap is your **net calorie balance** — what you ate minus what you burned. A net of 500 below your typical burn, sustained, is roughly a pound a week.
+
+                        CalorieCalc tracks both sides — every food entry adds to consumed, every workout (manual or HealthKit) adds to burned — and lets you set a daily **net goal** below your typical burn. Pick a realistic target (most people start a few hundred below their sedentary number), and the app handles the bookkeeping.
+
+                        The wrinkle: hitting an exact net *every* day is brutal. Real life has dinners out. So CalorieCalc averages the net across the week — eat under on disciplined days, bank the difference, spend it on a bonus day. As long as the **week** averages out to your net goal, you're on plan. That's the rest of this guide.
+                        """
+                    )
+
+                    section(
                         title: "Why I built this",
                         icon: "sparkles",
                         body:
                         """
                         I'm Patrick. I built this for myself.
 
-                        Every big weight-loss app tries to work for everyone — keto, low sugar, body building, macros, fasting windows. I didn't need a system for somebody else's goals. I just wanted to track how many calories I ate, how many I burned, and the difference — and have it average out across the week so a Friday dinner didn't have to feel like a failure.
+                        Every big weight-loss app tries to work for everyone — keto, low sugar, body building, macros, fasting windows. I didn't need a system for somebody else's goals. I just wanted to know two things every day: **how much can I eat** to stay in the weight-loss zone, and **how much workout do I owe** to keep that number livable.
+
+                        And — honestly — I wanted to be able to treat myself once in a while. A real dinner, a real dessert, no guilt. The fix was averaging: eat under on the disciplined days, bank the difference, spend it on a bigger day. Knowing a Friday steak or a Saturday ice cream wasn't going to torpedo the week made the whole thing actually sustainable. That single thing — the occasional larger meal *without* it being a relapse — made the difference between this approach working and the previous twenty things I'd tried not.
 
                         Using this exact approach I lost more than 60 lbs in under 6 months. Twice.
 
@@ -132,6 +154,8 @@ struct InfoView: View {
 
                         The weight chart includes a **trend line** — a regression fit through every weigh-in. Day-to-day weight bounces ±2 lbs on water alone, which makes it hard to tell if the plan is actually working. The trend line filters that noise so you can see the real slope and decide whether to tweak the plan.
 
+                        Use **Include today** to drop today's partial data when it's pulling the short-range averages around — today's still-developing numbers can skew a 7- or 14-day day-avg hard. Flip it off, look at the settled history, then flip it back on for live tracking.
+
                         This is where maintenance happens. Trend creeping up? Drop the net a little, give it two weeks, look again.
                         """
                     )
@@ -226,10 +250,9 @@ struct InfoView: View {
                 Text(title)
                     .font(.headline)
             }
-            Text(LocalizedStringKey(body))
+            sectionBody(body)
                 .font(.subheadline)
                 .foregroundStyle(.primary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
@@ -237,5 +260,52 @@ struct InfoView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(.ultraThinMaterial)
         )
+    }
+
+    /// Renders a section body that may include "• "-prefixed bullet lists. Each contiguous
+    /// run of bullet lines becomes a stack of hanging-indent rows so wrapped lines align
+    /// to the right of the bullet, like a proper list. Sub-bullets (lines with leading
+    /// spaces before "• ") indent further. Plain paragraphs stay as Markdown `Text` so
+    /// existing **bold** spans continue to render.
+    @ViewBuilder
+    private func sectionBody(_ body: String) -> some View {
+        let paragraphs = body.components(separatedBy: "\n\n")
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                let lines = paragraph.split(separator: "\n", omittingEmptySubsequences: true)
+                let parsed = lines.map(parseBulletLine)
+                if !parsed.isEmpty, parsed.allSatisfy({ $0 != nil }) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(parsed.enumerated()), id: \.offset) { _, item in
+                            if let item {
+                                bulletRow(item.text, level: item.level)
+                            }
+                        }
+                    }
+                } else {
+                    Text(LocalizedStringKey(paragraph))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// Returns (nesting level, content after the bullet) or nil if the line isn't a bullet.
+    /// Two leading spaces in the source string == one nesting level.
+    private func parseBulletLine(_ line: Substring) -> (level: Int, text: String)? {
+        let leadingSpaces = line.prefix(while: { $0 == " " }).count
+        let trimmed = line.dropFirst(leadingSpaces)
+        guard trimmed.hasPrefix("• ") else { return nil }
+        return (leadingSpaces / 2, String(trimmed.dropFirst(2)))
+    }
+
+    private func bulletRow(_ text: String, level: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("•")
+            Text(LocalizedStringKey(text))
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.leading, CGFloat(level) * 18)
     }
 }
