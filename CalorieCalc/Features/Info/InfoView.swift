@@ -132,6 +132,8 @@ struct InfoView: View {
                         Tap any day on the Calc tab to open its daily log. Food is grouped by meal — Breakfast, Lunch, Dinner, Snacks — with calorie and macro totals shown on each meal header. Workouts (Apple Health + anything manual) sit below. At the bottom, a **Summary** shows exactly how that day's Remaining was calculated, including planned vs actual exercise so you can see *why* the number says what it says.
 
                         Sections start collapsed for a clean view. Logging an item live expands its section automatically.
+
+                        **Tip:** for the most accurate plan, log food by weight when you can — grams beat eyeballed portions every time. The more precise each entry, the better the math reflects what you're actually eating.
                         """
                     )
 
@@ -313,10 +315,29 @@ struct InfoView: View {
     private func bulletRow(_ text: String, level: Int) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text("•")
-            Text(LocalizedStringKey(text))
+            boltAwareText(text)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.leading, CGFloat(level) * 18)
+    }
+
+    /// Replaces literal `⚡` characters with an inline orange SF Symbol bolt so the icon
+    /// in prose matches the favorite/Quick Add bolt elsewhere. The emoji is always
+    /// rendered yellow by the OS regardless of SwiftUI styling — the Image replacement
+    /// is the only way to actually color it. `bolt` is built as a `Text` (not a styled
+    /// `View`) so it interpolates cleanly into the outer `Text` without falling through
+    /// to the deprecated unlocalized-description path.
+    private func boltAwareText(_ raw: String) -> Text {
+        guard raw.contains("⚡") else {
+            return Text(LocalizedStringKey(raw))
+        }
+        let parts = raw.components(separatedBy: "⚡")
+        let bolt = Text("\(Image(systemName: "bolt.fill"))").foregroundStyle(.orange)
+        var result = Text(LocalizedStringKey(parts[0]))
+        for part in parts.dropFirst() {
+            result = Text("\(result)\(bolt)\(Text(LocalizedStringKey(part)))")
+        }
+        return result
     }
 }

@@ -31,6 +31,8 @@ struct DayDetailView: View {
     /// onChange handlers below.
     @State private var collapsedMeals: Set<MealType> = Set(MealType.allCases)
     @State private var workoutsCollapsed: Bool = true
+    @State private var supplementsCollapsed: Bool = true
+    @State private var lastSupplementCount: Int = 0
     @State private var summaryCollapsed: Bool = true
     /// Last-observed counts so the onChange handlers can detect *additions* (which
     /// expand the section) and ignore deletions (which leave the user's choice alone).
@@ -68,14 +70,18 @@ struct DayDetailView: View {
 
             List {
                 mealsSections(log: dayLog)
+                workoutsSection(log: dayLog)
                 if tracksSupplements {
                     SupplementSectionView(
                         entries: (dayLog?.supplementEntriesList ?? []).sorted { $0.timestamp < $1.timestamp },
+                        collapsed: supplementsCollapsed,
+                        onToggleCollapse: {
+                            withAnimation(.snappy) { supplementsCollapsed.toggle() }
+                        },
                         onAdd: { showSupplementPicker = true },
                         onDelete: { entry in delete(supplement: entry) }
                     )
                 }
-                workoutsSection(log: dayLog)
                 summarySection(log: dayLog)
             }
             .listSectionSpacing(0)
@@ -110,6 +116,7 @@ struct DayDetailView: View {
                 lastFoodCounts[meal] = dayLog?.entries(for: meal).count ?? 0
             }
             lastManualWorkoutCount = dayLog?.manualWorkoutsList.count ?? 0
+            lastSupplementCount = dayLog?.supplementEntriesList.count ?? 0
         }
         .onChange(of: mealEntryCountsSnapshot) { _, newSnapshot in
             for meal in MealType.allCases {
@@ -126,6 +133,12 @@ struct DayDetailView: View {
                 withAnimation(.snappy) { workoutsCollapsed = false }
             }
             lastManualWorkoutCount = newCount
+        }
+        .onChange(of: dayLog?.supplementEntriesList.count ?? 0) { _, newCount in
+            if newCount > lastSupplementCount {
+                withAnimation(.snappy) { supplementsCollapsed = false }
+            }
+            lastSupplementCount = newCount
         }
     }
 

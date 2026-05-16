@@ -326,7 +326,7 @@ struct FoodSearchView: View {
         Button {
             portionTarget = cached.toSearchResult(forFavorites: forFavorites)
         } label: {
-            CachedFoodRow(cached: cached) {
+            CachedFoodRow(cached: cached, showServingSize: true) {
                 CachedFood.toggleFavorite(cached, in: modelContext)
             }
         }
@@ -406,7 +406,7 @@ struct CachedFoodRow: View {
     let onToggleFavorite: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 0) {
             Text(cached.name)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
@@ -445,7 +445,7 @@ struct CachedFoodRow: View {
                 Button(action: onToggleFavorite) {
                     Image(systemName: cached.isFavorite ? "bolt.fill" : "bolt")
                         .foregroundStyle(cached.isFavorite ? Color.orange : Color.secondary)
-                        .frame(width: 44, height: 44, alignment: .trailing)
+                        .frame(width: 44, alignment: .trailing)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -453,6 +453,7 @@ struct CachedFoodRow: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 4)
     }
 
 }
