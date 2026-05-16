@@ -60,6 +60,7 @@ struct FoodsView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
                             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                                 Button(role: .destructive) {
                                     // Removing from the unified list also clears the favorite —

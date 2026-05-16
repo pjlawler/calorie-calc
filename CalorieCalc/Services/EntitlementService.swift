@@ -77,6 +77,12 @@ final class EntitlementService {
         req.addValue(deviceId, forHTTPHeaderField: "X-Device-Id")
         req.addValue(assertion, forHTTPHeaderField: "X-Assertion")
         req.addValue(String(timestampMs), forHTTPHeaderField: "X-Timestamp")
+        let installId = InstallIdentity.shared.id
+        if !installId.isEmpty {
+            // iCloud-synced identifier — see InstallIdentity. Either /v1/messages or
+            // /v1/account/state can trip the initial credit grant, so both carry it.
+            req.addValue(installId, forHTTPHeaderField: "X-Install-Id")
+        }
         #if DEBUG
         // Mirror of the same header sent on /v1/messages — see ClaudeFoodRecognitionService
         // for the full rationale. Either endpoint can trip the initial credit grant for a

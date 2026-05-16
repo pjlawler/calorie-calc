@@ -139,7 +139,8 @@ app.get("/v1/account/state", async (c) => {
 
   device.counter = v.newCounter;
   const initial = initialCreditsFor(c.env, c.req.raw.headers);
-  grantInitialCreditsIfNeeded(device, initial);
+  const installId = c.req.header("X-Install-Id");
+  await grantInitialCreditsIfNeeded(c.env, device, deviceId, installId, initial);
   await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
 
   return c.json({
@@ -392,9 +393,12 @@ app.post("/v1/messages", async (c) => {
   // Grant initial credits before checking entitlement so a brand-new device — or a
   // pre-existing TestFlight device upgrading into this build — never sees a 402 on
   // their very first AI call. Idempotent (no-op once `grandfatheredAt` is set).
+  // Install id (iCloud-synced) prevents the same Apple ID from re-rolling the grant
+  // by uninstalling and reinstalling — see grantInitialCreditsIfNeeded for the gating.
   const initial = initialCreditsFor(c.env, c.req.raw.headers);
-  if (grantInitialCreditsIfNeeded(device, initial)) {
-    console.log("messages grandfather", deviceId, "+", initial, "->", device.credits);
+  const installId = c.req.header("X-Install-Id");
+  if (await grantInitialCreditsIfNeeded(c.env, device, deviceId, installId, initial)) {
+    console.log("messages grandfather", deviceId, "install", installId ?? "(none)", "+", initial, "->", device.credits);
   }
 
   const now = Date.now();

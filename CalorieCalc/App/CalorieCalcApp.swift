@@ -102,6 +102,11 @@ struct CalorieCalcApp: App {
         guard !proxyURLString.isEmpty, let proxyBaseURL = URL(string: proxyURLString) else {
             fatalError("PROXY_BASE_URL must be set in Secrets.xcconfig — see proxy/README.md.")
         }
+        // Force-resolve the install id at launch so the iCloud KV sync + UUID-mint logic
+        // runs before any service makes its first proxy call (and the install id is in
+        // UserDefaults by the time `InstallIdentity.shared.id` is read on a header).
+        _ = InstallIdentity.shared
+
         let attest = AppAttestService(proxyBaseURL: proxyBaseURL)
         let entitlements = EntitlementService(proxyBaseURL: proxyBaseURL, attest: attest)
         entitlementService = entitlements

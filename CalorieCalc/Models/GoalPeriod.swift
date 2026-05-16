@@ -17,11 +17,11 @@ final class GoalPeriod {
     /// First day of the NEXT period, exclusive. `nil` for the currently-active period.
     var endDate: Date?
 
-    var dailyNetCalorieGoal: Int = 1_600
+    var dailyNetCalorieGoal: Int = 2_000
     var dailyGrossCalorieGoal: Int = 1_800
-    var dailyWorkoutCalorieGoal: Int = 500
+    var dailyWorkoutCalorieGoal: Int = 150
 
-    var bankSplit: BankSplit = BankSplit.fiveTwo
+    var bankSplit: BankSplit = BankSplit.sixOne
     var weekStart: Weekday = Weekday.monday
 
     init(

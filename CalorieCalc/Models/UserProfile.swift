@@ -5,11 +5,11 @@ import SwiftData
 final class UserProfile {
     var id: UUID = UUID()
 
-    var dailyNetCalorieGoal: Int = 1_600
+    var dailyNetCalorieGoal: Int = 2_000
     var dailyGrossCalorieGoal: Int = 1_800
-    var dailyWorkoutCalorieGoal: Int = 500
+    var dailyWorkoutCalorieGoal: Int = 150
 
-    var bankSplit: BankSplit = BankSplit.fiveTwo
+    var bankSplit: BankSplit = BankSplit.sixOne
     var weekStart: Weekday = Weekday.monday
     /// Legacy storage. Banking days are now derived from `weekStart` + `bankSplit` on the fly,
     /// so this value is ignored. Kept as a field so existing SwiftData stores migrate without loss.
@@ -26,7 +26,7 @@ final class UserProfile {
     /// When `true`, the Progress tab's preset windows (7d/30d/etc.) end at today; when
     /// `false`, they end at yesterday and shift back one day so the same number of days
     /// is covered. Lets the user drop a still-developing morning weigh-in from the trend.
-    var includesTodayInProgress: Bool = true
+    var includesTodayInProgress: Bool = false
 
     var startingWeight: Double?
     var startingWeightLoggedAt: Date?
@@ -37,10 +37,10 @@ final class UserProfile {
 
     init(
         id: UUID = UUID(),
-        dailyNetCalorieGoal: Int = 1_600,
+        dailyNetCalorieGoal: Int = 2_000,
         dailyGrossCalorieGoal: Int = 1_800,
-        dailyWorkoutCalorieGoal: Int = 500,
-        bankSplit: BankSplit = .fiveTwo,
+        dailyWorkoutCalorieGoal: Int = 150,
+        bankSplit: BankSplit = .sixOne,
         weekStart: Weekday = .monday,
         weightUnit: WeightUnit = .pounds,
         energyUnit: EnergyUnit = .kilocalories,

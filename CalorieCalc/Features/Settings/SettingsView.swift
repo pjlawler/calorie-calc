@@ -450,13 +450,13 @@ private struct SettingsForm: View {
                 BankingDaysPreview(weekStart: draft.weekStart, bankSplit: draft.bankSplit)
 
                 Stepper(value: $draft.dailyNetCalorieGoal, in: 800...5000, step: 50) {
-                    LabeledContent("Daily net") { Text("\(draft.dailyNetCalorieGoal) kcal").monospacedDigit() }
+                    LabeledContent("Target Daily Net") { Text("\(draft.dailyNetCalorieGoal) kcal").monospacedDigit() }
                 }
                 Stepper(value: $draft.dailyWorkoutCalorieGoal, in: 0...3000, step: 25) {
                     LabeledContent("Daily workout goal") { Text("\(draft.dailyWorkoutCalorieGoal) kcal").monospacedDigit() }
                 }
                 Stepper(value: $draft.dailyGrossCalorieGoal, in: 800...6000, step: 50) {
-                    LabeledContent("Target") { Text("\(draft.dailyGrossCalorieGoal) kcal").monospacedDigit() }
+                    LabeledContent("Daily eating goal") { Text("\(draft.dailyGrossCalorieGoal) kcal").monospacedDigit() }
                 }
                 if draft.bankSplit.offDayCount > 0 {
                     LabeledContent("Bonus day(s)") {
@@ -466,7 +466,7 @@ private struct SettingsForm: View {
             } header: {
                 Text("My Plan")
             } footer: {
-                Text("Bank days are the first \(draft.bankSplit.bankingDayCount) days of your week — eat to Target while burning your daily workout. Bonus days are the rest — the kcal value above is what each bonus day allows once the math averages out across the week. Calorie changes apply to the current week and forward; past weeks keep the goals that were in effect at the time.")
+                Text("Set your Target Daily Net based on how fast you want to drop weight — at a healthy pace. Set your workout goal to your average daily burn (for example, walking 3 miles 3× a week burns about 140 kcal a day). Then adjust your Daily eating goal to see how many calories you can eat on your bonus day(s).")
             }
 
             Section("Units") {
@@ -803,7 +803,7 @@ private struct BankingDaysPreview: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 4)
         .accessibilityLabel(
-            "Bank days: \(bankingDays.sorted { $0.rawValue < $1.rawValue }.map(\.fullName).joined(separator: ", "))"
+            "Regular days: \(bankingDays.sorted { $0.rawValue < $1.rawValue }.map(\.fullName).joined(separator: ", "))"
         )
     }
 }

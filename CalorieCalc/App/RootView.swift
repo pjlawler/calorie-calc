@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import StoreKit
 
 struct RootView: View {
     @State private var selection: AppTab
@@ -10,6 +11,7 @@ struct RootView: View {
     @Environment(RewardedAdService.self) private var rewardedAd
     @Environment(\.modelContext) private var modelContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.requestReview) private var requestReview
 
     init() {
         let raw = UserDefaults.standard.string(forKey: AppTab.defaultTabStorageKey) ?? AppTab.week.rawValue
@@ -63,6 +65,11 @@ struct RootView: View {
             await subscription.loadProduct()
             await entitlements.refresh()
             await rewardedAd.bootstrap()
+
+            // Defer the review prompt past bootstrap so it doesn't fight the splash/first-frame
+            // work above. The service enforces a 10-launch minimum and a 3-per-year ceiling.
+            try? await Task.sleep(for: .seconds(3))
+            ReviewPromptService.recordLaunchAndMaybePrompt(requestReview: requestReview)
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {

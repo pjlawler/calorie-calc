@@ -55,9 +55,41 @@ export function hasEntitlement(d: StoredDevice, now: number): EntitlementCheck {
 // One-time grant for any device that hasn't received the initial free-credit allotment.
 // Fires on first /v1/messages or /v1/account/state call after deploy. Mutates `d` in
 // place; returns true if a grant was applied (caller must persist).
-export function grantInitialCreditsIfNeeded(d: StoredDevice, amount: number): boolean {
+//
+// `installId` is an iCloud-synced identifier from the iOS app (X-Install-Id header) —
+// stable across uninstall/reinstall on the same Apple ID, unlike the App Attest keyId
+// which resets. When supplied, we consult a per-install KV marker so a reinstall on
+// the same Apple ID lands on the existing grant record rather than re-rolling free
+// credits. Old clients (and clients with iCloud signed out) supply no install id;
+// they fall through to the legacy per-device grandfathering, preserving the original
+// behavior.
+export async function grantInitialCreditsIfNeeded(
+  env: { DEVICES: KVNamespace },
+  d: StoredDevice,
+  deviceId: string,
+  installId: string | undefined,
+  amount: number,
+): Promise<boolean> {
   if (d.grandfatheredAt != null) return false;
+
+  if (installId) {
+    const marker = await env.DEVICES.get(`i:${installId}`);
+    if (marker) {
+      // This iCloud install already received its grant on a prior device record —
+      // mark this new device as grandfathered (so we don't keep checking KV) and
+      // skip the credit bump. The proxy logs make this case visible at the call site.
+      d.grandfatheredAt = Date.now();
+      return false;
+    }
+  }
+
   d.grandfatheredAt = Date.now();
   d.credits += amount;
+  if (installId) {
+    await env.DEVICES.put(
+      `i:${installId}`,
+      JSON.stringify({ grantedAt: Date.now(), firstDeviceId: deviceId, amount }),
+    );
+  }
   return true;
 }

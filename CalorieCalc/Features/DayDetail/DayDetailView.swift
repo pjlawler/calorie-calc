@@ -116,7 +116,7 @@ struct DayDetailView: View {
                 let newCount = newSnapshot[meal] ?? 0
                 let previous = lastFoodCounts[meal] ?? newCount
                 if newCount > previous {
-                    withAnimation(.snappy) { collapsedMeals.remove(meal) }
+                    withAnimation(.snappy) { _ = collapsedMeals.remove(meal) }
                 }
                 lastFoodCounts[meal] = newCount
             }

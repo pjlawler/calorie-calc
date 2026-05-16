@@ -30,6 +30,12 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         req.addValue("application/json", forHTTPHeaderField: "content-type")
         req.addValue(try await attest.deviceId(), forHTTPHeaderField: "X-Device-Id")
         req.addValue(try await attest.assertion(for: body), forHTTPHeaderField: "X-Assertion")
+        let installId = InstallIdentity.shared.id
+        if !installId.isEmpty {
+            // iCloud-synced identifier so reinstalling on the same Apple ID can't
+            // re-roll the initial free-credit grant. See InstallIdentity for details.
+            req.addValue(installId, forHTTPHeaderField: "X-Install-Id")
+        }
         #if DEBUG
         // Hint to the proxy that this is a debug build so it grants 1 initial credit
         // instead of the production amount, making the paywall flow easy to retest

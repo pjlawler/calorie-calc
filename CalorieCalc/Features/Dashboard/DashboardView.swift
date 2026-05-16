@@ -25,7 +25,7 @@ struct DashboardView: View {
     @State private var hkBurnsByDay: [Date: Double] = [:]
     @State private var hkStepsByDay: [Date: Double] = [:]
 
-    @AppStorage("progress.timeframe") private var timeframe: ProgressTrendTimeframe = .days90
+    @AppStorage("progress.timeframe") private var timeframe: ProgressTrendTimeframe = .days7
     @AppStorage("progress.customStart") private var customStartTS: Double = (Calendar.current.date(byAdding: .day, value: -29, to: Calendar.current.startOfDay(for: .now)) ?? .now).timeIntervalSinceReferenceDate
     @AppStorage("progress.customEnd") private var customEndTS: Double = Calendar.current.startOfDay(for: .now).timeIntervalSinceReferenceDate
     @AppStorage("settings.showSteps") private var showSteps: Bool = true

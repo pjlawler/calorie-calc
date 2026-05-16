@@ -418,9 +418,9 @@ struct CachedFoodRow: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     if cached.brand != nil {
-                        Text("|")
-                            .font(.caption)
-                            .foregroundStyle(.tertiary)
+                        Rectangle()
+                            .fill(.tertiary)
+                            .frame(width: 1, height: 10)
                     }
                 }
                 if let brand = cached.brand {
@@ -428,6 +428,7 @@ struct CachedFoodRow: View {
                         .lineLimit(1)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                        .layoutPriority(1)
                 }
                 Spacer(minLength: 8)
                 if !cached.tagsList.isEmpty {
@@ -439,10 +440,13 @@ struct CachedFoodRow: View {
                                 .accessibilityLabel(Text(tag.name))
                         }
                     }
+                    .padding(.trailing, 4)
                 }
                 Button(action: onToggleFavorite) {
                     Image(systemName: cached.isFavorite ? "bolt.fill" : "bolt")
                         .foregroundStyle(cached.isFavorite ? Color.orange : Color.secondary)
+                        .frame(width: 44, height: 44, alignment: .trailing)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(cached.isFavorite ? "Remove from Quick Add" : "Add to Quick Add")

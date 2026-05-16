@@ -97,21 +97,22 @@ struct InfoView: View {
                     )
 
                     section(
-                        title: "Bank days vs bonus days",
+                        title: "Regular days vs bonus days",
                         icon: "calendar",
                         body:
                         """
-                        Settings → Week split lets you pick something like **5/2** — five bank days, two bonus days.
+                        Settings → Week split lets you pick something like **5/2** — five regular days, two bonus days.
 
-                        Bank days have the tighter eating target. Hit your bank-day gross, burn the planned workout, build the cushion. Bonus days have a higher target — that's where you spend what you saved.
+                        Regular days have the tighter eating target. Hit your regular-day gross, burn the planned workout, build the cushion. Bonus days have a higher target — that's where you spend what you saved.
 
-                        The split is just what the math *targets* per day — the app never stops you from eating. I order bank days first because earning the headroom before spending it is what makes a bonus day feel like a reward instead of a guilt trip.
+                        The split is just what the math *targets* per day — the app never stops you from eating. I order regular days first because earning the headroom before spending it is what makes a bonus day feel like a reward instead of a guilt trip.
                         """
                     )
 
                     section(
                         title: "Quick Add",
                         icon: "bolt.fill",
+                        iconTint: .orange,
                         body:
                         """
                         Quick Add is the fast lane. From the Calc tab, tap Quick Add and you'll see:
@@ -189,9 +190,9 @@ struct InfoView: View {
                         """
                         Settings is where the targets live:
 
-                        • **Daily net** — your weekly goal ÷ 7. Lower to lose faster, raise to maintain.
-                        • **Daily gross (bank days)** — calories eaten before exercise on a banking day.
-                        • **Workout goal** — what you commit to burn on a banking day. Without it, the eating target eats too much of the weekly budget.
+                        • **Target Daily Net** — your weekly goal ÷ 7. Lower to lose faster, raise to maintain.
+                        • **Daily eating goal (regular days)** — calories eaten before exercise on a regular day.
+                        • **Workout goal** — what you commit to burn on a regular day. Without it, the eating target eats too much of the weekly budget.
                         • **Week split** — how many bank vs bonus days.
                         • **Week starts on** — so bonus days land at the end of *your* week.
 
@@ -252,10 +253,11 @@ struct InfoView: View {
         )
     }
 
-    private func section(title: String, icon: String, body: String) -> some View {
+    private func section(title: String, icon: String, iconTint: Color? = nil, body: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: icon).foregroundStyle(.tint)
+                Image(systemName: icon)
+                    .foregroundStyle(iconTint.map { AnyShapeStyle($0) } ?? AnyShapeStyle(.tint))
                 Text(title)
                     .font(.headline)
             }

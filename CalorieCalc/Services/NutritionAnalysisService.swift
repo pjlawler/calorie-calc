@@ -97,6 +97,12 @@ final class NutritionAnalysisService: Sendable {
         req.addValue("application/json", forHTTPHeaderField: "content-type")
         req.addValue(try await attest.deviceId(), forHTTPHeaderField: "X-Device-Id")
         req.addValue(try await attest.assertion(for: bodyData), forHTTPHeaderField: "X-Assertion")
+        let installId = InstallIdentity.shared.id
+        if !installId.isEmpty {
+            // Mirrors the header sent on /v1/messages by ClaudeFoodRecognitionService —
+            // either endpoint can trip the initial grant, so both carry the install id.
+            req.addValue(installId, forHTTPHeaderField: "X-Install-Id")
+        }
         #if DEBUG
         // Mirror of the same header sent on /v1/messages by ClaudeFoodRecognitionService —
         // signals a debug iOS build so the proxy grants 1 initial credit instead of 50.
