@@ -49,6 +49,8 @@ struct PaywallSheet: View {
 
                     restoreButton
                         .padding(.top, 8)
+
+                    subscriptionDisclosure
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 24)
@@ -172,6 +174,40 @@ struct PaywallSheet: View {
             .font(.footnote)
         }
         .disabled(isRestoring)
+    }
+
+    /// App Store Schedule 2 requires every auto-renewable subscription paywall to display
+    /// the subscription title and length, an auto-renew explanation, and functional links
+    /// to the Terms of Use and Privacy Policy. Missing any of these is a recurring 3.1.2
+    /// rejection reason for indie apps.
+    private var subscriptionDisclosure: some View {
+        VStack(spacing: 10) {
+            Text(disclosureTitleLine)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Text("Payment is charged to your Apple ID at purchase confirmation. Subscription auto-renews unless canceled at least 24 hours before the end of the current period. Manage or cancel in Settings → Apple ID → Subscriptions.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            HStack(spacing: 18) {
+                Link("Terms of Use", destination: URL(string: "https://pjlawler.github.io/calorie-calc/terms.html")!)
+                Link("Privacy Policy", destination: URL(string: "https://pjlawler.github.io/calorie-calc/privacy.html")!)
+            }
+            .font(.caption)
+        }
+        .padding(.top, 16)
+        .padding(.horizontal, 4)
+    }
+
+    private var disclosureTitleLine: String {
+        let title = subscription.product?.displayName ?? "AI Subscription"
+        if let price = subscription.product?.displayPrice {
+            return "\(title) · \(price) / month · auto-renewing subscription"
+        }
+        return "\(title) · auto-renewing monthly subscription"
     }
 
     // MARK: - Actions

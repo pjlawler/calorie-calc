@@ -331,8 +331,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = CalorieCalc;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSCameraUsageDescription = "CalorieCalc uses the camera to scan product barcodes so you can quickly log packaged foods.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "CalorieCalc reads your active energy and workouts so the daily burn is reflected in your weekly calorie bank.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "CalorieCalc does not currently write to Health — this permission is requested only if future features require it.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "CalorieCalc reads your active energy, workouts, and steps from Apple Health so the daily burn shows up in your weekly average and your exercise feeds the calorie math automatically.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "CalorieCalc requests this permission so a future update can write logged workouts and meals back to Apple Health, letting them appear in your Health timeline alongside data from other apps. CalorieCalc does not currently write to Health.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -385,8 +385,8 @@
 				INFOPLIST_KEY_CFBundleDisplayName = CalorieCalc;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.lifestyle";
 				INFOPLIST_KEY_NSCameraUsageDescription = "CalorieCalc uses the camera to scan product barcodes so you can quickly log packaged foods.";
-				INFOPLIST_KEY_NSHealthShareUsageDescription = "CalorieCalc reads your active energy and workouts so the daily burn is reflected in your weekly calorie bank.";
-				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "CalorieCalc does not currently write to Health — this permission is requested only if future features require it.";
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "CalorieCalc reads your active energy, workouts, and steps from Apple Health so the daily burn shows up in your weekly average and your exercise feeds the calorie math automatically.";
+				INFOPLIST_KEY_NSHealthUpdateUsageDescription = "CalorieCalc requests this permission so a future update can write logged workouts and meals back to Apple Health, letting them appear in your Health timeline alongside data from other apps. CalorieCalc does not currently write to Health.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
