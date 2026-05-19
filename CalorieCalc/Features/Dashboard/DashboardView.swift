@@ -9,6 +9,7 @@ struct DashboardView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(HealthKitService.self) private var healthKitService
+    @Environment(AIConsentService.self) private var aiConsent
 
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
     @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
@@ -19,6 +20,7 @@ struct DashboardView: View {
     @State private var showWeightSheet = false
     @State private var showSettings = false
     @State private var showAnalysis = false
+    @State private var showAIConsent = false
     /// HealthKit workout active-energy bucketed by start-of-day for the current chart range.
     /// Refreshed via `.task(id:)` whenever the timeframe or custom range changes — one HK query
     /// covers the whole span.
@@ -75,6 +77,9 @@ struct DashboardView: View {
             }
             .sheet(isPresented: $showAnalysis) {
                 NutritionAnalysisSheet(data: analysisInput)
+            }
+            .sheet(isPresented: $showAIConsent) {
+                AIConsentSheet(onAllow: { showAnalysis = true })
             }
             .task { await ensureProfile() }
             .task(id: healthKitFetchKey) { await loadHealthKit() }
@@ -369,7 +374,11 @@ struct DashboardView: View {
 
     private var analyzeButton: some View {
         Button {
-            showAnalysis = true
+            if aiConsent.isGranted {
+                showAnalysis = true
+            } else {
+                showAIConsent = true
+            }
         } label: {
             Label("Analyze", systemImage: "sparkles")
                 .labelStyle(TitleAndIconLabelStyle())

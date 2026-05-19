@@ -12,6 +12,7 @@ struct CalorieCalcApp: App {
     private let entitlementService: EntitlementService
     private let subscriptionService: SubscriptionService
     private let rewardedAdService: RewardedAdService
+    private let aiConsentService: AIConsentService
 
     init() {
         // Auto-snapshot the previous session's store files BEFORE opening the container, so
@@ -134,6 +135,7 @@ struct CalorieCalcApp: App {
                 entitlements: entitlements
             )
         )
+        aiConsentService = AIConsentService()
     }
 
     var body: some Scene {
@@ -146,6 +148,7 @@ struct CalorieCalcApp: App {
                 .environment(entitlementService)
                 .environment(subscriptionService)
                 .environment(rewardedAdService)
+                .environment(aiConsentService)
         }
         .modelContainer(modelContainer)
     }

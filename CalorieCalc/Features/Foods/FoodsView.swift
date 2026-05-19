@@ -10,6 +10,7 @@ struct FoodsView: View {
 
     @Environment(\.modelContext) private var modelContext
     @Environment(FoodDataSourceEnvironment.self) private var dataSourceEnv
+    @Environment(AIConsentService.self) private var aiConsent
     @Query(sort: \CachedFood.lastUsed, order: .reverse)
     private var cachedFoods: [CachedFood]
     @Query(sort: \FoodTag.name) private var allTags: [FoodTag]
@@ -37,6 +38,12 @@ struct FoodsView: View {
     @State private var showRecipeBuilder = false
     @State private var quickAddBarcode: String?
     @State private var addLookupViewModel: FoodSearchViewModel?
+
+    // First-use consent gate. When the user picks an AI-powered Add option without
+    // prior consent, we stash the action and show the disclosure sheet first; on
+    // Allow, the pending action fires. See AIConsentSheet + AIConsentService.
+    @State private var showAIConsent = false
+    @State private var pendingAIAction: (() -> Void)?
 
     var body: some View {
         NavigationStack {
@@ -105,9 +112,9 @@ struct FoodsView: View {
                 }
                 .alert("Add Food", isPresented: $showAddOptions) {
                     Button("Scan Barcode") { showScanner = true }
-                    Button("Photo") { showPhotoAnalyzer = true }
-                    Button("Describe with AI") { showDescribe = true }
-                    Button("Recipe Analyzer") { showRecipeBuilder = true }
+                    Button("Photo") { requestAI { showPhotoAnalyzer = true } }
+                    Button("Describe with AI") { requestAI { showDescribe = true } }
+                    Button("Recipe Analyzer") { requestAI { showRecipeBuilder = true } }
                     Button("Manual Entry") {
                         quickAddBarcode = nil
                         showQuickAdd = true
@@ -167,6 +174,13 @@ struct FoodsView: View {
                 }
                 .sheet(isPresented: $showRecipeBuilder) {
                     RecipeBuilderSheet { }
+                }
+                .sheet(isPresented: $showAIConsent, onDismiss: { pendingAIAction = nil }) {
+                    AIConsentSheet(onAllow: {
+                        let action = pendingAIAction
+                        pendingAIAction = nil
+                        action?()
+                    })
                 }
             .task {
                 if addLookupViewModel == nil {
@@ -266,6 +280,17 @@ struct FoodsView: View {
             // Not in any DB — open Quick Add manual entry pre-filled with the barcode.
             quickAddBarcode = code
             showQuickAdd = true
+        }
+    }
+
+    /// Runs `action` only after the user has granted AI consent. Pre-grant, the
+    /// disclosure sheet is shown and the action is held until they tap Allow.
+    private func requestAI(_ action: @escaping () -> Void) {
+        if aiConsent.isGranted {
+            action()
+        } else {
+            pendingAIAction = action
+            showAIConsent = true
         }
     }
 }

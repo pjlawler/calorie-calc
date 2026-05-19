@@ -8,6 +8,7 @@ struct FoodSearchView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
     @Environment(FoodDataSourceEnvironment.self) private var dataSourceEnv
+    @Environment(AIConsentService.self) private var aiConsent
 
     @Query(sort: \CachedFood.lastUsed, order: .reverse)
     private var cachedFoods: [CachedFood]
@@ -23,6 +24,11 @@ struct FoodSearchView: View {
     @State private var showDescribe = false
     @State private var quickAddBarcode: String?
     @State private var portionTarget: FoodSearchResult?
+
+    // First-use consent gate for the Photo and Describe quick-action tiles. Mirrors
+    // the same pattern in FoodsView — see AIConsentSheet + AIConsentService.
+    @State private var showAIConsent = false
+    @State private var pendingAIAction: (() -> Void)?
 
     /// Defaults the meal picker to the time-of-day-appropriate slot (breakfast / lunch /
     /// dinner / snack). Callers can override when they need a specific meal.
@@ -113,6 +119,24 @@ struct FoodSearchView: View {
                     portionTarget = result
                 }
             }
+            .sheet(isPresented: $showAIConsent, onDismiss: { pendingAIAction = nil }) {
+                AIConsentSheet(onAllow: {
+                    let action = pendingAIAction
+                    pendingAIAction = nil
+                    action?()
+                })
+            }
+        }
+    }
+
+    /// Pre-grant: stash the action and show the disclosure sheet; on Allow it fires.
+    /// Post-grant: runs immediately. See AIConsentService for the persisted state.
+    private func requestAI(_ action: @escaping () -> Void) {
+        if aiConsent.isGranted {
+            action()
+        } else {
+            pendingAIAction = action
+            showAIConsent = true
         }
     }
 
@@ -146,10 +170,10 @@ struct FoodSearchView: View {
                             showScanner = true
                         }
                         quickActionTile(title: "Photo", systemImage: "camera.fill") {
-                            showPhotoAnalyzer = true
+                            requestAI { showPhotoAnalyzer = true }
                         }
                         quickActionTile(title: "Describe", systemImage: "sparkles") {
-                            showDescribe = true
+                            requestAI { showDescribe = true }
                         }
                         quickActionTile(title: "Manual", systemImage: "square.and.pencil") {
                             quickAddBarcode = nil

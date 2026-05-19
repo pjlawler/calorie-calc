@@ -390,6 +390,9 @@ private struct SettingsForm: View {
     let exportURL: URL?
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(AIConsentService.self) private var aiConsent
+    @Environment(\.openURL) private var openURL
+    @State private var showAIConsentSheet = false
     @State private var showImporter = false
     @State private var importStatusMessage: String?
     @State private var showWipeConfirm = false
@@ -538,6 +541,37 @@ private struct SettingsForm: View {
                 Text("Custom labels you can attach to foods (e.g. \"Thai\", \"Vegan\", \"Low Calorie\") to filter your saved catalog and recents.")
             }
 
+            Section {
+                Button {
+                    showAIConsentSheet = true
+                } label: {
+                    HStack {
+                        Label("AI features", systemImage: "sparkles")
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Text(aiConsent.isGranted ? "On" : "Off")
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+                Button {
+                    openURL(URL(string: "https://pjlawler.github.io/calorie-calc/privacy.html")!)
+                } label: {
+                    Label("Privacy Policy", systemImage: "hand.raised")
+                }
+                Button {
+                    openURL(URL(string: "https://pjlawler.github.io/calorie-calc/terms.html")!)
+                } label: {
+                    Label("Terms of Service", systemImage: "doc.text")
+                }
+            } header: {
+                Text("Privacy")
+            } footer: {
+                Text("AI features (Photo, Describe, Recipe Analyzer, Period Analysis) send your input to Anthropic's Claude. Tap AI features for the full disclosure or to revoke access.")
+            }
+
             #if DEBUG
             Section {
                 Button {
@@ -669,6 +703,9 @@ private struct SettingsForm: View {
                 Text("Visible only in debug builds.")
             }
             #endif
+        }
+        .sheet(isPresented: $showAIConsentSheet) {
+            AIConsentSheet()
         }
     }
 

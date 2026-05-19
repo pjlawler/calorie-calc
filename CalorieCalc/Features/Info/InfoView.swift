@@ -147,9 +147,11 @@ struct InfoView: View {
                         • **My Foods + Recents** — pick from your saved list or things you've logged before. One tap, done.
                         • **Search tab** — four ways to find anything else:
                           • **Scan** a barcode (Open Food Facts).
-                          • **Photo** — Claude estimates calories + macros from a picture.
-                          • **Describe** — type "Five Guys cheeseburger" and Claude does the math.
+                          • **Photo** — AI estimates calories + macros from a picture.
+                          • **Describe** — type "Five Guys cheeseburger" and AI does the math.
                           • **Manual entry** — type the numbers yourself when you already know them.
+
+                        Photo and Describe send your input to Anthropic's Claude through our proxy — the app asks once before enabling AI features, and you can turn them off any time in Settings → Privacy.
 
                         The meal selector at the top of the sheet decides where the item lands. The search bar at the bottom hunts across your foods, your recents, and the USDA national food database in one place.
 

@@ -10,7 +10,7 @@
 <div class="container">
   <header>
     <h1>Privacy Policy</h1>
-    <p class="muted">Last updated: May 15, 2026</p>
+    <p class="muted">Last updated: May 19, 2026</p>
     <nav>
       <a href="index.html">Support</a>
       <a href="privacy.html">Privacy</a>
@@ -27,15 +27,37 @@
   <h2>Health data</h2>
   <p>If you grant permission, the app reads active energy, workouts, steps, and weight from Apple Health to power the weekly calorie math. This data stays on your device and (if you enable sync) your private iCloud. We never see it, store it, or transmit it anywhere.</p>
 
-  <h2>AI food entry (optional)</h2>
-  <p>If you use the photo recognition or "describe what I ate" features, your photo or text description is sent to our server, which forwards it to Anthropic's Claude API for analysis. The result comes back to your device.</p>
+  <h2>AI features and third-party processing (optional)</h2>
+  <p>CalorieCalc offers four AI-powered features. Each one sends a small amount of data to <strong>Anthropic PBC</strong> &mdash; the company behind the Claude AI model &mdash; through our authenticated proxy server, so Claude can return a nutrition estimate. None of these features run unless you explicitly enable AI features in the in-app consent prompt, and you can revoke that consent any time from Settings &rarr; Privacy.</p>
+
+  <h3>What we send, by feature</h3>
   <ul>
-    <li>We do not store these requests after they are processed.</li>
-    <li>We do not associate requests with your name, email, or Apple ID.</li>
-    <li>Each request is verified using Apple's App Attest service to confirm it came from a genuine copy of the app.</li>
-    <li>Anthropic's data handling is governed by their own privacy policy: <a href="https://www.anthropic.com/legal/privacy">https://www.anthropic.com/legal/privacy</a>.</li>
+    <li><strong>Photo</strong> &mdash; the image you take or pick from your library, plus any optional description you type.</li>
+    <li><strong>Describe with AI</strong> &mdash; the text description you type (for example, "Five Guys cheeseburger").</li>
+    <li><strong>Recipe Analyzer</strong> &mdash; the recipe name you provide and the ingredient list you build (each ingredient's name, brand, amount, and unit).</li>
+    <li><strong>Period Analysis</strong> &mdash; summary totals for the period you're viewing: average daily calories, macros, exercise, and net balance. No individual food entries, individual weigh-ins, or workout details are sent.</li>
   </ul>
-  <p>You can use the app without ever using the AI features.</p>
+
+  <h3>How the data is collected</h3>
+  <p>Each AI request originates from a tap inside the app &mdash; the photo picker, the describe sheet, the recipe builder, or the Analyze button on the Progress tab. The app builds the request on your device and sends it directly to our proxy over HTTPS; we do not collect this data passively or in the background.</p>
+
+  <h3>How the data is used</h3>
+  <p>The data is used solely to generate the nutrition estimate or period summary that the AI returns to your device for that single request. We do not log AI inputs or outputs on our proxy beyond what is necessary to forward the request, and Anthropic processes the request under their commercial API terms.</p>
+
+  <h3>Equivalent third-party protections</h3>
+  <p>Under Anthropic's commercial API terms, your AI inputs and outputs are <strong>not used to train Anthropic's models</strong>, and Anthropic provides confidentiality, security, and use-limitation protections substantially equivalent to those in this Privacy Policy. Anthropic's full data-handling practices are described in their privacy policy: <a href="https://www.anthropic.com/legal/privacy">https://www.anthropic.com/legal/privacy</a>. Anthropic's commercial terms are available at <a href="https://www.anthropic.com/legal/commercial-terms">https://www.anthropic.com/legal/commercial-terms</a>.</p>
+
+  <h3>What we never send</h3>
+  <ul>
+    <li>Your name, email, or any account information (we don't collect them in the first place).</li>
+    <li>Apple Health workouts, weight, or steps.</li>
+    <li>Your full food log, individual meal entries, or weigh-in history (Period Analysis sends summary totals only).</li>
+  </ul>
+
+  <h3>Authentication and identifiers sent with each request</h3>
+  <p>To prevent abuse of the AI features, each request includes an App Attest assertion (a cryptographic proof that the request came from a genuine copy of CalorieCalc on a real Apple device) and an install identifier used solely to anchor the free-tier credit count to a single install. Neither identifier is linked to your name, email, or Apple ID.</p>
+
+  <p>You can use CalorieCalc without ever enabling the AI features. Declining the consent prompt or turning AI features off in Settings means no data leaves your device for AI processing.</p>
 
   <h2>Ads (free tier only)</h2>
   <p>If you choose to use AI features without subscribing, you can watch a rewarded ad to unlock a single use. These ads are served by Google AdMob, which may collect standard advertising identifiers (such as Apple's IDFA, if you grant permission) to deliver and measure ads. See Google's ads privacy policy at <a href="https://policies.google.com/technologies/ads">https://policies.google.com/technologies/ads</a>.</p>
