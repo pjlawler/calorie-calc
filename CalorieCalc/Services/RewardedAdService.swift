@@ -12,9 +12,11 @@ import GoogleMobileAds
 /// passes that as `user_id` in the SSV callback.
 ///
 /// Lifecycle:
-///   • `bootstrap()` once at app launch.
-///   • `requestATTIfNeeded()` the first time the user taps "Earn credits" — Apple
-///     requires App Tracking Transparency consent before personalized ads.
+///   • `requestATTIfNeeded()` once at app launch, *before* `bootstrap()`, so the
+///     reviewer (and any user) sees the prompt without having to exhaust their
+///     free credits to reach the paywall. Idempotent — only prompts when status
+///     is `.notDetermined`.
+///   • `bootstrap()` once at app launch after ATT, initialising Google Mobile Ads.
 ///   • `loadAd()` when the paywall opens (warms the cache so present is instant).
 ///   • `present(from:)` when the user taps the watch button. Resolves on dismissal.
 ///

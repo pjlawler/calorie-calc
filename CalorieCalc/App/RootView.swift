@@ -64,6 +64,10 @@ struct RootView: View {
             subscription.startListeningForTransactions()
             await subscription.loadProduct()
             await entitlements.refresh()
+            // ATT must resolve before the ad SDK can request personalized fills. Prompting
+            // here (rather than at first paywall open) guarantees the prompt is reachable
+            // for App Store reviewers who never burn through the initial credits.
+            await rewardedAd.requestATTIfNeeded()
             await rewardedAd.bootstrap()
 
             // Defer the review prompt past bootstrap so it doesn't fight the splash/first-frame

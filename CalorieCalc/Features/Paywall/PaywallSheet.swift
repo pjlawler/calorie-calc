@@ -241,10 +241,9 @@ struct PaywallSheet: View {
 
     private func loadAdIfNeeded() async {
         guard !rewardedAd.isReady else { return }
-        // ATT must be resolved before we ask Google for personalised ads. Apple is
-        // strict about prompting only at the moment of opt-in; the paywall qualifies
-        // since the user has clearly engaged with the credits flow.
-        await rewardedAd.requestATTIfNeeded()
+        // ATT is resolved at app launch (see RootView.task) so it's reliably reachable
+        // for reviewers — by the time we reach this point the user's tracking choice
+        // is already recorded and the SDK will respect it on this request.
         do {
             try await rewardedAd.loadAd()
             adLoadFailed = false
