@@ -26,6 +26,17 @@
 	<array>
 		<string>iCloud.com.lawlerinnovationsinc-calorie</string>
 	</array>
+	<!--
+	  Force every signed build (Xcode debug, TestFlight, App Store) onto the SAME
+	  CloudKit Production environment. Without this, debug builds default to the
+	  Development container and TestFlight/App Store installs default to Production
+	  — so data written from Xcode is invisible after a TestFlight install (and
+	  vice versa). Trade-off: debug runs now mutate real Production data. Deploy
+	  schema changes via CloudKit Console (Development → Production) before any
+	  schema-affecting change ships to a debug build.
+	-->
+	<key>com.apple.developer.icloud-container-environment</key>
+	<string>Production</string>
 	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
 	<string>$(TeamIdentifierPrefix)com.lawlerinnovationsinc-calorie</string>
 </dict>
