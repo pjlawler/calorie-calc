@@ -17,7 +17,7 @@ struct FoodSearchView: View {
 
     @State private var mealType: MealType
     @State private var viewModel: FoodSearchViewModel?
-    @State private var tab: Tab = .myFoods
+    @State private var tab: Tab = .recents
     @State private var showScanner = false
     @State private var showQuickAdd = false
     @State private var showPhotoAnalyzer = false
@@ -41,29 +41,81 @@ struct FoodSearchView: View {
     /// reflected in the other so the user's "show only favorites" preference is global.
     @AppStorage("foodsView.showFavoritesOnly") private var showFavoritesOnly: Bool = false
 
+    /// Persistent user preference for Recents tab sort order. Defaults to most-recently-used
+    /// since that's what the tab is primarily for; alphabetical is the alternative for users who
+    /// scan by name.
+    @AppStorage("foodSearch.recentsSort") private var recentsSortRaw: String = RecentsSort.lastUsed.rawValue
+
     enum Tab: String, CaseIterable, Hashable {
-        case myFoods = "My Foods"
         case recents = "Recents"
-        case search = "Search"
+        case myFoods = "My Foods"
+    }
+
+    enum RecentsSort: String, CaseIterable, Hashable {
+        case lastUsed
+        case alphabetical
+
+        var displayName: String {
+            switch self {
+            case .lastUsed: return "Most Recent"
+            case .alphabetical: return "A–Z"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .lastUsed: return "clock"
+            case .alphabetical: return "textformat"
+            }
+        }
+    }
+
+    private var recentsSort: RecentsSort {
+        RecentsSort(rawValue: recentsSortRaw) ?? .lastUsed
+    }
+
+    /// Drives the search bar (always pinned in the nav-bar drawer). Mutating this also notifies
+    /// the view model so the API debounce kicks off.
+    private var searchBinding: Binding<String> {
+        Binding(
+            get: { viewModel?.query ?? "" },
+            set: { newValue in
+                viewModel?.query = newValue
+                viewModel?.queryChanged(newValue)
+            }
+        )
+    }
+
+    private var searchQuery: String {
+        viewModel?.query.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("Section", selection: $tab) {
-                    ForEach(Tab.allCases, id: \.self) { t in Text(t.rawValue).tag(t) }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
-                .padding(.top, 8)
+                actionTilesRow
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
 
-                if tab == .recents || tab == .myFoods {
+                // Picker + filter bar only matter when browsing — when a search query is
+                // active the bottom area becomes a single combined results list that doesn't
+                // belong to either tab, so we hide the chrome to keep the focus on results.
+                if searchQuery.isEmpty {
+                    Picker("Section", selection: $tab) {
+                        ForEach(Tab.allCases, id: \.self) { t in Text(t.rawValue).tag(t) }
+                    }
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+
                     filterBar
                         .padding(.vertical, 12)
                 }
 
                 tabContent
             }
+            .searchable(text: searchBinding, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search foods")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -86,6 +138,25 @@ struct FoodSearchView: View {
                         .foregroundStyle(.primary)
                     }
                     .accessibilityLabel("Change meal")
+                }
+                // Sort options only matter on Recents; My Foods has its own fixed
+                // favourites-first-then-alphabetical sort that the user doesn't override.
+                if tab == .recents && searchQuery.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Menu {
+                            Picker("Sort", selection: Binding(
+                                get: { recentsSort },
+                                set: { recentsSortRaw = $0.rawValue }
+                            )) {
+                                ForEach(RecentsSort.allCases, id: \.self) { option in
+                                    Label(option.displayName, systemImage: option.symbolName).tag(option)
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "arrow.up.arrow.down")
+                        }
+                        .accessibilityLabel("Sort Recents")
+                    }
                 }
             }
             .task {
@@ -142,49 +213,43 @@ struct FoodSearchView: View {
 
     @ViewBuilder
     private var tabContent: some View {
-        switch tab {
-        case .search: searchTab
-        case .recents: recentsTab
-        case .myFoods: myFoodsTab
+        if !searchQuery.isEmpty {
+            searchResultsContent(query: searchQuery)
+        } else {
+            switch tab {
+            case .recents: recentsTab
+            case .myFoods: myFoodsTab
+            }
         }
     }
 
-    private var searchTab: some View {
-        let binding = Binding<String>(
-            get: { viewModel?.query ?? "" },
-            set: { newValue in
-                viewModel?.query = newValue
-                viewModel?.queryChanged(newValue)
-            }
-        )
-        let query = viewModel?.query.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let cachedMatches = matchingCachedFoods(for: query)
-        let cachedIds = Set(cachedMatches.compactMap(\.externalId))
-        let apiResults = (viewModel?.results ?? []).filter { !cachedIds.contains($0.id) }
+    /// Combined search results — matched recents above matched My Foods (a food that lives in both
+    /// shows in Recents only), then USDA/OFF API hits. Action tiles live in the always-pinned
+    /// `actionTilesRow` above, so they're absent here.
+    private func searchResultsContent(query: String) -> some View {
+        let lower = query.lowercased()
+        let matched = cachedFoods.filter { cached in
+            cached.name.lowercased().contains(lower)
+                || (cached.brand?.lowercased().contains(lower) ?? false)
+        }
+
+        let recentsMatches = matched
+            .filter { $0.useCount > 0 }
+            .sorted { $0.lastUsed > $1.lastUsed }
+            .prefix(20)
+            .map { $0 }
+
+        let recentsIds = Set(recentsMatches.map(\.id))
+        let myFoodsMatches = matched
+            .filter { $0.isInMyFoods && !recentsIds.contains($0.id) }
+            .sorted(by: CachedFood.myFoodsSort)
+            .prefix(20)
+            .map { $0 }
+
+        let cachedExternalIds = Set((recentsMatches + myFoodsMatches).compactMap(\.externalId))
+        let apiResults = (viewModel?.results ?? []).filter { !cachedExternalIds.contains($0.id) }
 
         return List {
-            if query.isEmpty {
-                Section {
-                    HStack(spacing: 10) {
-                        quickActionTile(title: "Scan", systemImage: "barcode.viewfinder") {
-                            showScanner = true
-                        }
-                        quickActionTile(title: "Photo", systemImage: "camera.fill") {
-                            requestAI { showPhotoAnalyzer = true }
-                        }
-                        quickActionTile(title: "Describe", systemImage: "sparkles") {
-                            requestAI { showDescribe = true }
-                        }
-                        quickActionTile(title: "Manual", systemImage: "square.and.pencil") {
-                            quickAddBarcode = nil
-                            showQuickAdd = true
-                        }
-                    }
-                    .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
-                    .listRowSeparator(.hidden)
-                }
-            }
             if let vm = viewModel, vm.isSearching {
                 HStack { ProgressView(); Text("Searching foods…") }
                     .foregroundStyle(.secondary)
@@ -192,15 +257,22 @@ struct FoodSearchView: View {
             if let error = viewModel?.errorMessage {
                 Text(error).font(.footnote).foregroundStyle(.red)
             }
-            if !cachedMatches.isEmpty {
-                Section("Your foods") {
-                    ForEach(cachedMatches, id: \.id) { cached in
+            if !recentsMatches.isEmpty {
+                Section("Your Recents") {
+                    ForEach(recentsMatches, id: \.id) { cached in
                         cachedRow(cached)
                     }
                 }
             }
+            if !myFoodsMatches.isEmpty {
+                Section("Your Foods") {
+                    ForEach(myFoodsMatches, id: \.id) { cached in
+                        cachedRow(cached, forFavorites: cached.isFavorite)
+                    }
+                }
+            }
             if !apiResults.isEmpty {
-                Section(cachedMatches.isEmpty ? "" : "Food database") {
+                Section((recentsMatches.isEmpty && myFoodsMatches.isEmpty) ? "" : "Food database") {
                     ForEach(apiResults) { result in
                         Button {
                             portionTarget = result
@@ -212,7 +284,26 @@ struct FoodSearchView: View {
                 }
             }
         }
-        .searchable(text: binding, prompt: "Search foods")
+    }
+
+    /// Always-pinned row of one-tap shortcuts. Lives above the Recents/My Foods picker so it's
+    /// reachable regardless of which tab is showing or whether a search query is active.
+    private var actionTilesRow: some View {
+        HStack(spacing: 10) {
+            quickActionTile(title: "Scan", systemImage: "barcode.viewfinder") {
+                showScanner = true
+            }
+            quickActionTile(title: "Photo", systemImage: "camera.fill") {
+                requestAI { showPhotoAnalyzer = true }
+            }
+            quickActionTile(title: "Describe", systemImage: "sparkles") {
+                requestAI { showDescribe = true }
+            }
+            quickActionTile(title: "Manual", systemImage: "square.and.pencil") {
+                quickAddBarcode = nil
+                showQuickAdd = true
+            }
+        }
     }
 
     private func quickActionTile(title: String, systemImage: String, action: @escaping () -> Void) -> some View {
@@ -358,12 +449,17 @@ struct FoodSearchView: View {
     }
 
     private var recentFoods: [CachedFood] {
-        cachedFoods
+        let filtered = cachedFoods
             .filter { $0.useCount > 0 && (!showFavoritesOnly || $0.isFavorite) }
             .filter { matchesTagFilter($0) }
-            .sorted(by: { $0.lastUsed > $1.lastUsed })
-            .prefix(100)
-            .map { $0 }
+        let sorted: [CachedFood]
+        switch recentsSort {
+        case .lastUsed:
+            sorted = filtered.sorted { $0.lastUsed > $1.lastUsed }
+        case .alphabetical:
+            sorted = filtered.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+        return Array(sorted.prefix(100))
     }
 
     private func deleteRecentFoods(at offsets: IndexSet) {

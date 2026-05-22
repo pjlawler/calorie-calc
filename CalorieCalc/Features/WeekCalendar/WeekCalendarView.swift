@@ -13,6 +13,16 @@ struct WeekCalendarView: View {
     @State private var viewModel: WeekCalendarViewModel?
     @State private var selectedDate: Date?
     @State private var showSettings = false
+    @State private var showFavoriteQuickAdd = false
+
+    /// Favourite-bolted foods, hoisted up here from the inner body so the toolbar
+    /// can disable its bolt button when there are none. Same query as before; the
+    /// quick-add sheet renders these as a one-tap list.
+    @Query(
+        filter: #Predicate<CachedFood> { $0.isFavorite == true },
+        sort: [SortDescriptor(\CachedFood.lastUsed, order: .reverse)]
+    )
+    private var favoriteFoods: [CachedFood]
 
     private var currentPeriod: GoalPeriod? { GoalPeriod.current(in: goalPeriods) }
     private func period(for date: Date) -> GoalPeriod? {
@@ -34,6 +44,9 @@ struct WeekCalendarView: View {
                 .toolbar { toolbar }
                 .sheet(isPresented: $showSettings) {
                     SettingsView()
+                }
+                .sheet(isPresented: $showFavoriteQuickAdd) {
+                    FavoriteQuickAddListSheet(favorites: favoriteFoods)
                 }
                 .task { await ensureBootstrap() }
         }
@@ -97,6 +110,20 @@ struct WeekCalendarView: View {
                 .accessibilityLabel("Next week")
             }
         }
+        // Subdued quick-add affordance — sits to the left of the gear. Intentionally a
+        // plain unfilled bolt (not the prominent badge it used to be in the body)
+        // because tapping it only surfaces favourited foods, which has confused users
+        // who expected a full add-food action. Disabled when there are no favourites
+        // so the button doesn't open an empty sheet.
+        ToolbarItem(placement: .topBarTrailing) {
+            Button {
+                showFavoriteQuickAdd = true
+            } label: {
+                Image(systemName: "bolt")
+            }
+            .disabled(favoriteFoods.isEmpty)
+            .accessibilityLabel("Quick add favourites")
+        }
         ToolbarItem(placement: .topBarTrailing) {
             Button {
                 showSettings = true
@@ -129,12 +156,6 @@ struct WeekCalendarView: View {
 }
 
 private struct WeekCalendarBody: View {
-    @Query(
-        filter: #Predicate<CachedFood> { $0.isFavorite == true },
-        sort: [SortDescriptor(\CachedFood.lastUsed, order: .reverse)]
-    )
-    private var favoriteFoods: [CachedFood]
-
     let period: GoalPeriod
     let currentPeriod: GoalPeriod
     let calculation: WeeklyCalculation
@@ -142,7 +163,6 @@ private struct WeekCalendarBody: View {
     @Binding var selectedDate: Date?
     let viewModel: WeekCalendarViewModel
 
-    @State private var showFavoriteQuickAdd = false
     /// Last `MathCardData` we computed against fully-loaded HealthKit burns. Carried over
     /// while a new week is fetching so the hero number can smoothly animate from the
     /// previous week's value to the new one instead of flashing through `—`.
@@ -157,22 +177,9 @@ private struct WeekCalendarBody: View {
         ScrollView {
             VStack(spacing: 12) {
                 Color.clear.frame(height: 0).id("top")
-                HStack(alignment: .center) {
-                    Text("CalorieCalc")
-                        .font(.largeTitle.bold())
-                    Spacer()
-                    Button {
-                        showFavoriteQuickAdd = true
-                    } label: {
-                        Label("Add", systemImage: "bolt.fill")
-                            .labelStyle(TitleAndIconLabelStyle())
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                    .disabled(favoriteFoods.isEmpty)
-                    .accessibilityLabel("Quick add")
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                Text("CalorieCalc")
+                    .font(.largeTitle.bold())
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(spacing: 8) {
                     DayCellHeader()
@@ -198,9 +205,6 @@ private struct WeekCalendarBody: View {
         // .refreshable needs the bounce to trigger, so without this the gesture
         // does nothing on short weeks.
         .scrollBounceBehavior(.always)
-        .sheet(isPresented: $showFavoriteQuickAdd) {
-            FavoriteQuickAddListSheet(favorites: favoriteFoods)
-        }
         .navigationDestination(item: $selectedDate) { date in
             let isToday = Calendar.current.isDateInToday(date)
             // Per-day plan, NOT the global bank-day goal: bonus days have a higher planned
@@ -418,7 +422,7 @@ private struct FavoriteQuickAddListSheet: View {
                     case .quickAdd:
                         quickAddList
                     case .manual:
-                        QuickAddForm(
+                        QuickMacroEntryForm(
                             mealType: selectedMeal,
                             date: normalizedSelectedDay(from: selectedDate),
                             onSaved: { dismiss() }
@@ -659,5 +663,115 @@ private struct WeekRangeLabel: View {
         let last = dates.last ?? date
         Text("\(first.formatted(.dateTime.month(.abbreviated).day())) – \(last.formatted(.dateTime.month(.abbreviated).day()))")
             .font(.subheadline.weight(.semibold))
+    }
+}
+
+/// Lightweight macro-only entry form used inside the Calc tab's Quick Add sheet.
+/// Unlike `QuickAddForm` this does NOT collect a name/brand/serving, does NOT create
+/// a `CachedFood`, and so does NOT appear in Recents or My Foods. Every entry from
+/// this form is logged as "Quick Add Entry" — a transient way to add macros to a meal
+/// when the user doesn't want to invent a name for the food.
+private struct QuickMacroEntryForm: View {
+    let mealType: MealType
+    let date: Date
+    let onSaved: () -> Void
+
+    @Environment(\.modelContext) private var modelContext
+    @Query private var dayLogs: [DayLog]
+
+    @State private var caloriesText: String = ""
+    @State private var proteinText: String = ""
+    @State private var carbsText: String = ""
+    @State private var fatText: String = ""
+    @State private var notesText: String = ""
+
+    private var calories: Double? { Double(caloriesText) }
+    private var canSave: Bool {
+        guard let cals = calories, cals > 0 else { return false }
+        return true
+    }
+
+    var body: some View {
+        Form {
+            Section("Nutrition") {
+                macroField(label: "Calories", text: $caloriesText, suffix: "kcal")
+                macroField(label: "Protein", text: $proteinText, suffix: "g")
+                macroField(label: "Carbs", text: $carbsText, suffix: "g")
+                macroField(label: "Fat", text: $fatText, suffix: "g")
+            }
+
+            Section("Notes") {
+                TextField("Add notes — what this was for, source, etc.", text: $notesText, axis: .vertical)
+                    .lineLimit(2...6)
+            }
+
+            Section {
+                Button {
+                    save()
+                } label: {
+                    Text("Add to \(mealType.displayName)")
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!canSave)
+            }
+        }
+    }
+
+    private func macroField(label: String, text: Binding<String>, suffix: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("0", text: text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .monospacedDigit()
+                .frame(maxWidth: 100)
+            Text(suffix)
+                .foregroundStyle(.secondary)
+                .frame(width: 36, alignment: .leading)
+        }
+    }
+
+    private func save() {
+        guard let cals = calories, cals > 0 else { return }
+        let trimmedNotes = notesText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let log = ensureDayLog()
+        let entry = FoodEntry(
+            name: "Quick Add Entry",
+            nativeUnit: "ea",
+            selectedUnit: "ea",
+            quantity: 1,
+            caloriesPerServing: cals,
+            proteinPerServing: Double(proteinText) ?? 0,
+            carbsPerServing: Double(carbsText) ?? 0,
+            fatPerServing: Double(fatText) ?? 0,
+            mealType: mealType,
+            source: .manual,
+            notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+            timestamp: defaultTimestamp(),
+            dayLog: log
+        )
+        modelContext.insert(entry)
+        try? modelContext.save()
+        onSaved()
+    }
+
+    private func ensureDayLog() -> DayLog {
+        if let existing = DayLog.preferredForDay(dayLogs, on: date) {
+            return existing
+        }
+        let new = DayLog(date: date)
+        modelContext.insert(new)
+        return new
+    }
+
+    private func defaultTimestamp() -> Date {
+        if Calendar.current.isDateInToday(date) {
+            return .now
+        }
+        return Calendar.current.date(bySettingHour: 12, minute: 0, second: 0, of: date) ?? date
     }
 }
