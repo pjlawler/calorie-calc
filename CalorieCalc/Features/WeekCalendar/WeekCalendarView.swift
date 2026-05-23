@@ -110,16 +110,15 @@ struct WeekCalendarView: View {
                 .accessibilityLabel("Next week")
             }
         }
-        // Subdued quick-add affordance — sits to the left of the gear. Intentionally a
-        // plain unfilled bolt (not the prominent badge it used to be in the body)
-        // because tapping it only surfaces favourited foods, which has confused users
-        // who expected a full add-food action. Disabled when there are no favourites
-        // so the button doesn't open an empty sheet.
+        // Orange filled bolt — same visual treatment as the favourite/My Staples bolt
+        // used everywhere else in the app, so the entry point reads as the same concept.
+        // Disabled when there are no favourites so the button doesn't open an empty sheet.
         ToolbarItem(placement: .topBarTrailing) {
             Button {
                 showFavoriteQuickAdd = true
             } label: {
-                Image(systemName: "bolt")
+                Image(systemName: "bolt.fill")
+                    .foregroundStyle(.orange)
             }
             .disabled(favoriteFoods.isEmpty)
             .accessibilityLabel("My Staples")

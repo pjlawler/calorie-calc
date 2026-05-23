@@ -115,12 +115,10 @@ struct InfoView: View {
                         iconTint: .orange,
                         body:
                         """
-                        My Staples is the fast lane. From the Calc tab, tap the ⚡ bolt in the top bar and you'll see:
+                        My Staples is the fast lane. From the Calc tab, tap the ⚡ bolt in the top bar and you'll see two tabs:
 
-                        • **Staples** — anything from My Foods that you marked with the ⚡ bolt. Use it for things you eat the same way every time — a protein bar, your usual coffee, a daily shake.
-                        • **Manual entry** — drop in just calories and macros for one-off things you don't want to save as a food.
-
-                        One tap to log; no searching required.
+                        • **My Staples** — anything from My Foods that you marked with the ⚡ bolt. Use it for things you eat the same way every time — a protein bar, your usual coffee, a daily shake. One tap logs it.
+                        • **Quick Add** — drop in just calories and macros for one-off things you don't want to save as a food. Logs as "Quick Add Entry" on the day and never shows up in Recents or My Foods.
                         """
                     )
 
@@ -142,18 +140,20 @@ struct InfoView: View {
                         icon: "plus.circle",
                         body:
                         """
-                        The Log button on the daily log opens a sheet with two areas:
+                        The Log button on the daily log opens an add sheet. The search bar lives at the top and stays put — type anything and the list switches to combined results from your Recents, your My Foods, and the USDA national database. Clear the search and you're back to your **Recents | My Foods** tabs (Recents is the default, sortable by most recent or alphabetical from the toolbar).
 
-                        • **My Foods + Recents** — pick from your saved list or things you've logged before. One tap, done.
-                        • **Search tab** — four ways to find anything else:
-                          • **Scan** a barcode (Open Food Facts).
-                          • **Photo** — AI estimates calories + macros from a picture.
-                          • **Describe** — type "Five Guys cheeseburger" and AI does the math.
-                          • **Manual entry** — type the numbers yourself when you already know them.
+                        Four action tiles stay pinned above the tabs:
+
+                        • **Scan** — barcode (Open Food Facts).
+                        • **Photo** — AI estimates calories + macros from a picture.
+                        • **Describe** — type "Five Guys cheeseburger" and AI does the math.
+                        • **Manual** — type the numbers yourself when you already know them.
+
+                        The meal selector in the nav bar decides where the item lands.
 
                         Photo and Describe send your input to Anthropic's Claude through our proxy — the app asks once before enabling AI features, and you can turn them off any time in Settings → Privacy.
 
-                        The meal selector at the top of the sheet decides where the item lands. The search bar at the bottom hunts across your foods, your recents, and the USDA national food database in one place.
+                        The Foods tab's **+** button has the same four shortcuts plus **Recipe Analyzer** — list out ingredients (manual or barcode lookup), AI returns the totals and suggested serving sizes, saved into My Foods so you can log it later like any other food.
 
                         For exercise, Apple Health pulls active-energy automatically once you authorize it. Add manual workouts for anything Health misses — gym session without the watch, gardening, whatever.
                         """
@@ -169,6 +169,10 @@ struct InfoView: View {
                         The weight chart includes a **trend line** — a regression fit through every weigh-in. Day-to-day weight bounces ±2 lbs on water alone, which makes it hard to tell if the plan is actually working. The trend line filters that noise so you can see the real slope and decide whether to tweak the plan.
 
                         Use **Include today** to drop today's partial data when it's pulling the short-range averages around — today's still-developing numbers can skew a 7- or 14-day day-avg hard. Flip it off, look at the settled history, then flip it back on for live tracking.
+
+                        Tap the **+** in the top-left to log a new weight. That sheet's History section has its own range picker (7/14/30/60/90/180 days, year, or All dates) — independent from this tab's range so you can scope your weight history without affecting the rest of Progress.
+
+                        Tap **Analyze** below the history rows for an AI summary of the period — what's trending, where the calorie variance is, suggestions to consider. Only the period's summary totals are sent to Claude; no individual food entries or weigh-ins.
 
                         This is where maintenance happens. Trend creeping up? Drop the net a little, give it two weeks, look again.
                         """
@@ -298,7 +302,9 @@ struct InfoView: View {
                         }
                     }
                 } else {
-                    Text(LocalizedStringKey(paragraph))
+                    // Run plain paragraphs through boltAwareText too so ⚡ characters
+                    // render as the orange SF Symbol instead of the OS's yellow emoji.
+                    boltAwareText(paragraph)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
@@ -324,18 +330,20 @@ struct InfoView: View {
         .padding(.leading, CGFloat(level) * 18)
     }
 
-    /// Replaces literal `⚡` characters with an inline orange SF Symbol bolt so the icon
-    /// in prose matches the favorite/Quick Add bolt elsewhere. The emoji is always
-    /// rendered yellow by the OS regardless of SwiftUI styling — the Image replacement
-    /// is the only way to actually color it. `bolt` is built as a `Text` (not a styled
-    /// `View`) so it interpolates cleanly into the outer `Text` without falling through
-    /// to the deprecated unlocalized-description path.
+    /// Replaces literal `⚡` characters with an inline orange filled SF Symbol bolt so
+    /// the prose icon matches the favourite/My Staples bolt used everywhere else.
+    /// The emoji is always rendered yellow by the OS regardless of SwiftUI styling —
+    /// the Image replacement is the only way to actually colour it.
     private func boltAwareText(_ raw: String) -> Text {
         guard raw.contains("⚡") else {
             return Text(LocalizedStringKey(raw))
         }
         let parts = raw.components(separatedBy: "⚡")
-        let bolt = Text("\(Image(systemName: "bolt.fill"))").foregroundStyle(.orange)
+        // Forcing .monochrome — without it, SF Symbol `bolt.fill` interpolated into
+        // a Text falls back to its multicolour rendering (yellow lightning), and
+        // .foregroundStyle(.orange) on the Text does nothing about it.
+        let boltImage = Image(systemName: "bolt.fill").symbolRenderingMode(.monochrome)
+        let bolt = Text("\(boltImage)").foregroundStyle(.orange)
         var result = Text(LocalizedStringKey(parts[0]))
         for part in parts.dropFirst() {
             result = Text("\(result)\(bolt)\(Text(LocalizedStringKey(part)))")
