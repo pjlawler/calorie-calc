@@ -353,20 +353,25 @@ struct FoodSearchView: View {
         List {
             ForEach(recentFoods, id: \.id) { cached in
                 cachedRow(cached, forFavorites: false)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
             .onDelete(perform: deleteRecentFoods)
         }
+        .listStyle(.plain)
     }
 
     /// Unified My Foods catalog. Favorites sort first, then alphabetical. The star icon on each
     /// row toggles `isFavorite`; a row in this list always has `isInMyFoods == true` already, so
-    /// starring/unstarring just adjusts the highlight + sort position.
+    /// starring/unstarring just adjusts the highlight + sort position. Plain-style list with
+    /// matching row insets so the look mirrors the main Foods tab.
     private var myFoodsTab: some View {
         List {
             ForEach(myFoods, id: \.id) { cached in
                 cachedRow(cached, forFavorites: cached.isFavorite)
+                    .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
         }
+        .listStyle(.plain)
     }
 
     private var myFoods: [CachedFood] {
@@ -405,7 +410,7 @@ struct FoodSearchView: View {
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only Quick Add")
+                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only My Staples")
 
                 ForEach(allTags) { tag in
                     Button {
@@ -569,7 +574,7 @@ struct CachedFoodRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(cached.isFavorite ? "Remove from Quick Add" : "Add to Quick Add")
+                .accessibilityLabel(cached.isFavorite ? "Remove from My Staples" : "Add to My Staples")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

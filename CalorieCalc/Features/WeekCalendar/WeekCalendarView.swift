@@ -122,7 +122,7 @@ struct WeekCalendarView: View {
                 Image(systemName: "bolt")
             }
             .disabled(favoriteFoods.isEmpty)
-            .accessibilityLabel("Quick add favourites")
+            .accessibilityLabel("My Staples")
         }
         ToolbarItem(placement: .topBarTrailing) {
             Button {
@@ -355,8 +355,8 @@ private struct FavoriteQuickAddListSheet: View {
     @State private var sheetTab: SheetTab = .quickAdd
 
     private enum SheetTab: String, CaseIterable, Hashable {
-        case quickAdd = "Quick Add"
-        case manual = "Manual Entry"
+        case quickAdd = "My Staples"
+        case manual = "Quick Add"
     }
 
     private var sortedFavorites: [CachedFood] {
@@ -430,11 +430,23 @@ private struct FavoriteQuickAddListSheet: View {
                     }
                 }
             }
-            .navigationTitle("Quick Add")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Close") { dismiss() }
+                }
+                // Custom principal title: bolt + "My Staples". `navigationTitle`
+                // can't render an SF Symbol inline, so we replace the title with
+                // a labelled HStack here.
+                ToolbarItem(placement: .principal) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "bolt.fill")
+                            .foregroundStyle(.orange)
+                        Text("My Staples")
+                            .font(.headline)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("My Staples")
                 }
             }
         }
@@ -478,7 +490,7 @@ private struct FavoriteQuickAddListSheet: View {
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("Search Quick Add", text: $searchText)
+                    TextField("Search My Staples", text: $searchText)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     if !searchText.isEmpty {
@@ -529,11 +541,11 @@ private struct FavoriteQuickAddListSheet: View {
                 }
             }
 
-            Section("Quick Add") {
+            Section("My Staples") {
                 if sortedFavorites.isEmpty {
                     Text(selectedTagIds.isEmpty
-                        ? "Nothing in Quick Add yet."
-                        : "Nothing in Quick Add matches the selected tags.")
+                        ? "Nothing in My Staples yet."
+                        : "Nothing in My Staples matches the selected tags.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(sortedFavorites, id: \.id) { favorite in
@@ -542,9 +554,10 @@ private struct FavoriteQuickAddListSheet: View {
                             dismiss()
                         } label: {
                             HStack(alignment: .firstTextBaseline) {
-                                VStack(alignment: .leading, spacing: 2) {
+                                VStack(alignment: .leading, spacing: 0) {
                                     Text(favorite.name)
-                                        .lineLimit(1)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.leading)
                                     HStack(spacing: 6) {
                                         if let brand = favorite.brand {
                                             Text(brand).lineLimit(1)
@@ -558,7 +571,7 @@ private struct FavoriteQuickAddListSheet: View {
                                 Text("\(CalorieFormatter.whole(favoriteCalories(favorite))) kcal")
                                     .font(.subheadline.monospacedDigit())
                             }
-                            .padding(.vertical, 2)
+                            .padding(.vertical, 4)
                         }
                         .buttonStyle(.plain)
                     }

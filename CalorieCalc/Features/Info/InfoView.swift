@@ -110,15 +110,15 @@ struct InfoView: View {
                     )
 
                     section(
-                        title: "Quick Add",
+                        title: "My Staples",
                         icon: "bolt.fill",
                         iconTint: .orange,
                         body:
                         """
-                        Quick Add is the fast lane. From the Calc tab, tap Quick Add and you'll see:
+                        My Staples is the fast lane. From the Calc tab, tap the ⚡ bolt in the top bar and you'll see:
 
-                        • **Quick items** — anything from My Foods that you marked with the ⚡ bolt. Use it for things you eat the same way every time — a protein bar, your usual coffee, a daily shake.
-                        • **Manual entry** — type a name, calories, and macros for one-off things you'd never bother saving.
+                        • **Staples** — anything from My Foods that you marked with the ⚡ bolt. Use it for things you eat the same way every time — a protein bar, your usual coffee, a daily shake.
+                        • **Manual entry** — drop in just calories and macros for one-off things you don't want to save as a food.
 
                         One tap to log; no searching required.
                         """
@@ -181,7 +181,7 @@ struct InfoView: View {
                         """
                         Save the things you eat regularly so you stop re-searching them every week.
 
-                        • Tap the ⚡ bolt on any food to mark it as **Quick Add**. Those surface for one-tap logging from the Calc tab.
+                        • Tap the ⚡ bolt on any food to mark it as a **Staple**. Those surface for one-tap logging from the Calc tab.
                         • Add **tags** to organize your list — make whatever categories work for you (Breakfast, Prep, Snacks, Treats) and assign them to your saved items.
                         • Filter the list by tag from the My Foods toolbar.
                         """

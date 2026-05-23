@@ -210,7 +210,7 @@ struct FoodsView: View {
                         .frame(width: 32, height: 32)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only Quick Add")
+                .accessibilityLabel(showFavoritesOnly ? "Show all foods" : "Show only My Staples")
 
                 ForEach(allTags) { tag in
                     Button {
@@ -267,7 +267,7 @@ struct FoodsView: View {
             return "No foods match the selected tags. Try removing one."
         }
         if showFavoritesOnly {
-            return "Nothing in Quick Add yet. Tap the bolt on a food to add it."
+            return "Nothing in My Staples yet. Tap the bolt on a food to add it."
         }
         return "No saved foods yet. Tap + to add one, or use the Save to My Foods button on a food you find via search."
     }

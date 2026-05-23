@@ -458,7 +458,7 @@ struct FoodPortionSheet: View {
                         Image(systemName: isFavorite ? "bolt.fill" : "bolt")
                             .foregroundStyle(isFavorite ? Color.orange : Color.secondary)
                     }
-                    .accessibilityLabel(isFavorite ? "Remove from Quick Add" : "Add to Quick Add")
+                    .accessibilityLabel(isFavorite ? "Remove from My Staples" : "Add to My Staples")
                 }
             }
             .onAppear { configureInitialState() }

@@ -15,7 +15,28 @@ struct WeightLogView: View {
     @State private var selectedUnit: WeightUnit = .pounds
     @State private var selectedDate: Date = .now
 
+    // History filter — independent of Progress's `progress.timeframe` so the two
+    // surfaces can scope to different ranges (you can view 90 days of weights
+    // while the Progress chart is still on 7 days). We reuse the existing
+    // ProgressTrendTimeframe enum but locally relabel `.custom` to "All dates"
+    // and treat it as "no filter — show every entry."
+    @AppStorage("weightLog.timeframe") private var timeframe: ProgressTrendTimeframe = .days30
+
     private var profile: UserProfile? { profiles.first }
+
+    private var filteredEntries: [WeightEntry] {
+        if timeframe == .custom { return entries }
+        let cal = Calendar.current
+        let today = cal.startOfDay(for: .now)
+        let days = timeframe.daysBack ?? 30
+        let start = cal.date(byAdding: .day, value: -(days - 1), to: today) ?? today
+        let endExclusive = cal.date(byAdding: .day, value: 1, to: today) ?? today
+        return entries.filter { $0.timestamp >= start && $0.timestamp < endExclusive }
+    }
+
+    private func timeframeLabel(_ tf: ProgressTrendTimeframe) -> String {
+        tf == .custom ? "All dates" : tf.displayName
+    }
 
     var body: some View {
         NavigationStack {
@@ -54,19 +75,32 @@ struct WeightLogView: View {
                     }
 
                     Section("History") {
-                        ForEach(entries) { entry in
-                            HStack {
-                                Text(entry.timestamp.formatted(.dateTime.month().day().year()))
-                                Spacer()
-                                Text(CalorieFormatter.weight(entry.weight(in: profile?.weightUnit ?? entry.unit), unit: profile?.weightUnit ?? entry.unit))
-                                    .monospacedDigit()
+                        Picker("Range", selection: $timeframe) {
+                            ForEach(ProgressTrendTimeframe.allCases) { tf in
+                                Text(timeframeLabel(tf)).tag(tf)
                             }
-                            .font(.subheadline)
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    modelContext.delete(entry)
-                                    try? modelContext.save()
-                                } label: { Label("Delete", systemImage: "trash") }
+                        }
+                        .pickerStyle(.menu)
+
+                        if filteredEntries.isEmpty {
+                            Text("No weights logged in this range.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(filteredEntries) { entry in
+                                HStack {
+                                    Text(entry.timestamp.formatted(.dateTime.month().day().year()))
+                                    Spacer()
+                                    Text(CalorieFormatter.weight(entry.weight(in: profile?.weightUnit ?? entry.unit), unit: profile?.weightUnit ?? entry.unit))
+                                        .monospacedDigit()
+                                }
+                                .font(.subheadline)
+                                .swipeActions {
+                                    Button(role: .destructive) {
+                                        modelContext.delete(entry)
+                                        try? modelContext.save()
+                                    } label: { Label("Delete", systemImage: "trash") }
+                                }
                             }
                         }
                     }
