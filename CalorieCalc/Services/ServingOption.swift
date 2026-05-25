@@ -131,6 +131,28 @@ nonisolated enum ServingMath {
         return quantity * perUnit
     }
 
+    /// Extracts a gram weight from a parenthetical in a serving description.
+    /// "1 cup (85g)" → 85, "2 cookies (32 g)" → 32, "1 bar (57g)" → 57. Returns
+    /// nil when no `(NNN g)` clause exists. Used to disambiguate APIs that report a
+    /// `serving_quantity` number without telling us whether it's grams or ml.
+    static func extractGramsFromParenthetical(_ description: String) -> Double? {
+        extractValueFromParenthetical(description, unitPattern: #"g(?:r(?:ams?)?)?\b"#)
+    }
+
+    /// Extracts a milliliter weight from a parenthetical. "1 fl oz (30ml)" → 30,
+    /// "8 fl oz (240 ml)" → 240. Same role as `extractGramsFromParenthetical`.
+    static func extractMillilitersFromParenthetical(_ description: String) -> Double? {
+        extractValueFromParenthetical(description, unitPattern: #"ml\b|milliliters?\b|millilitres?\b"#)
+    }
+
+    private static func extractValueFromParenthetical(_ description: String, unitPattern: String) -> Double? {
+        let pattern = "\\(\\s*(\\d+(?:[\\.,]\\d+)?)\\s*(?i:\(unitPattern))\\s*\\)"
+        guard let regex = try? Regex(pattern),
+              let match = description.firstMatch(of: regex),
+              let raw = match.output[1].substring else { return nil }
+        return Double(raw.replacingOccurrences(of: ",", with: "."))
+    }
+
     static func milliliters(forSelectedUnit unit: String, quantity: Double) -> Double? {
         guard let perUnit = millilitersPerVolumeUnit[unit] else { return nil }
         return quantity * perUnit

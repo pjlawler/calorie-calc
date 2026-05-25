@@ -84,6 +84,17 @@ final class OpenFoodFactsService: FoodDataSource, Sendable {
             guard decoded.status == 1, let product = decoded.product else {
                 return nil
             }
+            // OFF cheerfully returns status=1 for records that only contain a generic name
+            // and per-100g nutrients — no brand, no serving_size, no serving_quantity. These
+            // are essentially useless to the user, and USDA frequently has the same barcode
+            // with full brand + household serving data. Returning nil here lets the chained
+            // data source fall through to USDA instead of locking in OFF's stub record.
+            let hasServingInfo = (product.servingSize?.trimmingCharacters(in: .whitespaces).isEmpty == false)
+                || ((product.servingQuantity?.doubleValue ?? 0) > 0)
+            let hasBrand = (product.brands?.trimmingCharacters(in: .whitespaces).isEmpty == false)
+            if !hasServingInfo && !hasBrand {
+                return nil
+            }
             return product.toSearchResult(barcode: barcode)
         } catch is DecodingError {
             throw FoodDataSourceError.invalidResponse
@@ -126,14 +137,36 @@ private struct OFFProduct: Decodable {
     func toSearchResult(barcode: String) -> FoodSearchResult {
         let name = (productName?.isEmpty == false ? productName : nil) ?? "Scanned product"
         let quantity = servingQuantity?.doubleValue
-        // OFF stores `serving_quantity` as a plain number in g (solids) or ml (liquids), with the
-        // unit only disambiguated via the free-text `serving_size`. We look for an "ml"/"l" token
-        // there to decide which family the food belongs to; absent a hint we default to grams.
-        let isVolume = servingSize.map(Self.looksLikeVolume) ?? false
-        var servingMassGrams = isVolume ? nil : quantity
-        var servingMassMl = isVolume ? quantity : nil
+        let parsedServing = servingSize.flatMap(ServingMath.parseServingDescription)
+        let parsedToken = parsedServing.map { ServingMath.normalizeUnitToken($0.unit) }
+
+        // OFF stores `serving_quantity` as a plain number that's grams for solids and ml for
+        // liquids. There's no flag, so we triangulate:
+        //   1. A `(NNg)` or `(NNml)` parenthetical in `serving_size` is authoritative.
+        //   2. Otherwise: if the parsed primary unit is a strict liquid unit (ml/l/fl oz), quantity
+        //      is ml. If it's any other unit (cup/tbsp/tsp/bar/g), quantity is grams. The previous
+        //      "any volume word means volume" heuristic mis-classified "1 cup (40g)" as 40 ml.
+        let parenGrams = servingSize.flatMap(ServingMath.extractGramsFromParenthetical)
+        let parenMl = servingSize.flatMap(ServingMath.extractMillilitersFromParenthetical)
+        let pureLiquid = parsedToken.map { ["ml", "l", "fl oz"].contains($0) } ?? false
+
+        var servingMassGrams: Double? = parenGrams ?? (pureLiquid ? nil : quantity)
+        var servingMassMl: Double? = parenMl ?? {
+            if pureLiquid { return quantity }
+            // Compute volume from the parsed unit even when OFF omits it explicitly — "1 cup"
+            // (without parenthetical) → 236.588 ml so the picker can offer the volume family.
+            if let parsed = parsedServing, let token = parsedToken,
+               ServingMath.isVolumeUnit(token),
+               let mlPerUnit = ServingMath.millilitersPerVolumeUnit[token] {
+                return parsed.count * mlPerUnit
+            }
+            return nil
+        }()
+
+        // Last-resort fallback when the product has no serving info at all — OFF returns plenty
+        // of these. 100 g is the conventional "per nutrition label" basis.
         if servingMassGrams == nil && servingMassMl == nil {
-            if isVolume { servingMassMl = 100 } else { servingMassGrams = 100 }
+            if pureLiquid { servingMassMl = 100 } else { servingMassGrams = 100 }
         }
 
         let perServingBasis = servingMassGrams ?? servingMassMl
@@ -173,15 +206,42 @@ private struct OFFProduct: Decodable {
         var initialSelectedUnit: String = "ea"
         var initialSelectedQuantity: Double = 1
 
-        if let raw = servingSize,
-           let parsed = ServingMath.parseServingDescription(raw),
+        if let parsed = parsedServing,
            parsed.count > 0,
-           !parsed.unit.isEmpty {
-            let token = ServingMath.normalizeUnitToken(parsed.unit)
-            if !token.isEmpty && !ServingMath.isMeasurementUnit(token) {
+           let token = parsedToken,
+           !token.isEmpty {
+            // Mass-unit households ("57 g") collapse to loose-mass native; volume + countable
+            // households use the parsed unit as native. See USDA for the same shape — both
+            // services normalize household servings the same way so the portion sheet behaves
+            // identically regardless of which API answered the barcode.
+            if ServingMath.isMassUnit(token) {
+                let totalGrams = (ServingMath.gramsPerMassUnit[token] ?? 1) * parsed.count
+                let basis = (servingMassGrams ?? totalGrams)
+                nativeUnit = "g"
+                nativeUnitGrams = 1
+                caloriesPerNative = caloriesPerServing / basis
+                proteinPerNative = proteinPerServing / basis
+                carbsPerNative = carbsPerServing / basis
+                fatPerNative = fatPerServing / basis
+                satPerNative = satPerServing.map { $0 / basis }
+                transPerNative = transPerServing.map { $0 / basis }
+                monoPerNative = monoPerServing.map { $0 / basis }
+                polyPerNative = polyPerServing.map { $0 / basis }
+                cholPerNative = cholPerServing.map { $0 / basis }
+                sodiumPerNative = sodiumPerServing.map { $0 / basis }
+                fiberPerNative = fiberPerServing.map { $0 / basis }
+                sugarsPerNative = sugarsPerServing.map { $0 / basis }
+                addedSugarsPerNative = addedSugarsPerServing.map { $0 / basis }
+                initialSelectedUnit = token
+                initialSelectedQuantity = parsed.count
+            } else {
                 nativeUnit = token
                 if let g = servingMassGrams { nativeUnitGrams = g / parsed.count }
-                if let ml = servingMassMl { nativeUnitMilliliters = ml / parsed.count }
+                if ServingMath.isVolumeUnit(token) {
+                    nativeUnitMilliliters = ServingMath.millilitersPerVolumeUnit[token]
+                } else if let ml = servingMassMl {
+                    nativeUnitMilliliters = ml / parsed.count
+                }
                 caloriesPerNative = caloriesPerServing / parsed.count
                 proteinPerNative = proteinPerServing / parsed.count
                 carbsPerNative = carbsPerServing / parsed.count
@@ -268,23 +328,6 @@ private struct OFFProduct: Decodable {
         )
     }
 
-    /// True when the free-text serving description starts with a volume unit (ml, l, cl).
-    /// Only considers the first numeric+unit token; "1 cup (240 ml)" is treated as volume.
-    private static func looksLikeVolume(_ servingSize: String) -> Bool {
-        let lower = servingSize.lowercased()
-        // Grab the first unit token after a number. Handles "240 ml", "240ml", "1 L", "1l".
-        let pattern = #"(?i)\b\d+(?:\.\d+)?\s*(ml|milliliter|millilitre|cl|centiliter|centilitre|l\b|liter|litre|fl\s*oz|cup|tbsp|tablespoon|tsp|teaspoon|g\b|gram|kg|kilogram|oz|ounce)"#
-        guard let range = lower.range(of: pattern, options: .regularExpression) else {
-            return false
-        }
-        let token = lower[range]
-        let volumeMarkers = ["ml", "milliliter", "millilitre", "cl", "centiliter", "centilitre", "liter", "litre", "fl oz", "floz", "cup", "tbsp", "tablespoon", "tsp", "teaspoon"]
-        if volumeMarkers.contains(where: { token.contains($0) }) { return true }
-        // Bare `l` needs word-boundary care so "14 g" doesn't match "liter" etc. The regex already
-        // anchors `l\b`, but we still need to distinguish it from a stray letter in a mass unit.
-        if token.range(of: #"\b\d+(?:\.\d+)?\s*l\b"#, options: .regularExpression) != nil { return true }
-        return false
-    }
 }
 
 private struct OFFNutriments: Decodable {

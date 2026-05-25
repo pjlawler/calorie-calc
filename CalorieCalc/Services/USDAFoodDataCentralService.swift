@@ -152,12 +152,46 @@ private struct FDCFood: Decodable {
            parsed.count > 0,
            !parsed.unit.isEmpty {
             let token = ServingMath.normalizeUnitToken(parsed.unit)
-            if !token.isEmpty && !ServingMath.isMeasurementUnit(token) {
-                // Countable native unit. Servings nutrients are already per *household serving*,
-                // which equals `parsed.count` of native. Divide to get per-native.
+            // Three kinds of native unit derived from a household serving:
+            //  • Countable nouns ("bar", "cookie") — native = the noun; grams/ml carry over.
+            //  • Volume measurements ("cup", "tbsp") — native = the unit, and we populate BOTH
+            //    nativeUnitGrams (from USDA's gram-weighted serving) and nativeUnitMilliliters
+            //    (looked up from the volume table) so the picker offers mass and volume families
+            //    side by side.
+            //  • Mass measurements ("g", "oz") — collapse to loose-mass native ("g") since the
+            //    portion sheet's picker handles g/oz/lb conversion intrinsically.
+            if !token.isEmpty && ServingMath.isMassUnit(token) {
+                // Household is "57 g" / "2 oz" — treat as loose mass keyed to grams.
+                let totalGrams = (ServingMath.gramsPerMassUnit[token] ?? 1) * parsed.count
+                let basis = (servingMassGrams ?? totalGrams)
+                nativeUnit = "g"
+                nativeUnitGrams = 1
+                caloriesPerNative = calories / basis
+                proteinPerNative = protein / basis
+                carbsPerNative = carbs / basis
+                fatPerNative = fat / basis
+                satPerNative = saturated.map { $0 / basis }
+                transPerNative = trans.map { $0 / basis }
+                monoPerNative = mono.map { $0 / basis }
+                polyPerNative = poly.map { $0 / basis }
+                cholPerNative = cholesterol.map { $0 / basis }
+                sodiumPerNative = sodium.map { $0 / basis }
+                fiberPerNative = fiber.map { $0 / basis }
+                sugarsPerNative = sugars.map { $0 / basis }
+                addedSugarsPerNative = addedSugars.map { $0 / basis }
+                initialSelectedUnit = token
+                initialSelectedQuantity = parsed.count
+            } else if !token.isEmpty {
+                // Either a countable noun or a volume measurement — both use `token` as native and
+                // scale nutrients by parsed.count. For volume tokens we additionally seed the
+                // ml-per-native from the volume table so the picker shows volume siblings.
                 nativeUnit = token
                 if let g = servingMassGrams { nativeUnitGrams = g / parsed.count }
-                if let ml = servingMassMl { nativeUnitMilliliters = ml / parsed.count }
+                if ServingMath.isVolumeUnit(token) {
+                    nativeUnitMilliliters = ServingMath.millilitersPerVolumeUnit[token]
+                } else if let ml = servingMassMl {
+                    nativeUnitMilliliters = ml / parsed.count
+                }
                 caloriesPerNative = calories / parsed.count
                 proteinPerNative = protein / parsed.count
                 carbsPerNative = carbs / parsed.count

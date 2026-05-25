@@ -116,6 +116,10 @@ struct FoodDescribeSheet: View {
         var nativeUnitGrams: Double? = nil
         var nativeUnitMilliliters: Double? = nil
         var recipeNote: String? = nil
+        /// How many natives a "serving" (Claude's caloriesPerServing) represents. For a "2 Tbsp"
+        /// portion with native = "tbsp", a serving is 2 natives, so we divide per-serving values
+        /// by 2 to get per-tbsp. Defaults to 1 (per-serving == per-native).
+        var nativesPerServing: Double = 1
 
         if useEach || isRecipe {
             recipeNote = isRecipe ? portionRaw : nil
@@ -128,14 +132,16 @@ struct FoodDescribeSheet: View {
                 nativeUnit = token
                 if let grams = meal.servingGrams { nativeUnitGrams = grams / parsed.count }
             } else if ServingMath.isVolumeUnit(token),
-                      let grams = meal.servingGrams, grams > 0,
                       let mlPerUnit = ServingMath.millilitersPerVolumeUnit[token] {
-                // Packaged label-style portion ("2 Tbsp (32g)"): treat the whole label serving
-                // as 1 native "serving" and surface BOTH families in the picker by populating
-                // grams (mass siblings) and milliliters (volume siblings) for it.
-                nativeUnit = "serving"
-                nativeUnitGrams = grams
-                nativeUnitMilliliters = parsed.count * mlPerUnit
+                // Volume-measurement portion ("2 Tbsp") — use the measurement as native so the
+                // picker can show "1 tbsp" / "2 tbsp" / g / oz etc. Per-native nutrients come
+                // from dividing the AI's per-serving values by parsed.count.
+                nativeUnit = token
+                nativeUnitMilliliters = mlPerUnit
+                if let grams = meal.servingGrams, grams > 0 {
+                    nativeUnitGrams = grams / parsed.count
+                }
+                nativesPerServing = parsed.count
             }
         }
 
@@ -153,17 +159,26 @@ struct FoodDescribeSheet: View {
         ]
         let notes = noteParts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
 
-        // For loose-mass nativization, scale per-serving nutrients to per-gram.
-        let factor: Double = (nativeUnit == "g" && nativeUnitGrams == 1)
-            ? max(meal.servingGrams ?? 1, 1)
-            : 1
+        // Per-native divisor. For loose mass (native "g"), divide by the serving's gram weight
+        // so each gram gets the right per-gram value. For volume-measurement natives ("tbsp"),
+        // divide by the natives-per-serving count we resolved above. Countable natives stay 1.
+        let factor: Double = {
+            if nativeUnit == "g" && nativeUnitGrams == 1 {
+                return max(meal.servingGrams ?? 1, 1)
+            }
+            return max(nativesPerServing, 1)
+        }()
 
-        // Default the picker to the native (one label serving). If the AI returned an
-        // intake_amount — meaning the user explicitly named a quantity ("100g") or the photo
-        // shows a clear amount — open the picker on that unit/quantity instead, so the user
-        // sees what they asked for, not "1 serving".
+        // Default the picker to the AI's reported serving. For loose-mass natives that's the
+        // serving's gram weight; for volume-measurement natives ("tbsp") that's the
+        // nativesPerServing count (so "2 Tbsp" opens as "2 tbsp", matching the package label
+        // the AI quoted in the notes); for countable natives ("bar") that's 1.
         var initialUnit: String = (nativeUnit == "g") ? "g" : nativeUnit
-        var initialQty: Double = (nativeUnit == "g") ? (meal.servingGrams ?? 1) : 1
+        var initialQty: Double = {
+            if nativeUnit == "g" { return meal.servingGrams ?? 1 }
+            if nativesPerServing > 1 { return nativesPerServing }
+            return 1
+        }()
 
         if let intake = meal.intakeAmount,
            let parsed = ServingMath.parseServingDescription(intake),

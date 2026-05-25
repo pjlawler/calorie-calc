@@ -468,28 +468,36 @@ struct FoodPhotoSheet: View {
         let storedNotes: String? = notesText.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
 
         // Resolve native unit from the AI's portion text. Composite plates ("burger and fries")
-        // collapse to "ea". A clean "1 bar" / "1 burger" parses to its noun. Recognized grams
-        // become per-native grams.
-        let (nativeUnit, nativeUnitGrams) = resolveNative(
+        // collapse to "ea"; "1 bar" parses to its noun; "2 Tbsp" parses to its measurement unit
+        // with both gram + ml siblings populated.
+        let resolved = resolveNative(
             portion: trimmedPortion,
             useEach: useEach,
             recognizedGrams: recognizedServingGrams
         )
+        // The user's typed calories/macros are PER THE WHOLE SERVING the AI named (e.g., per
+        // 2 tbsp). Store per-native so unit conversions in the picker work; set quantity to
+        // match nativesPerServing so the displayed total still equals what the user typed.
+        let perNativeDivisor = max(resolved.nativesPerServing, 1)
+        let calsPerNative = cals / perNativeDivisor
+        let proteinPerNative = protein / perNativeDivisor
+        let carbsPerNative = carbs / perNativeDivisor
+        let fatPerNative = fat / perNativeDivisor
 
         if !addToMyFoods {
             let log = ensureDayLog()
             let entry = FoodEntry(
                 name: trimmedName,
                 brand: trimmedBrand,
-                nativeUnit: nativeUnit,
-                nativeUnitGrams: nativeUnitGrams,
-                nativeUnitMilliliters: nil,
-                selectedUnit: nativeUnit,
-                quantity: 1,
-                caloriesPerServing: cals,
-                proteinPerServing: protein,
-                carbsPerServing: carbs,
-                fatPerServing: fat,
+                nativeUnit: resolved.unit,
+                nativeUnitGrams: resolved.grams,
+                nativeUnitMilliliters: resolved.ml,
+                selectedUnit: resolved.unit,
+                quantity: perNativeDivisor,
+                caloriesPerServing: calsPerNative,
+                proteinPerServing: proteinPerNative,
+                carbsPerServing: carbsPerNative,
+                fatPerServing: fatPerNative,
                 mealType: mealType,
                 source: .photo,
                 externalId: externalId,
@@ -503,12 +511,13 @@ struct FoodPhotoSheet: View {
             externalId: externalId,
             name: trimmedName,
             brand: trimmedBrand,
-            nativeUnit: nativeUnit,
-            nativeUnitGrams: nativeUnitGrams,
-            calories: cals,
-            protein: protein,
-            carbs: carbs,
-            fat: fat,
+            nativeUnit: resolved.unit,
+            nativeUnitGrams: resolved.grams,
+            nativeUnitMilliliters: resolved.ml,
+            calories: calsPerNative,
+            protein: proteinPerNative,
+            carbs: carbsPerNative,
+            fat: fatPerNative,
             notes: storedNotes
         )
         try? modelContext.save()
@@ -516,24 +525,46 @@ struct FoodPhotoSheet: View {
         onLogged()
     }
 
-    /// Parse the AI's portion description ("1 bar", "1 burger") into a native unit token + per-
-    /// native gram weight. Falls back to "ea" for composite/recipe-style portions where no clean
-    /// unit noun is available.
-    private func resolveNative(portion: String, useEach: Bool, recognizedGrams: Double?) -> (String, Double?) {
+    /// Parse the AI's portion description ("1 bar", "2 Tbsp") into a native unit token + per-
+    /// native gram weight + (when the portion is a volume measurement) per-native ml + how
+    /// many natives equal the AI's reported per-serving values. Falls back to "ea" for
+    /// composite/recipe-style portions where no clean unit noun is available.
+    private struct ResolvedNative {
+        let unit: String
+        let grams: Double?
+        let ml: Double?
+        /// How many natives the AI's per-serving values represent. For "2 Tbsp" this is 2 —
+        /// the typed-into-the-form calories cover 2 tbsp, so per-native = typed / 2 and the
+        /// log quantity should be 2 so the displayed total matches what the user typed.
+        let nativesPerServing: Double
+    }
+
+    private func resolveNative(portion: String, useEach: Bool, recognizedGrams: Double?) -> ResolvedNative {
         if useEach || RecognizedMeal.looksLikeRecipeExplanation(portion) {
-            return ("ea", nil)
+            return ResolvedNative(unit: "ea", grams: nil, ml: nil, nativesPerServing: 1)
         }
         guard let parsed = ServingMath.parseServingDescription(portion),
               parsed.count > 0,
               !parsed.unit.isEmpty else {
-            return ("ea", nil)
+            return ResolvedNative(unit: "ea", grams: nil, ml: nil, nativesPerServing: 1)
         }
         let token = ServingMath.normalizeUnitToken(parsed.unit)
-        if token.isEmpty || ServingMath.isMeasurementUnit(token) {
-            return ("ea", nil)
+        if token.isEmpty {
+            return ResolvedNative(unit: "ea", grams: nil, ml: nil, nativesPerServing: 1)
         }
-        let perNative = recognizedGrams.map { $0 / parsed.count }
-        return (token, perNative)
+        if !ServingMath.isMeasurementUnit(token) {
+            // Countable noun like "1 bar" or "2 cookies".
+            let perNative = recognizedGrams.map { $0 / parsed.count }
+            return ResolvedNative(unit: token, grams: perNative, ml: nil, nativesPerServing: 1)
+        }
+        if ServingMath.isVolumeUnit(token), let mlPerUnit = ServingMath.millilitersPerVolumeUnit[token] {
+            // Volume measurement like "2 Tbsp" — use the measurement as native (mirrors
+            // the barcode path) and seed both gram + ml siblings on the picker.
+            let perNativeGrams = recognizedGrams.map { $0 / parsed.count }
+            return ResolvedNative(unit: token, grams: perNativeGrams, ml: mlPerUnit, nativesPerServing: parsed.count)
+        }
+        // Mass-unit measurement ("57 g"): collapse to loose-mass native.
+        return ResolvedNative(unit: "ea", grams: nil, ml: nil, nativesPerServing: 1)
     }
 
     private func upsertCached(
@@ -542,6 +573,7 @@ struct FoodPhotoSheet: View {
         brand: String?,
         nativeUnit: String,
         nativeUnitGrams: Double?,
+        nativeUnitMilliliters: Double?,
         calories: Double,
         protein: Double,
         carbs: Double,
@@ -561,7 +593,7 @@ struct FoodPhotoSheet: View {
                 brand: brand,
                 nativeUnit: nativeUnit,
                 nativeUnitGrams: nativeUnitGrams,
-                nativeUnitMilliliters: nil,
+                nativeUnitMilliliters: nativeUnitMilliliters,
                 lastSelectedUnit: nativeUnit,
                 lastSelectedQuantity: 1,
                 caloriesPerServing: calories,

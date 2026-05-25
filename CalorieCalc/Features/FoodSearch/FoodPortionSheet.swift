@@ -3,7 +3,10 @@ import SwiftData
 
 struct FoodPortionSheet: View {
 
-    let result: FoodSearchResult
+    /// Snapshot of the food as it was when the sheet was opened. Read it once; everything in
+    /// the view reads `result` (the computed property below) so user-applied overrides flow in
+    /// automatically.
+    let originalResult: FoodSearchResult
     let mealType: MealType
     let date: Date
     /// Set when the sheet is opened to edit an existing entry. `nil` on the create flow.
@@ -18,7 +21,7 @@ struct FoodPortionSheet: View {
     let onLogged: () -> Void
 
     init(result: FoodSearchResult, mealType: MealType, date: Date, editingEntry: FoodEntry? = nil, addToMyFoods: Bool = false, pickMealAndDate: Bool = false, onLogged: @escaping () -> Void) {
-        self.result = result
+        self.originalResult = result
         self.mealType = mealType
         self.date = date
         self.editingEntry = editingEntry
@@ -28,6 +31,18 @@ struct FoodPortionSheet: View {
         _selectedMealType = State(initialValue: mealType)
         _selectedDate = State(initialValue: date)
     }
+
+    /// User-applied edits to a fresh barcode/search result, before the entry is committed.
+    /// `nil` means "use originalResult as-is." Populated by `EditFreshNutritionSheet` so the
+    /// rest of the portion sheet (display + save) doesn't need to know whether the macros
+    /// came from the lookup or the user.
+    @State private var resultOverride: FoodSearchResult? = nil
+
+    /// The active result the rest of the view should read from. Pre-edit, this is just the
+    /// passed-in lookup; post-edit, it carries the user's overrides.
+    private var result: FoodSearchResult { resultOverride ?? originalResult }
+
+    @State private var showEditFreshNutrition: Bool = false
 
     /// Convenience for opening the sheet on an existing `FoodEntry` — reconstructs a
     /// `FoodSearchResult` from the stored per-native fields so the UI can edit amounts.
@@ -343,6 +358,22 @@ struct FoodPortionSheet: View {
                     } footer: {
                         Text("Adjust the saved food's serving and macros. Already-logged entries are unchanged.")
                     }
+                } else if cachedFood == nil {
+                    // Fresh barcode / search result, not yet saved. Surface an edit step so the
+                    // user can refine macros + the grams-per-serving conversion before logging —
+                    // useful when the API's data doesn't match the package label.
+                    Section {
+                        Button {
+                            showEditFreshNutrition = true
+                        } label: {
+                            Label("Edit Nutrition", systemImage: "pencil")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                    } footer: {
+                        Text("Override the looked-up calories, macros, or grams-per-serving if they don't match the package label.")
+                    }
                 }
 
                 Section("Notes") {
@@ -441,6 +472,14 @@ struct FoodPortionSheet: View {
                         // Same staleness rule as the entry-edit path.
                         dismiss()
                     }
+                }
+            }
+            .sheet(isPresented: $showEditFreshNutrition) {
+                EditFreshNutritionSheet(result: result) { edited in
+                    // Cache the user's overrides. The computed `result` accessor returns this
+                    // instead of `originalResult` so display + save paths automatically pick up
+                    // the edits without any further plumbing.
+                    resultOverride = edited
                 }
             }
             .navigationTitle(navigationTitle)
@@ -819,3 +858,151 @@ private struct MacroBreakdownView: View {
     }
 }
 
+/// Lets the user refine an as-yet-unsaved barcode/search result before it's logged. Lives
+/// here (rather than in EditCachedFoodSheet) because there's no CachedFood yet — the sheet
+/// builds a new `FoodSearchResult` with the user's edits and hands it back via `onSave`.
+///
+/// Editable fields are intentionally minimal: per-native calories/protein/carbs/fat, plus
+/// the grams-per-native conversion when the food has one. Native unit, name, brand stay
+/// fixed — those changes belong in EditCachedFood once the food is saved.
+private struct EditFreshNutritionSheet: View {
+    let result: FoodSearchResult
+    let onSave: (FoodSearchResult) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var caloriesText: String = ""
+    @State private var proteinText: String = ""
+    @State private var carbsText: String = ""
+    @State private var fatText: String = ""
+    @State private var gramsPerNativeText: String = ""
+
+    private var nativeLabel: String {
+        // "Per cup", "Per bar", "Per gram" — matches how the user thinks about the food.
+        "Per \(result.nativeUnit)"
+    }
+
+    private var showsGramsField: Bool {
+        // Loose-mass foods (native = "g") don't need a grams-per-gram field; the conversion is
+        // trivial. Same for pure-each foods where grams are unknown by design.
+        result.nativeUnit != "g" && result.nativeUnitGrams != nil
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text(result.name)
+                        .font(.headline)
+                    if let brand = result.brand, !brand.isEmpty {
+                        Text(brand).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+
+                Section {
+                    macroField("Calories", text: $caloriesText, suffix: "kcal")
+                    macroField("Protein", text: $proteinText, suffix: "g")
+                    macroField("Carbs", text: $carbsText, suffix: "g")
+                    macroField("Fat", text: $fatText, suffix: "g")
+                } header: {
+                    Text(nativeLabel)
+                } footer: {
+                    Text("Edit these to match the package label if the lookup differs.")
+                }
+
+                if showsGramsField {
+                    Section {
+                        macroField("Grams per \(result.nativeUnit)", text: $gramsPerNativeText, suffix: "g")
+                    } header: {
+                        Text("Serving weight")
+                    } footer: {
+                        Text("How many grams a single \(result.nativeUnit) weighs. Changes how mass-unit conversions (g/oz/lb) work in the picker.")
+                    }
+                }
+
+                Section {
+                    Button {
+                        save()
+                    } label: {
+                        Text("Save")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                }
+            }
+            .navigationTitle("Edit Nutrition")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+            .task {
+                if caloriesText.isEmpty {
+                    caloriesText = formatNumber(result.caloriesPerServing)
+                    proteinText = formatNumber(result.proteinPerServing)
+                    carbsText = formatNumber(result.carbsPerServing)
+                    fatText = formatNumber(result.fatPerServing)
+                    if let g = result.nativeUnitGrams {
+                        gramsPerNativeText = formatNumber(g)
+                    }
+                }
+            }
+        }
+    }
+
+    private func macroField(_ label: String, text: Binding<String>, suffix: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("0", text: text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .monospacedDigit()
+                .frame(maxWidth: 100)
+            Text(suffix)
+                .foregroundStyle(.secondary)
+                .frame(width: 40, alignment: .leading)
+        }
+    }
+
+    private func save() {
+        let calories = Double(caloriesText) ?? result.caloriesPerServing
+        let protein = Double(proteinText) ?? result.proteinPerServing
+        let carbs = Double(carbsText) ?? result.carbsPerServing
+        let fat = Double(fatText) ?? result.fatPerServing
+        let gramsPerNative = showsGramsField ? Double(gramsPerNativeText) : nil
+
+        let edited = FoodSearchResult(
+            id: result.id,
+            name: result.name,
+            brand: result.brand,
+            nativeUnit: result.nativeUnit,
+            nativeUnitGrams: gramsPerNative ?? result.nativeUnitGrams,
+            nativeUnitMilliliters: result.nativeUnitMilliliters,
+            initialSelectedUnit: result.initialSelectedUnit,
+            initialSelectedQuantity: result.initialSelectedQuantity,
+            caloriesPerServing: calories,
+            proteinPerServing: protein,
+            carbsPerServing: carbs,
+            fatPerServing: fat,
+            // Preserve the optional micros from the original lookup — the user didn't edit them
+            // here, and dropping them would silently hide sodium/fiber/etc. info in the day log.
+            saturatedFatPerServing: result.saturatedFatPerServing,
+            transFatPerServing: result.transFatPerServing,
+            monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,
+            polyunsaturatedFatPerServing: result.polyunsaturatedFatPerServing,
+            cholesterolPerServing: result.cholesterolPerServing,
+            sodiumPerServing: result.sodiumPerServing,
+            fiberPerServing: result.fiberPerServing,
+            sugarsPerServing: result.sugarsPerServing,
+            addedSugarsPerServing: result.addedSugarsPerServing,
+            notes: result.notes,
+            source: result.source
+        )
+        onSave(edited)
+        dismiss()
+    }
+}
