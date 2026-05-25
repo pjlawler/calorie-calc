@@ -33,16 +33,25 @@ struct FoodPortionSheet: View {
     }
 
     /// User-applied edits to a fresh barcode/search result, before the entry is committed.
-    /// `nil` means "use originalResult as-is." Populated by `EditFreshNutritionSheet` so the
-    /// rest of the portion sheet (display + save) doesn't need to know whether the macros
-    /// came from the lookup or the user.
+    /// `nil` means "use originalResult as-is." Populated by inline macro edits in the
+    /// EditableMacroBreakdownView so the rest of the portion sheet (display + save) doesn't
+    /// need to know whether the macros came from the lookup or the user.
     @State private var resultOverride: FoodSearchResult? = nil
 
     /// The active result the rest of the view should read from. Pre-edit, this is just the
     /// passed-in lookup; post-edit, it carries the user's overrides.
     private var result: FoodSearchResult { resultOverride ?? originalResult }
 
-    @State private var showEditFreshNutrition: Bool = false
+    // Inline-editable macro fields for fresh search/barcode/AI results. Pre-fill from the
+    // looked-up values; updates flow back into `resultOverride` so the displayed totals
+    // (and the eventual saved entry) reflect what the user typed.
+    @State private var caloriesEditText: String = ""
+    @State private var proteinEditText: String = ""
+    @State private var carbsEditText: String = ""
+    @State private var fatEditText: String = ""
+    /// Set once when the sheet first appears, then again whenever the picker (unit /
+    /// quantity) changes, so the inline fields re-derive their displayed totals.
+    @State private var lastSyncedMultiplier: Double = -1
 
     /// Convenience for opening the sheet on an existing `FoodEntry` — reconstructs a
     /// `FoodSearchResult` from the stored per-native fields so the UI can edit amounts.
@@ -71,8 +80,9 @@ struct FoodPortionSheet: View {
     @State private var selectedMealType: MealType
     @State private var selectedDate: Date
     @State private var showTagPicker: Bool = false
-    @State private var showEditEntryNutrition: Bool = false
-    @State private var showEditCachedFoodNutrition: Bool = false
+    /// Off by default so accidental taps on the macro tiles don't replace looked-up values.
+    /// Toggled by an Edit/Done pill in the macro section header.
+    @State private var isEditingMacros: Bool = false
     // Per-native-unit nutrition values, editable via the "Per serving" section.
     // Initialised from `result.*PerServing` in `resolveDefaults`.
     /// Staged tag selections — populated from the existing CachedFood (if any) on
@@ -322,58 +332,31 @@ struct FoodPortionSheet: View {
                 }
 
                 Section {
-                    MacroBreakdownView(
-                        calories: result.caloriesPerServing * nativeUnitsConsumed,
-                        carbs: result.carbsPerServing * nativeUnitsConsumed,
-                        fat: result.fatPerServing * nativeUnitsConsumed,
-                        protein: result.proteinPerServing * nativeUnitsConsumed
+                    EditableMacroBreakdownView(
+                        calories: $caloriesEditText,
+                        carbs: $carbsEditText,
+                        fat: $fatEditText,
+                        protein: $proteinEditText,
+                        editable: isEditingMacros,
+                        onCommit: { kind, raw in commitMacroEdit(kind: kind, raw: raw) }
                     )
                     .listRowBackground(Color.clear)
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
-                }
-
-                if editingEntry != nil {
-                    Section {
+                } header: {
+                    HStack {
+                        Spacer()
                         Button {
-                            showEditEntryNutrition = true
+                            isEditingMacros.toggle()
                         } label: {
-                            Label("Edit Nutrition", systemImage: "pencil")
-                                .frame(maxWidth: .infinity)
+                            Text(isEditingMacros ? "Done" : "Edit")
+                                .textCase(nil)
+                                .font(.subheadline.weight(.semibold))
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-                    } footer: {
-                        Text("Adjust this log entry's serving and macros without changing other logs or your saved foods.")
                     }
-                } else if pickMealAndDate && cachedFood != nil {
-                    Section {
-                        Button {
-                            showEditCachedFoodNutrition = true
-                        } label: {
-                            Label("Edit Nutrition", systemImage: "pencil")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-                    } footer: {
-                        Text("Adjust the saved food's serving and macros. Already-logged entries are unchanged.")
-                    }
-                } else if cachedFood == nil {
-                    // Fresh barcode / search result, not yet saved. Surface an edit step so the
-                    // user can refine macros + the grams-per-serving conversion before logging —
-                    // useful when the API's data doesn't match the package label.
-                    Section {
-                        Button {
-                            showEditFreshNutrition = true
-                        } label: {
-                            Label("Edit Nutrition", systemImage: "pencil")
-                                .frame(maxWidth: .infinity)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-                    } footer: {
-                        Text("Override the looked-up calories, macros, or grams-per-serving if they don't match the package label.")
-                    }
+                } footer: {
+                    Text(isEditingMacros
+                        ? "Tap any value to override the looked-up numbers."
+                        : "Tap Edit to override the looked-up calories or macros.")
                 }
 
                 Section("Notes") {
@@ -456,32 +439,6 @@ struct FoodPortionSheet: View {
             .sheet(isPresented: $showTagPicker) {
                 TagPickerSheet(selectedIds: $stagedTagIds)
             }
-            .sheet(isPresented: $showEditEntryNutrition) {
-                if let entry = editingEntry {
-                    EditEntryFoodSheet(entry: entry) {
-                        // Portion sheet's `result` is a frozen snapshot — close it after the
-                        // modal saves so re-opening picks up the new identity rather than
-                        // showing stale macros.
-                        dismiss()
-                    }
-                }
-            }
-            .sheet(isPresented: $showEditCachedFoodNutrition) {
-                if let cached = cachedFood {
-                    EditCachedFoodSheet(food: cached) {
-                        // Same staleness rule as the entry-edit path.
-                        dismiss()
-                    }
-                }
-            }
-            .sheet(isPresented: $showEditFreshNutrition) {
-                EditFreshNutritionSheet(result: result) { edited in
-                    // Cache the user's overrides. The computed `result` accessor returns this
-                    // instead of `originalResult` so display + save paths automatically pick up
-                    // the edits without any further plumbing.
-                    resultOverride = edited
-                }
-            }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -501,6 +458,11 @@ struct FoodPortionSheet: View {
                 }
             }
             .onAppear { configureInitialState() }
+            // Resync the inline macro text fields whenever the picker changes (so the totals
+            // re-derive from per-native × new multiplier). The .task with two-tuple id ensures
+            // both edits flow through one trigger.
+            .onChange(of: selectedUnit, initial: true) { _, _ in syncMacroEditTextsToCurrentSelection() }
+            .onChange(of: amountText) { _, _ in syncMacroEditTextsToCurrentSelection() }
         }
     }
 
@@ -773,6 +735,166 @@ struct FoodPortionSheet: View {
             modelContext.delete(cached)
         }
     }
+
+    /// Refreshes the inline macro text fields with totals for the current picker selection.
+    /// Called on first appearance and whenever the user changes the unit or amount; uses
+    /// `result` (the override-applied result) so values the user typed earlier stay reflected
+    /// after a picker change. Calories render as whole numbers; protein/carbs/fat round to
+    /// the nearest 0.1 g.
+    private func syncMacroEditTextsToCurrentSelection() {
+        let mult = nativeUnitsConsumed
+        guard mult > 0 else { return }
+        caloriesEditText = formatCaloriesValue(result.caloriesPerServing * mult)
+        proteinEditText = formatMacroValue(result.proteinPerServing * mult)
+        carbsEditText = formatMacroValue(result.carbsPerServing * mult)
+        fatEditText = formatMacroValue(result.fatPerServing * mult)
+        lastSyncedMultiplier = mult
+    }
+
+    private func formatCaloriesValue(_ value: Double) -> String {
+        String(Int(value.rounded()))
+    }
+
+    private func formatMacroValue(_ value: Double) -> String {
+        // Round to 0.1; drop the trailing .0 so "10.0 g" reads as "10 g" but "10.5 g" stays.
+        let rounded = (value * 10).rounded() / 10
+        if rounded.truncatingRemainder(dividingBy: 1) == 0 {
+            return String(Int(rounded))
+        }
+        return String(format: "%.1f", rounded)
+    }
+
+    enum MacroKind { case calories, protein, carbs, fat }
+
+    /// Reads the user's typed value for one macro, converts back to per-native, and rebuilds
+    /// `resultOverride` so display + save automatically reflect the edit. Other macros stay
+    /// at whatever they were (either lookup or earlier override). Called on every keystroke;
+    /// silently ignores partial/invalid text so the user can type "1." without trouble.
+    private func commitMacroEdit(kind: MacroKind, raw: String) {
+        guard let parsed = Double(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
+        let mult = nativeUnitsConsumed
+        guard mult > 0 else { return }
+        let perNative = parsed / mult
+        let base = result
+        var newCal = base.caloriesPerServing
+        var newProt = base.proteinPerServing
+        var newCarb = base.carbsPerServing
+        var newFat = base.fatPerServing
+        switch kind {
+        case .calories: newCal = perNative
+        case .protein: newProt = perNative
+        case .carbs: newCarb = perNative
+        case .fat: newFat = perNative
+        }
+        // Skip writes that don't change anything — avoids feedback loops from the sync-on-
+        // picker-change path that also retypes into the bound state.
+        if newCal == base.caloriesPerServing
+            && newProt == base.proteinPerServing
+            && newCarb == base.carbsPerServing
+            && newFat == base.fatPerServing {
+            return
+        }
+        resultOverride = FoodSearchResult(
+            id: base.id,
+            name: base.name,
+            brand: base.brand,
+            nativeUnit: base.nativeUnit,
+            nativeUnitGrams: base.nativeUnitGrams,
+            nativeUnitMilliliters: base.nativeUnitMilliliters,
+            initialSelectedUnit: base.initialSelectedUnit,
+            initialSelectedQuantity: base.initialSelectedQuantity,
+            caloriesPerServing: newCal,
+            proteinPerServing: newProt,
+            carbsPerServing: newCarb,
+            fatPerServing: newFat,
+            saturatedFatPerServing: base.saturatedFatPerServing,
+            transFatPerServing: base.transFatPerServing,
+            monounsaturatedFatPerServing: base.monounsaturatedFatPerServing,
+            polyunsaturatedFatPerServing: base.polyunsaturatedFatPerServing,
+            cholesterolPerServing: base.cholesterolPerServing,
+            sodiumPerServing: base.sodiumPerServing,
+            fiberPerServing: base.fiberPerServing,
+            sugarsPerServing: base.sugarsPerServing,
+            addedSugarsPerServing: base.addedSugarsPerServing,
+            notes: base.notes,
+            source: base.source
+        )
+    }
+}
+
+/// Inline-editable replacement for `MacroBreakdownView`. Each tile is a tap-to-edit
+/// TextField styled to match the original's look (bold number + small unit + label +
+/// percentage). Parent owns the text state; `onCommit` fires on every keystroke so the
+/// portion sheet's MacroBreakdownView totals re-derive immediately.
+private struct EditableMacroBreakdownView: View {
+    @Binding var calories: String
+    @Binding var carbs: String
+    @Binding var fat: String
+    @Binding var protein: String
+    /// Off by default — the tiles render as plain Text so accidental taps don't trigger
+    /// the keypad. The parent flips this on when the user taps Edit in the section header.
+    let editable: Bool
+    let onCommit: (FoodPortionSheet.MacroKind, String) -> Void
+
+    private var caloriesValue: Double { Double(calories) ?? 0 }
+    private var proteinValue: Double { Double(protein) ?? 0 }
+    private var carbsValue: Double { Double(carbs) ?? 0 }
+    private var fatValue: Double { Double(fat) ?? 0 }
+
+    private var totalCalFromMacros: Double {
+        (carbsValue * 4) + (fatValue * 9) + (proteinValue * 4)
+    }
+
+    private func percent(_ calsFromMacro: Double) -> Int {
+        guard totalCalFromMacros > 0 else { return 0 }
+        return Int((calsFromMacro / totalCalFromMacros * 100).rounded())
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            tile(label: "Calories", text: $calories, unit: "kcal", subtitle: nil, tint: .accentColor, kind: .calories)
+            Divider().frame(height: 48)
+            tile(label: "Carbs", text: $carbs, unit: "g", subtitle: "\(percent(carbsValue * 4))%", tint: .teal, kind: .carbs)
+            Divider().frame(height: 48)
+            tile(label: "Fat", text: $fat, unit: "g", subtitle: "\(percent(fatValue * 9))%", tint: .purple, kind: .fat)
+            Divider().frame(height: 48)
+            tile(label: "Protein", text: $protein, unit: "g", subtitle: "\(percent(proteinValue * 4))%", tint: .orange, kind: .protein)
+        }
+    }
+
+    private func tile(label: String, text: Binding<String>, unit: String, subtitle: String?, tint: Color, kind: FoodPortionSheet.MacroKind) -> some View {
+        VStack(spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                if editable {
+                    // .fixedSize keeps the TextField width hugging its content so the unit
+                    // suffix doesn't end up several characters away from the number.
+                    TextField("0", text: text)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .font(.title3.weight(.bold).monospacedDigit())
+                        .fixedSize(horizontal: true, vertical: false)
+                        .foregroundStyle(.tint)
+                        .onChange(of: text.wrappedValue) { _, newValue in
+                            onCommit(kind, newValue)
+                        }
+                } else {
+                    Text(text.wrappedValue.isEmpty ? "0" : text.wrappedValue)
+                        .font(.title3.weight(.bold).monospacedDigit())
+                }
+                Text(unit)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(subtitle ?? " ")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(tint)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity)
+    }
 }
 
 extension FoodEntry {
@@ -858,151 +980,3 @@ private struct MacroBreakdownView: View {
     }
 }
 
-/// Lets the user refine an as-yet-unsaved barcode/search result before it's logged. Lives
-/// here (rather than in EditCachedFoodSheet) because there's no CachedFood yet — the sheet
-/// builds a new `FoodSearchResult` with the user's edits and hands it back via `onSave`.
-///
-/// Editable fields are intentionally minimal: per-native calories/protein/carbs/fat, plus
-/// the grams-per-native conversion when the food has one. Native unit, name, brand stay
-/// fixed — those changes belong in EditCachedFood once the food is saved.
-private struct EditFreshNutritionSheet: View {
-    let result: FoodSearchResult
-    let onSave: (FoodSearchResult) -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    @State private var caloriesText: String = ""
-    @State private var proteinText: String = ""
-    @State private var carbsText: String = ""
-    @State private var fatText: String = ""
-    @State private var gramsPerNativeText: String = ""
-
-    private var nativeLabel: String {
-        // "Per cup", "Per bar", "Per gram" — matches how the user thinks about the food.
-        "Per \(result.nativeUnit)"
-    }
-
-    private var showsGramsField: Bool {
-        // Loose-mass foods (native = "g") don't need a grams-per-gram field; the conversion is
-        // trivial. Same for pure-each foods where grams are unknown by design.
-        result.nativeUnit != "g" && result.nativeUnitGrams != nil
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text(result.name)
-                        .font(.headline)
-                    if let brand = result.brand, !brand.isEmpty {
-                        Text(brand).font(.subheadline).foregroundStyle(.secondary)
-                    }
-                }
-
-                Section {
-                    macroField("Calories", text: $caloriesText, suffix: "kcal")
-                    macroField("Protein", text: $proteinText, suffix: "g")
-                    macroField("Carbs", text: $carbsText, suffix: "g")
-                    macroField("Fat", text: $fatText, suffix: "g")
-                } header: {
-                    Text(nativeLabel)
-                } footer: {
-                    Text("Edit these to match the package label if the lookup differs.")
-                }
-
-                if showsGramsField {
-                    Section {
-                        macroField("Grams per \(result.nativeUnit)", text: $gramsPerNativeText, suffix: "g")
-                    } header: {
-                        Text("Serving weight")
-                    } footer: {
-                        Text("How many grams a single \(result.nativeUnit) weighs. Changes how mass-unit conversions (g/oz/lb) work in the picker.")
-                    }
-                }
-
-                Section {
-                    Button {
-                        save()
-                    } label: {
-                        Text("Save")
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                }
-            }
-            .navigationTitle("Edit Nutrition")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
-            .task {
-                if caloriesText.isEmpty {
-                    caloriesText = formatNumber(result.caloriesPerServing)
-                    proteinText = formatNumber(result.proteinPerServing)
-                    carbsText = formatNumber(result.carbsPerServing)
-                    fatText = formatNumber(result.fatPerServing)
-                    if let g = result.nativeUnitGrams {
-                        gramsPerNativeText = formatNumber(g)
-                    }
-                }
-            }
-        }
-    }
-
-    private func macroField(_ label: String, text: Binding<String>, suffix: String) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField("0", text: text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .monospacedDigit()
-                .frame(maxWidth: 100)
-            Text(suffix)
-                .foregroundStyle(.secondary)
-                .frame(width: 40, alignment: .leading)
-        }
-    }
-
-    private func save() {
-        let calories = Double(caloriesText) ?? result.caloriesPerServing
-        let protein = Double(proteinText) ?? result.proteinPerServing
-        let carbs = Double(carbsText) ?? result.carbsPerServing
-        let fat = Double(fatText) ?? result.fatPerServing
-        let gramsPerNative = showsGramsField ? Double(gramsPerNativeText) : nil
-
-        let edited = FoodSearchResult(
-            id: result.id,
-            name: result.name,
-            brand: result.brand,
-            nativeUnit: result.nativeUnit,
-            nativeUnitGrams: gramsPerNative ?? result.nativeUnitGrams,
-            nativeUnitMilliliters: result.nativeUnitMilliliters,
-            initialSelectedUnit: result.initialSelectedUnit,
-            initialSelectedQuantity: result.initialSelectedQuantity,
-            caloriesPerServing: calories,
-            proteinPerServing: protein,
-            carbsPerServing: carbs,
-            fatPerServing: fat,
-            // Preserve the optional micros from the original lookup — the user didn't edit them
-            // here, and dropping them would silently hide sodium/fiber/etc. info in the day log.
-            saturatedFatPerServing: result.saturatedFatPerServing,
-            transFatPerServing: result.transFatPerServing,
-            monounsaturatedFatPerServing: result.monounsaturatedFatPerServing,
-            polyunsaturatedFatPerServing: result.polyunsaturatedFatPerServing,
-            cholesterolPerServing: result.cholesterolPerServing,
-            sodiumPerServing: result.sodiumPerServing,
-            fiberPerServing: result.fiberPerServing,
-            sugarsPerServing: result.sugarsPerServing,
-            addedSugarsPerServing: result.addedSugarsPerServing,
-            notes: result.notes,
-            source: result.source
-        )
-        onSave(edited)
-        dismiss()
-    }
-}

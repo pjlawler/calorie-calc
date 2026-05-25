@@ -172,27 +172,15 @@ struct FoodDescribeSheet: View {
         // Default the picker to the AI's reported serving. For loose-mass natives that's the
         // serving's gram weight; for volume-measurement natives ("tbsp") that's the
         // nativesPerServing count (so "2 Tbsp" opens as "2 tbsp", matching the package label
-        // the AI quoted in the notes); for countable natives ("bar") that's 1.
-        var initialUnit: String = (nativeUnit == "g") ? "g" : nativeUnit
-        var initialQty: Double = {
+        // the AI quoted in the notes); for countable natives ("bar") that's 1. Claude is now
+        // instructed to put the user's named quantity directly into `portion`, so we never
+        // need to do a separate "intake" overlay anymore.
+        let initialUnit: String = (nativeUnit == "g") ? "g" : nativeUnit
+        let initialQty: Double = {
             if nativeUnit == "g" { return meal.servingGrams ?? 1 }
             if nativesPerServing > 1 { return nativesPerServing }
             return 1
         }()
-
-        if let intake = meal.intakeAmount,
-           let parsed = ServingMath.parseServingDescription(intake),
-           parsed.count > 0,
-           !parsed.unit.isEmpty {
-            let token = ServingMath.normalizeUnitToken(parsed.unit)
-            let isPickerUnit = ServingMath.isMassUnit(token)
-                || ServingMath.isVolumeUnit(token)
-                || token == nativeUnit
-            if !token.isEmpty && isPickerUnit {
-                initialUnit = token
-                initialQty = parsed.count
-            }
-        }
 
         return FoodSearchResult(
             id: "ai:\(UUID().uuidString)",
