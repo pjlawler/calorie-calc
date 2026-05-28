@@ -223,9 +223,11 @@ struct FoodSearchView: View {
         }
     }
 
-    /// Combined search results — matched recents above matched My Foods (a food that lives in both
-    /// shows in Recents only), then USDA/OFF API hits. Action tiles live in the always-pinned
-    /// `actionTilesRow` above, so they're absent here.
+    /// Combined search results — matched recents above matched My Foods, then USDA/OFF API hits. A
+    /// food that's both recently logged and saved appears in both sections (each section is its own
+    /// category). Dedup happens *within* a section, so duplicate rows for the same food (same name +
+    /// brand captured through different sources) collapse to one. Action tiles live in the
+    /// always-pinned `actionTilesRow` above, so they're absent here.
     private func searchResultsContent(query: String) -> some View {
         let lower = query.lowercased()
         let matched = cachedFoods.filter { cached in
@@ -233,15 +235,12 @@ struct FoodSearchView: View {
                 || (cached.brand?.lowercased().contains(lower) ?? false)
         }
 
-        let recentsMatches = matched
-            .filter { $0.useCount > 0 }
+        let recentsMatches = dedupedByIdentity(matched.filter { $0.useCount > 0 })
             .sorted { $0.lastUsed > $1.lastUsed }
             .prefix(20)
             .map { $0 }
 
-        let recentsIds = Set(recentsMatches.map(\.id))
-        let myFoodsMatches = matched
-            .filter { $0.isInMyFoods && !recentsIds.contains($0.id) }
+        let myFoodsMatches = dedupedByIdentity(matched.filter { $0.isInMyFoods })
             .sorted(by: CachedFood.myFoodsSort)
             .prefix(20)
             .map { $0 }
@@ -328,6 +327,36 @@ struct FoodSearchView: View {
             )
         }
         .buttonStyle(.plain)
+    }
+
+    /// Collapses CachedFood rows that represent the same food (same name + brand, case-insensitive)
+    /// down to one best representative. The same physical food lands in multiple rows when it's
+    /// captured through different sources — a barcode scan, an AI estimate, and a manual entry each
+    /// get their own externalId, so id-based dedup can't merge them and the search list shows the
+    /// food twice. Preference order: favorite, then in My Foods, then most-logged, then most-recent,
+    /// so the curated row wins and its star state is preserved.
+    private func dedupedByIdentity(_ foods: [CachedFood]) -> [CachedFood] {
+        func key(_ f: CachedFood) -> String {
+            let name = f.name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let brand = (f.brand ?? "").lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            return name + "|" + brand
+        }
+        func isBetter(_ a: CachedFood, than b: CachedFood) -> Bool {
+            if a.isFavorite != b.isFavorite { return a.isFavorite }
+            if a.isInMyFoods != b.isInMyFoods { return a.isInMyFoods }
+            if a.useCount != b.useCount { return a.useCount > b.useCount }
+            return a.lastUsed > b.lastUsed
+        }
+        var best: [String: CachedFood] = [:]
+        for f in foods {
+            let k = key(f)
+            if let current = best[k] {
+                if isBetter(f, than: current) { best[k] = f }
+            } else {
+                best[k] = f
+            }
+        }
+        return Array(best.values)
     }
 
     /// Cached foods (recents + favorites) whose name or brand contains the query string.

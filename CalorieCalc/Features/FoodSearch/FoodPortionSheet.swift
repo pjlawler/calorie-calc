@@ -615,6 +615,25 @@ struct FoodPortionSheet: View {
             cached.notes = storedNotes
             cached.lastSelectedUnit = selectedUnit
             cached.lastSelectedQuantity = amount
+            // Persist inline macro edits — `result` carries the user's overrides, so write the
+            // full per-native nutrient set back to the saved food. Without this the edits are
+            // dropped and the row reopens with the looked-up numbers.
+            cached.nativeUnit = result.nativeUnit
+            cached.nativeUnitGrams = result.nativeUnitGrams
+            cached.nativeUnitMilliliters = result.nativeUnitMilliliters
+            cached.caloriesPerServing = result.caloriesPerServing
+            cached.proteinPerServing = result.proteinPerServing
+            cached.carbsPerServing = result.carbsPerServing
+            cached.fatPerServing = result.fatPerServing
+            cached.saturatedFatPerServing = result.saturatedFatPerServing
+            cached.transFatPerServing = result.transFatPerServing
+            cached.monounsaturatedFatPerServing = result.monounsaturatedFatPerServing
+            cached.polyunsaturatedFatPerServing = result.polyunsaturatedFatPerServing
+            cached.cholesterolPerServing = result.cholesterolPerServing
+            cached.sodiumPerServing = result.sodiumPerServing
+            cached.fiberPerServing = result.fiberPerServing
+            cached.sugarsPerServing = result.sugarsPerServing
+            cached.addedSugarsPerServing = result.addedSugarsPerServing
             try? modelContext.save()
         }
         dismiss()
