@@ -836,6 +836,12 @@ private struct EditableMacroBreakdownView: View {
     let editable: Bool
     let onCommit: (FoodPortionSheet.MacroKind, String) -> Void
 
+    /// Which field the user is actively typing in. Edits only commit for the focused field so
+    /// the parent's programmatic re-sync (it rewrites these bound strings whenever the amount or
+    /// unit changes) isn't mistaken for a user edit — that false commit would round-trip the
+    /// looked-up totals back through per-native math and clobber or revert the user's override.
+    @FocusState private var focusedField: FoodPortionSheet.MacroKind?
+
     private var caloriesValue: Double { Double(calories) ?? 0 }
     private var proteinValue: Double { Double(protein) ?? 0 }
     private var carbsValue: Double { Double(carbs) ?? 0 }
@@ -874,7 +880,13 @@ private struct EditableMacroBreakdownView: View {
                         .font(.title3.weight(.bold).monospacedDigit())
                         .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(.tint)
+                        .focused($focusedField, equals: kind)
                         .onChange(of: text.wrappedValue) { _, newValue in
+                            // Only a change to the focused field is a real user edit. The parent
+                            // re-syncs these bound strings on amount/unit changes; without this
+                            // guard those programmatic rewrites would commit as fake edits and
+                            // revert the user's override to the looked-up numbers.
+                            guard focusedField == kind else { return }
                             onCommit(kind, newValue)
                         }
                 } else {

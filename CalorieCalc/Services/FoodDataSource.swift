@@ -92,6 +92,23 @@ nonisolated struct FoodSearchResult: Sendable, Hashable, Identifiable {
 }
 
 extension FoodSearchResult {
+    /// Stable identity key for foods with no external-database id (AI estimates, photo
+    /// recognitions). Re-logging the same-named food reuses this key so it updates the existing
+    /// CachedFood/Recents row instead of minting a fresh UUID each time and stacking duplicates.
+    /// Name + brand are normalized (lowercased, whitespace-collapsed) so casing/spacing don't
+    /// split one food into separate rows.
+    static func localIdentityId(prefix: String, name: String, brand: String?) -> String {
+        func normalize(_ s: String) -> String {
+            s.lowercased()
+                .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let key = [normalize(name), brand.map(normalize) ?? ""]
+            .filter { !$0.isEmpty }
+            .joined(separator: "|")
+        return "\(prefix):\(key)"
+    }
+
     /// Search-row caption: "1 bar (57g)" / "100 g" / "1 ea". For countable natives we surface the
     /// implicit count of 1 to match labels users see in the wild ("1 bar"). For loose foods we
     /// show the initial-selected default so the row reads naturally ("100 g").

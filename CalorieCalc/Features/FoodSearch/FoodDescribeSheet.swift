@@ -183,7 +183,7 @@ struct FoodDescribeSheet: View {
         }()
 
         return FoodSearchResult(
-            id: "ai:\(UUID().uuidString)",
+            id: FoodSearchResult.localIdentityId(prefix: "ai", name: meal.name, brand: meal.brand),
             name: meal.name,
             brand: meal.brand,
             nativeUnit: nativeUnit,

@@ -414,7 +414,7 @@ struct FoodPhotoSheet: View {
         let protein = Double(proteinText) ?? 0
         let carbs = Double(carbsText) ?? 0
         let fat = Double(fatText) ?? 0
-        let externalId = "photo:\(UUID().uuidString)"
+        let externalId = FoodSearchResult.localIdentityId(prefix: "photo", name: trimmedName, brand: trimmedBrand)
         let storedNotes: String? = notesText.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
 
         // Resolve native unit from the AI's portion text. Composite plates ("burger and fries")
