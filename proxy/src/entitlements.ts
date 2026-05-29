@@ -19,6 +19,8 @@ export type StoredDevice = {
   subscriptionExpiresAt: number | null;
   originalTransactionId: string | null;
   grandfatheredAt: number | null;
+  rateLimitDay: string;
+  rateLimitCount: number;
 };
 
 export function parseDevice(raw: string): StoredDevice {
@@ -31,7 +33,26 @@ export function parseDevice(raw: string): StoredDevice {
     subscriptionExpiresAt: obj.subscriptionExpiresAt ?? null,
     originalTransactionId: obj.originalTransactionId ?? null,
     grandfatheredAt: obj.grandfatheredAt ?? null,
+    rateLimitDay: obj.rateLimitDay ?? "",
+    rateLimitCount: obj.rateLimitCount ?? 0,
   };
+}
+
+// Per-device daily request ceiling, stored on the device record itself so it costs
+// no extra KV op — the record is already read and written on every /v1/messages.
+// Resets when the UTC day rolls over. Mutates `d`; returns false when the limit is
+// already reached (caller still persists `d` to save the verified Attest counter).
+// Like the old KV counter, this is keyed by the App Attest device, so it resets on
+// reinstall — intentionally, since it's a per-device abuse ceiling, not the paywall.
+export function consumeDailyRequest(d: StoredDevice, dailyLimit: number, now: number): boolean {
+  const day = new Date(now).toISOString().slice(0, 10);
+  if (d.rateLimitDay !== day) {
+    d.rateLimitDay = day;
+    d.rateLimitCount = 0;
+  }
+  if (d.rateLimitCount >= dailyLimit) return false;
+  d.rateLimitCount += 1;
+  return true;
 }
 
 export function serializeDevice(d: StoredDevice): string {

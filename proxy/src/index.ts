@@ -9,6 +9,7 @@ import {
 } from "./applestore";
 import { b64decode, b64encode, concat } from "./crypto-utils";
 import {
+  consumeDailyRequest,
   grantInitialCreditsIfNeeded,
   hasEntitlement,
   isSubscriptionActive,
@@ -16,7 +17,6 @@ import {
   serializeDevice,
   type StoredDevice,
 } from "./entitlements";
-import { rateLimit } from "./ratelimit";
 
 type Env = {
   ANTHROPIC_API_KEY: string;
@@ -95,6 +95,8 @@ app.post("/v1/attest/register", async (c) => {
     subscriptionExpiresAt: null,
     originalTransactionId: null,
     grandfatheredAt: null,
+    rateLimitDay: "",
+    rateLimitCount: 0,
   };
   await c.env.DEVICES.put(`d:${keyId}`, serializeDevice(stored));
   return c.json({ deviceId: keyId });
@@ -417,10 +419,10 @@ app.post("/v1/messages", async (c) => {
   }
 
   // Abuse ceiling, not the paywall. Subscribers and credit users alike are bounded
-  // here so a compromised key can't run our Anthropic bill into the ground.
+  // here so a compromised key can't run our Anthropic bill into the ground. The count
+  // lives on the device record (persisted below), so this adds no extra KV write.
   const limit = parseInt(c.env.DAILY_REQUEST_LIMIT, 10) || 50;
-  const allowed = await rateLimit(c.env.RATE_LIMITS, deviceId, limit);
-  if (!allowed) {
+  if (!consumeDailyRequest(device, limit, now)) {
     device.counter = v.newCounter;
     await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
     return c.json({ error: "rate_limited" }, 429);
