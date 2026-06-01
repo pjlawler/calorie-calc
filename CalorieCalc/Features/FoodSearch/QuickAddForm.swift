@@ -1,16 +1,16 @@
 import SwiftUI
 import SwiftData
 
-/// Standalone sheet wrapper around `QuickAddForm` — wraps it in a nav stack with Cancel /
-/// contextual title so it presents cleanly from the Add-to-meal sheet's toolbar.
+/// Standalone sheet wrapper around `QuickAddForm` — wraps it in a nav stack with a
+/// contextual title. The leading Close/Cancel and the My Foods / staple toggles live on
+/// `QuickAddForm` itself so they can drive its save state.
 struct QuickAddSheet: View {
     let mealType: MealType
     let date: Date
     var scannedBarcode: String? = nil
     var addToMyFoods: Bool = false
+    var onMealChange: ((MealType) -> Void)? = nil
     let onSaved: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         NavigationStack {
@@ -19,15 +19,11 @@ struct QuickAddSheet: View {
                 date: date,
                 scannedBarcode: scannedBarcode,
                 addToMyFoods: addToMyFoods,
+                onMealChange: onMealChange,
                 onSaved: onSaved
             )
             .navigationTitle("Manual Entry")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Cancel") { dismiss() }
-                }
-            }
         }
     }
 }
@@ -38,11 +34,34 @@ struct QuickAddForm: View {
     let date: Date
     var scannedBarcode: String? = nil
     var addToMyFoods: Bool = false
+    /// Called when the user changes the meal in the in-sheet picker, so the presenting list
+    /// can carry that choice forward to the next item logged in the same session.
+    let onMealChange: ((MealType) -> Void)?
     let onSaved: () -> Void
 
+    init(mealType: MealType, date: Date, scannedBarcode: String? = nil, addToMyFoods: Bool = false, onMealChange: ((MealType) -> Void)? = nil, onSaved: @escaping () -> Void) {
+        self.mealType = mealType
+        self.date = date
+        self.scannedBarcode = scannedBarcode
+        self.addToMyFoods = addToMyFoods
+        self.onMealChange = onMealChange
+        self.onSaved = onSaved
+        _selectedMealType = State(initialValue: mealType)
+        // In the My Foods creation flow the food is meant to land in My Foods, so the
+        // fork toggle starts lit; in the log flow it starts off (saving is opt-in).
+        _stagedInMyFoods = State(initialValue: addToMyFoods)
+    }
+
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.dismiss) private var dismiss
     @Query private var dayLogs: [DayLog]
 
+    @State private var selectedMealType: MealType
+    /// Staged toggles for the toolbar (mirrors the portion sheet's My Foods + staple buttons).
+    /// The food doesn't exist until Save, so these are applied to the upserted CachedFood then
+    /// rather than persisted on tap. `stagedInMyFoods` is seeded from `addToMyFoods` in init.
+    @State private var stagedInMyFoods: Bool = false
+    @State private var stagedStaple: Bool = false
     @State private var name: String = ""
     @State private var brandText: String = ""
     @State private var caloriesText: String = ""
@@ -137,18 +156,79 @@ struct QuickAddForm: View {
                     .lineLimit(2...6)
             }
 
-            Section {
-                Button {
-                    save()
-                } label: {
-                    Text(addToMyFoods ? "Save to My Foods" : "Add to \(mealType.displayName)")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
+            if !addToMyFoods {
+                // Let the user retarget the meal before logging — mirrors the portion sheet.
+                Section("Add to") {
+                    Picker("Meal", selection: $selectedMealType) {
+                        ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
+                            Text(meal.displayName).tag(meal)
+                        }
+                    }
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(!canSave)
             }
+
+            // The log flow keeps an explicit CTA. The My Foods creation flow has no logging
+            // CTA — the fork toggle is the "save to My Foods" control and Close commits.
+            if !addToMyFoods {
+                Section {
+                    Button {
+                        save()
+                    } label: {
+                        Text("Log Item")
+                            .fontWeight(.semibold)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!canSave)
+                }
+            }
+        }
+        // Carry a manual meal change back to the presenting list so the next item logged
+        // in this session defaults to it instead of the time-of-day meal.
+        .onChange(of: selectedMealType) { _, newValue in onMealChange?(newValue) }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                // My Foods creation has no CTA, so Close commits the staged food; the log
+                // flow keeps a Cancel that just discards (the CTA does the logging).
+                Button(addToMyFoods ? "Close" : "Cancel") {
+                    if addToMyFoods { commitMyFoodAndDismiss() } else { dismiss() }
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    stagedInMyFoods.toggle()
+                    // A staple is by definition part of My Foods.
+                    if !stagedInMyFoods { stagedStaple = false }
+                } label: {
+                    Image(systemName: "fork.knife")
+                        .foregroundStyle(stagedInMyFoods ? Color.accentColor : Color.secondary)
+                }
+                .disabled(!canSave)
+                .accessibilityLabel(stagedInMyFoods ? "Remove from My Foods" : "Save to My Foods")
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    stagedStaple.toggle()
+                    // Favoriting auto-promotes to My Foods.
+                    if stagedStaple { stagedInMyFoods = true }
+                } label: {
+                    Image(systemName: stagedStaple ? "bolt.fill" : "bolt")
+                        .foregroundStyle(stagedStaple ? Color.orange : Color.secondary)
+                }
+                .disabled(!canSave)
+                .accessibilityLabel(stagedStaple ? "Remove from My Staples" : "Add to My Staples")
+            }
+        }
+    }
+
+    /// Close action for the My Foods creation flow: persist the food when it's valid and at
+    /// least one toggle is on, otherwise just dismiss without saving.
+    private func commitMyFoodAndDismiss() {
+        if canSave && (stagedInMyFoods || stagedStaple) {
+            save()   // calls onSaved() which dismisses the sheet
+        } else {
+            dismiss()
         }
     }
 
@@ -247,7 +327,7 @@ struct QuickAddForm: View {
                 proteinPerServing: proteinPerNative,
                 carbsPerServing: carbsPerNative,
                 fatPerServing: fatPerNative,
-                mealType: mealType,
+                mealType: selectedMealType,
                 source: entrySource,
                 externalId: externalId,
                 notes: storedNotes,
@@ -256,6 +336,9 @@ struct QuickAddForm: View {
             )
             modelContext.insert(entry)
         }
+        // Staple implies My Foods. The fork toggle (seeded on in the creation flow) drives
+        // whether the food lands in My Foods.
+        let resolvedInMyFoods = stagedInMyFoods || stagedStaple
         upsertCached(
             externalId: externalId,
             name: resolvedName,
@@ -270,7 +353,9 @@ struct QuickAddForm: View {
             carbsPerNative: carbsPerNative,
             fatPerNative: fatPerNative,
             notes: storedNotes,
-            source: entrySource
+            source: entrySource,
+            inMyFoods: resolvedInMyFoods,
+            isFavorite: stagedStaple
         )
         try? modelContext.save()
         onSaved()
@@ -292,7 +377,9 @@ struct QuickAddForm: View {
         carbsPerNative: Double,
         fatPerNative: Double,
         notes: String?,
-        source: FoodSource
+        source: FoodSource,
+        inMyFoods: Bool,
+        isFavorite: Bool
     ) {
         if let existing = cachedFoods.first(where: { $0.externalId == externalId }) {
             existing.lastUsed = .now
@@ -301,7 +388,14 @@ struct QuickAddForm: View {
             existing.brand = brand
             existing.lastSelectedUnit = initialSelectedUnit
             existing.lastSelectedQuantity = initialSelectedQuantity
-            if addToMyFoods { existing.isInMyFoods = true }
+            if inMyFoods { existing.isInMyFoods = true }
+            if isFavorite {
+                existing.isFavorite = true
+                if existing.favoriteSelectedUnit == nil {
+                    existing.favoriteSelectedUnit = initialSelectedUnit
+                    existing.favoriteSelectedQuantity = initialSelectedQuantity
+                }
+            }
             trimRecents(limit: 100)
             return
         }
@@ -319,10 +413,13 @@ struct QuickAddForm: View {
             carbsPerServing: carbsPerNative,
             fatPerServing: fatPerNative,
             source: source,
-            isInMyFoods: addToMyFoods,
+            isFavorite: isFavorite,
+            isInMyFoods: inMyFoods,
             lastUsed: .now,
             useCount: addToMyFoods ? 0 : 1,
-            notes: notes
+            notes: notes,
+            favoriteSelectedUnit: isFavorite ? initialSelectedUnit : nil,
+            favoriteSelectedQuantity: isFavorite ? initialSelectedQuantity : nil
         )
         modelContext.insert(cached)
         trimRecents(limit: 100)

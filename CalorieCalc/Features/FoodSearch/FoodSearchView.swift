@@ -37,9 +37,10 @@ struct FoodSearchView: View {
         _mealType = State(initialValue: initialMealType)
     }
 
-    /// Shared with the Foods tab via the same `@AppStorage` key — toggling in one place is
-    /// reflected in the other so the user's "show only favorites" preference is global.
-    @AppStorage("foodsView.showFavoritesOnly") private var showFavoritesOnly: Bool = false
+    /// Local to the log sheet so it resets to off every time the sheet opens — just like the
+    /// tag chips (`selectedTagIds`). The list therefore always opens unfiltered. (The Foods tab
+    /// keeps its own persistent `@AppStorage` preference; the two are intentionally independent.)
+    @State private var showFavoritesOnly: Bool = false
 
     /// Persistent user preference for Recents tab sort order. Defaults to most-recently-used
     /// since that's what the tab is primarily for; alphabetical is the alternative for users who
@@ -122,22 +123,9 @@ struct FoodSearchView: View {
                     Button("Done") { dismiss() }
                 }
                 ToolbarItem(placement: .principal) {
-                    Menu {
-                        Picker("Meal", selection: $mealType) {
-                            ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
-                                Label(meal.displayName, systemImage: meal.symbolName).tag(meal)
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("Add to \(mealType.displayName)")
-                                .font(.headline)
-                            Image(systemName: "chevron.down")
-                                .font(.footnote)
-                        }
+                    Text("Log Item")
+                        .font(.headline)
                         .foregroundStyle(.primary)
-                    }
-                    .accessibilityLabel("Change meal")
                 }
                 // Sort options only matter on Recents; My Foods has its own fixed
                 // favourites-first-then-alphabetical sort that the user doesn't override.
@@ -165,7 +153,7 @@ struct FoodSearchView: View {
                 }
             }
             .sheet(item: $portionTarget) { target in
-                FoodPortionSheet(result: target, mealType: mealType, date: date) { }
+                FoodPortionSheet(result: target, mealType: mealType, date: date, onMealChange: { mealType = $0 }) { }
             }
             .sheet(isPresented: $showScanner) {
                 BarcodeScannerView { code in
@@ -177,7 +165,8 @@ struct FoodSearchView: View {
                 QuickAddSheet(
                     mealType: mealType,
                     date: date,
-                    scannedBarcode: quickAddBarcode
+                    scannedBarcode: quickAddBarcode,
+                    onMealChange: { mealType = $0 }
                 ) {
                     showQuickAdd = false
                 }

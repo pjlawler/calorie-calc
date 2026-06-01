@@ -19,17 +19,25 @@ struct FoodPortionSheet: View {
     /// Done that persists field edits without logging. Used by the My Foods tap flow.
     let pickMealAndDate: Bool
     let onLogged: () -> Void
+    /// Called whenever the user changes the meal in the in-sheet picker, so the presenting
+    /// food list can carry that choice forward to the next food opened in the same session
+    /// (overriding the time-of-day default). `nil` for flows with no session to update.
+    let onMealChange: ((MealType) -> Void)?
 
-    init(result: FoodSearchResult, mealType: MealType, date: Date, editingEntry: FoodEntry? = nil, addToMyFoods: Bool = false, pickMealAndDate: Bool = false, onLogged: @escaping () -> Void) {
+    init(result: FoodSearchResult, mealType: MealType, date: Date, editingEntry: FoodEntry? = nil, addToMyFoods: Bool = false, pickMealAndDate: Bool = false, onMealChange: ((MealType) -> Void)? = nil, onLogged: @escaping () -> Void) {
         self.originalResult = result
         self.mealType = mealType
         self.date = date
         self.editingEntry = editingEntry
         self.addToMyFoods = addToMyFoods
         self.pickMealAndDate = pickMealAndDate
+        self.onMealChange = onMealChange
         self.onLogged = onLogged
         _selectedMealType = State(initialValue: mealType)
         _selectedDate = State(initialValue: date)
+        // New-food (My Foods) flow has no CTA — the fork toggle is the save control and
+        // starts lit since the intent is to add to My Foods. Committed on Close.
+        _stagedNewInMyFoods = State(initialValue: addToMyFoods)
     }
 
     /// User-applied edits to a fresh barcode/search result, before the entry is committed.
@@ -89,6 +97,11 @@ struct FoodPortionSheet: View {
     /// open, then mutated freely while the user picks. On save these get attached
     /// to the resulting CachedFood (whether updated or freshly created).
     @State private var stagedTagIds: Set<UUID> = []
+    /// Staged toggles for the new-food (My Foods) flow, where there's no CTA and the food
+    /// doesn't exist yet. The toolbar fork/bolt drive these and `save()` (run on Close)
+    /// applies them. The normal log flow uses the immediate `toggleMyFoods`/`toggleFavorite`.
+    @State private var stagedNewInMyFoods: Bool = false
+    @State private var stagedNewStaple: Bool = false
 
     @Query(sort: \FoodTag.name) private var allTags: [FoodTag]
 
@@ -191,6 +204,13 @@ struct FoodPortionSheet: View {
                 }
                 // The favorite preset captures macros at favorite-time — clearing it lets
                 // the next "open from Quick Add" scale from the fresh per-native values.
+                existing.favoriteSelectedUnit = nil
+                existing.favoriteSelectedQuantity = nil
+            } else {
+                // A staple is by definition part of My Foods, so removing the food from
+                // My Foods must also drop its staple status — otherwise we'd strand a
+                // lit bolt on a food that's no longer saved.
+                existing.isFavorite = false
                 existing.favoriteSelectedUnit = nil
                 existing.favoriteSelectedQuantity = nil
             }
@@ -373,29 +393,32 @@ struct FoodPortionSheet: View {
                         }
                         DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
                     }
+                } else if editingEntry == nil && !addToMyFoods {
+                    // Standard log flow: let the user retarget the meal before logging. The
+                    // selection is seeded from the time-of-day default (or the session's last
+                    // pick) and written back via `onMealChange` so the next food inherits it.
+                    Section("Add to") {
+                        Picker("Meal", selection: $selectedMealType) {
+                            ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
+                                Text(meal.displayName).tag(meal)
+                            }
+                        }
+                    }
                 }
 
-                Section {
-                    if !addToMyFoods && !pickMealAndDate {
-                        Button { toggleMyFoods() } label: {
-                            Label(
-                                isInMyFoods ? "Saved to My Foods" : "Save to My Foods",
-                                systemImage: isInMyFoods ? "checkmark" : "plus"
-                            )
-                            .frame(maxWidth: .infinity)
+                // The new-food (My Foods) flow has no logging CTA — the fork toggle saves and
+                // Close commits. Every other flow keeps its explicit save/log button.
+                if !addToMyFoods {
+                    Section {
+                        Button { save() } label: {
+                            Text(saveButtonLabel)
+                                .fontWeight(.semibold)
+                                .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(!isValid)
                     }
-
-                    Button { save() } label: {
-                        Text(saveButtonLabel)
-                            .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(!isValid)
                 }
 
                 // Tags work for both existing CachedFoods and fresh search results.
@@ -445,16 +468,49 @@ struct FoodPortionSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     if pickMealAndDate {
                         Button("Done") { saveEditsAndDismiss() }
+                    } else if addToMyFoods {
+                        Button("Close") { commitNewMyFoodAndDismiss() }
                     } else {
                         Button("Cancel") { dismiss() }
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button { toggleFavorite() } label: {
-                        Image(systemName: isFavorite ? "bolt.fill" : "bolt")
-                            .foregroundStyle(isFavorite ? Color.orange : Color.secondary)
+                    if addToMyFoods {
+                        // Staged fork toggle — applied by save() on Close.
+                        Button {
+                            stagedNewInMyFoods.toggle()
+                            if !stagedNewInMyFoods { stagedNewStaple = false }
+                        } label: {
+                            Image(systemName: "fork.knife")
+                                .foregroundStyle(stagedNewInMyFoods ? Color.accentColor : Color.secondary)
+                        }
+                        .accessibilityLabel(stagedNewInMyFoods ? "Remove from My Foods" : "Save to My Foods")
+                    } else if !pickMealAndDate {
+                        Button { toggleMyFoods() } label: {
+                            Image(systemName: "fork.knife")
+                                .foregroundStyle(isInMyFoods ? Color.accentColor : Color.secondary)
+                        }
+                        .accessibilityLabel(isInMyFoods ? "Remove from My Foods" : "Save to My Foods")
                     }
-                    .accessibilityLabel(isFavorite ? "Remove from My Staples" : "Add to My Staples")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    if addToMyFoods {
+                        // Staged staple toggle — applied by save() on Close.
+                        Button {
+                            stagedNewStaple.toggle()
+                            if stagedNewStaple { stagedNewInMyFoods = true }
+                        } label: {
+                            Image(systemName: stagedNewStaple ? "bolt.fill" : "bolt")
+                                .foregroundStyle(stagedNewStaple ? Color.orange : Color.secondary)
+                        }
+                        .accessibilityLabel(stagedNewStaple ? "Remove from My Staples" : "Add to My Staples")
+                    } else {
+                        Button { toggleFavorite() } label: {
+                            Image(systemName: isFavorite ? "bolt.fill" : "bolt")
+                                .foregroundStyle(isFavorite ? Color.orange : Color.secondary)
+                        }
+                        .accessibilityLabel(isFavorite ? "Remove from My Staples" : "Add to My Staples")
+                    }
                 }
             }
             .onAppear { configureInitialState() }
@@ -463,6 +519,9 @@ struct FoodPortionSheet: View {
             // both edits flow through one trigger.
             .onChange(of: selectedUnit, initial: true) { _, _ in syncMacroEditTextsToCurrentSelection() }
             .onChange(of: amountText) { _, _ in syncMacroEditTextsToCurrentSelection() }
+            // Carry a manual meal change back to the presenting list so the next food
+            // opened in this session defaults to it instead of the time-of-day meal.
+            .onChange(of: selectedMealType) { _, newValue in onMealChange?(newValue) }
         }
     }
 
@@ -470,7 +529,7 @@ struct FoodPortionSheet: View {
         if editingEntry != nil { return "Save" }
         if addToMyFoods { return "Save to My Foods" }
         if pickMealAndDate { return "Log Food Item" }
-        return "Add to \(selectedMealType.displayName)"
+        return "Log Item"
     }
 
     private var navigationTitle: String {
@@ -528,6 +587,16 @@ struct FoodPortionSheet: View {
         value.truncatingRemainder(dividingBy: 1) == 0
             ? String(Int(value))
             : value.formatted(.number.precision(.fractionLength(0...2)))
+    }
+
+    /// Close action for the new-food (My Foods) flow: persist when valid and a toggle is on,
+    /// otherwise dismiss without saving.
+    private func commitNewMyFoodAndDismiss() {
+        if isValid && (stagedNewInMyFoods || stagedNewStaple) {
+            save()   // upserts the cached food, then dismisses
+        } else {
+            dismiss()
+        }
     }
 
     private func save() {
@@ -691,6 +760,11 @@ struct FoodPortionSheet: View {
         // so tagged foods stop disappearing into the auto-trimmed Recents bucket. Monotonic:
         // un-tagging never un-saves.
         let promoteForTags = !resolvedTags.isEmpty
+        // New-food flow: the staged toolbar toggles drive My Foods / staple. Other flows
+        // leave these to the immediate toggleMyFoods/toggleFavorite (so resolve to false
+        // here — upsertCached only ever sets the flags true, never clears them).
+        let resolveStaple = addToMyFoods ? stagedNewStaple : false
+        let resolveMyFoods = (addToMyFoods ? (stagedNewInMyFoods || stagedNewStaple) : false) || promoteForTags
         if let existing = cachedFoods.first(where: { matches(food: $0, resultId: id) }) {
             existing.lastUsed = .now
             if !addToMyFoods { existing.useCount += 1 }
@@ -702,7 +776,14 @@ struct FoodPortionSheet: View {
             // Sync staged tags onto the existing food — assigning replaces the full
             // set, so tag removals stage-side propagate to the CachedFood too.
             existing.tags = resolvedTags
-            if addToMyFoods || promoteForTags { existing.isInMyFoods = true }
+            if resolveMyFoods { existing.isInMyFoods = true }
+            if resolveStaple {
+                existing.isFavorite = true
+                if existing.favoriteSelectedUnit == nil {
+                    existing.favoriteSelectedUnit = selectedUnit
+                    existing.favoriteSelectedQuantity = amount
+                }
+            }
             // Backfill externalId on legacy rows so subsequent saves can match by
             // externalId directly without needing the UUID fallback. One-shot heal.
             if existing.externalId == nil { existing.externalId = id }
@@ -730,10 +811,13 @@ struct FoodPortionSheet: View {
                 sugarsPerServing: result.sugarsPerServing,
                 addedSugarsPerServing: result.addedSugarsPerServing,
                 source: result.source,
-                isInMyFoods: addToMyFoods || promoteForTags,
+                isFavorite: resolveStaple,
+                isInMyFoods: resolveMyFoods,
                 lastUsed: .now,
                 useCount: addToMyFoods ? 0 : 1,
-                notes: notes
+                notes: notes,
+                favoriteSelectedUnit: resolveStaple ? selectedUnit : nil,
+                favoriteSelectedQuantity: resolveStaple ? amount : nil
             )
             modelContext.insert(cached)
             // Attach staged tags after insert so the inverse relationship lands cleanly.
