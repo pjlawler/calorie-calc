@@ -703,6 +703,12 @@ struct FoodPortionSheet: View {
             cached.fiberPerServing = result.fiberPerServing
             cached.sugarsPerServing = result.sugarsPerServing
             cached.addedSugarsPerServing = result.addedSugarsPerServing
+            // Persist staged tag edits — without this, tags picked in the My Foods tap
+            // flow are silently dropped on Done. Assigning the full set also propagates
+            // removals; attaching a tag promotes the food into My Foods (monotonic).
+            let resolvedTags = allTags.filter { stagedTagIds.contains($0.id) }
+            cached.tags = resolvedTags
+            if !resolvedTags.isEmpty { cached.isInMyFoods = true }
             try? modelContext.save()
         }
         dismiss()
