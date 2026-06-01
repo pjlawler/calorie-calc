@@ -12,7 +12,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         proxyBaseURL: URL,
         attest: AppAttestService,
         entitlements: EntitlementService? = nil,
-        model: String = "claude-sonnet-4-6",
+        model: String = "claude-opus-4-8",
         session: URLSession = .shared
     ) {
         self.attest = attest
