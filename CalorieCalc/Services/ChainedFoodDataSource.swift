@@ -20,15 +20,21 @@ final class ChainedFoodDataSource: FoodDataSource, Sendable {
         guard !tokens.isEmpty else { return [] }
 
         var lastError: Error?
+        var anySucceeded = false
         for source in searchSources {
             do {
                 let raw = try await source.search(query: query)
+                anySucceeded = true
                 let filtered = raw.filter { Self.matches($0, tokens: tokens) }
                 if !filtered.isEmpty { return filtered }
             } catch {
                 lastError = error
             }
         }
+        // If at least one source answered (even with zero matches after filtering), this is a
+        // genuine "no results" — surface the empty state, not a flaky source's error. Only throw
+        // when every source failed (a real outage / connectivity problem).
+        if anySucceeded { return [] }
         if let lastError { throw lastError }
         return []
     }

@@ -172,7 +172,9 @@ struct FoodSearchView: View {
                 }
             }
             .sheet(isPresented: $showPhotoAnalyzer) {
-                FoodPhotoSheet(mealType: mealType, date: date) { }
+                FoodPhotoSheet { result in
+                    portionTarget = result
+                }
             }
             .sheet(isPresented: $showDescribe) {
                 FoodDescribeSheet { result in
@@ -511,7 +513,7 @@ struct FoodSearchView: View {
     }
 }
 
-private struct FoodResultRow: View {
+struct FoodResultRow: View {
     let result: FoodSearchResult
 
     var body: some View {

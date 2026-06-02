@@ -132,6 +132,93 @@ extension RecognizedMeal {
         ]
         return nonSpecificSignals.contains(where: { combined.contains($0) })
     }
+
+    /// Bridges a recognized meal (photo recognition or text estimate) into the search-result
+    /// shape so the portion sheet can scale + log it like any USDA/OFF lookup. Centralizing
+    /// this keeps the photo and describe flows identical — including resolving countable units
+    /// with gram weights ("1 bar (52g)" → native "bar" @ 52g) and the loose-mass fallback.
+    func toSearchResult(userText: String?, source: FoodSource = .manual) -> FoodSearchResult {
+        let useEach = RecognizedMeal.shouldUseEachServing(
+            name: name,
+            portionDescription: portionDescription,
+            userText: userText
+        )
+        let portionRaw = portionDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isRecipe = RecognizedMeal.looksLikeRecipeExplanation(portionRaw)
+
+        var nativeUnit = "ea"
+        var nativeUnitGrams: Double? = nil
+        var nativeUnitMilliliters: Double? = nil
+        var recipeNote: String? = nil
+        var nativesPerServing: Double = 1
+
+        if useEach || isRecipe {
+            recipeNote = isRecipe ? portionRaw : nil
+        } else if let parsed = ServingMath.parseServingDescription(portionRaw),
+                  parsed.count > 0,
+                  !parsed.unit.isEmpty {
+            let token = ServingMath.normalizeUnitToken(parsed.unit)
+            if !token.isEmpty && !ServingMath.isMeasurementUnit(token) {
+                // Countable noun like "1 bar", "1 burger".
+                nativeUnit = token
+                if let grams = servingGrams { nativeUnitGrams = grams / parsed.count }
+            } else if ServingMath.isVolumeUnit(token),
+                      let mlPerUnit = ServingMath.millilitersPerVolumeUnit[token] {
+                // Volume-measurement portion ("2 Tbsp").
+                nativeUnit = token
+                nativeUnitMilliliters = mlPerUnit
+                if let grams = servingGrams, grams > 0 {
+                    nativeUnitGrams = grams / parsed.count
+                }
+                nativesPerServing = parsed.count
+            }
+        }
+
+        // Loose-mass fallback when AI gives grams but no countable unit and no volume anchor.
+        if nativeUnit == "ea", let grams = servingGrams, grams > 0 {
+            nativeUnit = "g"
+            nativeUnitGrams = 1
+        }
+
+        let noteParts: [String?] = [
+            recipeNote,
+            confidence.map { "AI estimate · \($0) confidence" },
+            notes
+        ]
+        let resolvedNotes = noteParts.compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n")
+
+        let factor: Double = {
+            if nativeUnit == "g" && nativeUnitGrams == 1 {
+                return max(servingGrams ?? 1, 1)
+            }
+            return max(nativesPerServing, 1)
+        }()
+
+        let initialUnit: String = (nativeUnit == "g") ? "g" : nativeUnit
+        let initialQty: Double = {
+            if nativeUnit == "g" { return servingGrams ?? 1 }
+            if nativesPerServing > 1 { return nativesPerServing }
+            return 1
+        }()
+
+        let idPrefix = (source == .photo) ? "photo" : "ai"
+        return FoodSearchResult(
+            id: FoodSearchResult.localIdentityId(prefix: idPrefix, name: name, brand: brand),
+            name: name,
+            brand: brand,
+            nativeUnit: nativeUnit,
+            nativeUnitGrams: nativeUnitGrams,
+            nativeUnitMilliliters: nativeUnitMilliliters,
+            initialSelectedUnit: initialUnit,
+            initialSelectedQuantity: initialQty,
+            caloriesPerServing: caloriesPerServing / factor,
+            proteinPerServing: proteinPerServing / factor,
+            carbsPerServing: carbsPerServing / factor,
+            fatPerServing: fatPerServing / factor,
+            notes: resolvedNotes.isEmpty ? nil : resolvedNotes,
+            source: source
+        )
+    }
 }
 
 nonisolated enum FoodRecognitionError: LocalizedError, Sendable {

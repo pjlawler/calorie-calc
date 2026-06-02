@@ -36,8 +36,12 @@ struct FoodsView: View {
     @State private var showDescribe = false
     @State private var showQuickAdd = false
     @State private var showRecipeBuilder = false
+    @State private var showDatabaseSearch = false
     @State private var quickAddBarcode: String?
     @State private var addLookupViewModel: FoodSearchViewModel?
+    /// Action picked in the Add Food options sheet, run once that sheet has fully dismissed so
+    /// the follow-up sheet (scanner, analyzer, search, etc.) can present without a conflict.
+    @State private var pendingAddAction: (() -> Void)?
 
     // First-use consent gate. When the user picks an AI-powered Add option without
     // prior consent, we stash the action and show the disclosure sheet first; on
@@ -110,16 +114,22 @@ struct FoodsView: View {
                         .accessibilityLabel("Settings")
                     }
                 }
-                .alert("Add Food", isPresented: $showAddOptions) {
-                    Button("Scan Barcode") { showScanner = true }
-                    Button("Photo") { requestAI { showPhotoAnalyzer = true } }
-                    Button("Describe with AI") { requestAI { showDescribe = true } }
-                    Button("Recipe Analyzer") { requestAI { showRecipeBuilder = true } }
-                    Button("Manual Entry") {
-                        quickAddBarcode = nil
-                        showQuickAdd = true
+                .sheet(isPresented: $showAddOptions, onDismiss: { runPendingAddAction() }) {
+                    AddFoodOptionsSheet(
+                        onScanBarcode: { selectAdd { showScanner = true } },
+                        onSearchDatabase: { selectAdd { showDatabaseSearch = true } },
+                        onAnalyzePhoto: { selectAdd { requestAI { showPhotoAnalyzer = true } } },
+                        onAnalyzeDescription: { selectAdd { requestAI { showDescribe = true } } },
+                        onCreateRecipe: { selectAdd { requestAI { showRecipeBuilder = true } } },
+                        onManualEntry: { selectAdd { quickAddBarcode = nil; showQuickAdd = true } }
+                    )
+                }
+                .sheet(isPresented: $showDatabaseSearch) {
+                    FoodDatabaseSearchSheet { result in
+                        // Route to the create-target sheet so it lands in the add-food portion
+                        // sheet (My Foods/staple toggles), same as the other Add Food flows.
+                        newFoodTarget = result
                     }
-                    Button("Cancel", role: .cancel) { }
                 }
                 .sheet(item: $portionTarget) { target in
                     FoodPortionSheet(
@@ -150,11 +160,11 @@ struct FoodsView: View {
                     }
                 }
                 .sheet(isPresented: $showPhotoAnalyzer) {
-                    FoodPhotoSheet(
-                        mealType: MealType.quickAddDefaultForCurrentTime(),
-                        date: Calendar.current.startOfDay(for: .now),
-                        addToMyFoods: true
-                    ) { }
+                    FoodPhotoSheet { result in
+                        // Route to the create-target sheet so it lands in the add-food portion
+                        // sheet (My Foods/staple toggles), same as Describe-with-AI.
+                        newFoodTarget = result
+                    }
                 }
                 .sheet(isPresented: $showDescribe) {
                     FoodDescribeSheet { result in
@@ -292,5 +302,60 @@ struct FoodsView: View {
             pendingAIAction = action
             showAIConsent = true
         }
+    }
+
+    /// Stash the chosen Add Food action and dismiss the options sheet; the action runs in the
+    /// sheet's `onDismiss` so the next sheet presents cleanly.
+    private func selectAdd(_ action: @escaping () -> Void) {
+        pendingAddAction = action
+        showAddOptions = false
+    }
+
+    private func runPendingAddAction() {
+        let action = pendingAddAction
+        pendingAddAction = nil
+        action?()
+    }
+}
+
+/// The Add Food chooser — replaces the old action-sheet alert. A close (X) sits at the top;
+/// each row triggers a flow on the Foods view.
+private struct AddFoodOptionsSheet: View {
+    let onScanBarcode: () -> Void
+    let onSearchDatabase: () -> Void
+    let onAnalyzePhoto: () -> Void
+    let onAnalyzeDescription: () -> Void
+    let onCreateRecipe: () -> Void
+    let onManualEntry: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                row("Scan Barcode", "barcode.viewfinder", onScanBarcode)
+                row("Search Food Database", "magnifyingglass", onSearchDatabase)
+                row("Analyze Photo", "camera", onAnalyzePhoto)
+                row("Analyze Description", "sparkles", onAnalyzeDescription)
+                row("Create Recipe", "list.bullet.rectangle", onCreateRecipe)
+                row("Manual Entry", "square.and.pencil", onManualEntry)
+            }
+            .navigationTitle("Add Food")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Close")
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func row(_ title: String, _ systemImage: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+        }
+        .buttonStyle(.plain)
     }
 }

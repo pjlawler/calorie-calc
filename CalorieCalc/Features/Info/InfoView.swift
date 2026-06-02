@@ -149,11 +149,11 @@ struct InfoView: View {
                         • **Describe** — type "Five Guys cheeseburger" and AI does the math.
                         • **Manual** — type the numbers yourself when you already know them.
 
-                        The meal selector in the nav bar decides where the item lands.
+                        Pick where the item lands from the meal selector on the item sheet, just above the **Log Item** button. It defaults to the right meal for the time of day and remembers your last pick while you keep adding. That same sheet has a ⚡ bolt to mark the food a Staple and a fork-and-knife to also save it into My Foods.
 
                         Photo and Describe send your input to Anthropic's Claude through our proxy — the app asks once before enabling AI features, and you can turn them off any time in Settings → Privacy.
 
-                        The Foods tab's **+** button has the same four shortcuts plus **Recipe Analyzer** — list out ingredients (manual or barcode lookup), AI returns the totals and suggested serving sizes, saved into My Foods so you can log it later like any other food.
+                        Want to build up your saved list directly? The Foods tab's **+** button has its own set of Add Food options — see **My Foods** below.
 
                         For exercise, Apple Health pulls active-energy automatically once you authorize it. Add manual workouts for anything Health misses — gym session without the watch, gardening, whatever.
                         """
@@ -185,7 +185,20 @@ struct InfoView: View {
                         """
                         Save the things you eat regularly so you stop re-searching them every week.
 
-                        • Tap the ⚡ bolt on any food to mark it as a **Staple**. Those surface for one-tap logging from the Calc tab.
+                        **Adding a food.** Tap **+** on the My Foods tab to open the Add Food sheet (close it any time with the ✕ at the top). It gives you every way to create one:
+
+                        • **Scan Barcode** — look it up from its barcode (Open Food Facts).
+                        • **Search Food Database** — search the USDA + Open Food Facts databases and pick a match.
+                        • **Analyze Photo** — snap or choose a photo and AI estimates the name, portion, and macros.
+                        • **Analyze Description** — type "Five Guys cheeseburger" and AI fills in the numbers.
+                        • **Create Recipe** — list the ingredients (typed or by barcode); AI returns the totals and a suggested serving size.
+                        • **Manual Entry** — type the name and numbers yourself.
+
+                        Each one opens an editable sheet — adjust anything, optionally tap the ⚡ bolt to make it a Staple, and tap **Close** to save it into My Foods. You can also save any food while you're logging it from the daily log: tap the fork-and-knife on its item sheet.
+
+                        **Organizing your list.**
+
+                        • Tap the ⚡ bolt on any food to mark it a **Staple** — those surface for one-tap logging from the Calc tab.
                         • Add **tags** to organize your list — make whatever categories work for you (Breakfast, Prep, Snacks, Treats) and assign them to your saved items.
                         • Filter the list by tag from the My Foods toolbar.
                         """
@@ -201,7 +214,7 @@ struct InfoView: View {
                         • **Target Daily Net** — your weekly goal ÷ 7. Lower to lose faster, raise to maintain.
                         • **Daily eating goal (regular days)** — calories eaten before exercise on a regular day.
                         • **Workout goal** — what you commit to burn on a regular day. Without it, the eating target eats too much of the weekly budget.
-                        • **Week split** — how many bank vs bonus days.
+                        • **Week split** — how many regular vs bonus days.
                         • **Week starts on** — so bonus days land at the end of *your* week.
 
                         Changes apply going forward only. Past weeks keep the goals that were active at the time, so the history stays honest about what you were aiming for then.

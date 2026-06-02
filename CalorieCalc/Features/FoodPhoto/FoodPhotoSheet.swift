@@ -1,22 +1,19 @@
 import SwiftUI
-import SwiftData
 import PhotosUI
 
 #if os(iOS)
 import UIKit
 #endif
 
+/// Photo-based food recognition. The user snaps/picks an image (optionally adds a hint), Claude
+/// recognizes the food, and the sheet hands the estimate back as a `FoodSearchResult` so the
+/// normal portion sheet handles portion tweaks, My Foods/staple toggles, and logging — keeping
+/// the photo flow identical to the Describe-with-AI flow.
 struct FoodPhotoSheet: View {
-    let mealType: MealType
-    let date: Date
-    var addToMyFoods: Bool = false
-    let onLogged: () -> Void
+    let onEstimated: (FoodSearchResult) -> Void
 
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.modelContext) private var modelContext
     @Environment(FoodRecognitionEnvironment.self) private var env
-    @Query private var dayLogs: [DayLog]
-    @Query private var cachedFoods: [CachedFood]
 
     @State private var stage: Stage = .pickSource
     @State private var image: UIImage?
@@ -25,26 +22,12 @@ struct FoodPhotoSheet: View {
     @State private var pickerItem: PhotosPickerItem?
     @State private var errorMessage: String?
     @State private var showPaywall: Bool = false
-
     @State private var showCameraPicker = false
-
-    // Editable recognized fields
-    @State private var nameText: String = ""
-    @State private var brandText: String = ""
-    @State private var portionText: String = ""
-    @State private var caloriesText: String = ""
-    @State private var proteinText: String = ""
-    @State private var carbsText: String = ""
-    @State private var fatText: String = ""
-    @State private var confidenceLabel: String?
-    @State private var notesText: String?
-    @State private var recognizedServingGrams: Double?
 
     enum Stage: Equatable {
         case pickSource
         case ready
         case analyzing
-        case result
     }
 
     var body: some View {
@@ -86,8 +69,6 @@ struct FoodPhotoSheet: View {
             readyView
         case .analyzing:
             analyzingView
-        case .result:
-            resultView
         }
     }
 
@@ -103,7 +84,7 @@ struct FoodPhotoSheet: View {
                 .font(.title3.weight(.semibold))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
-            Text("Claude will look at the photo and estimate the food name, portion, and macros. You can edit anything before logging.")
+            Text("Claude will look at the photo and estimate the food name, portion, and macros. You can review and edit before adding.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -220,97 +201,6 @@ struct FoodPhotoSheet: View {
         }
     }
 
-    // MARK: - Stage: result
-
-    private var resultView: some View {
-        Form {
-            if let image {
-                Section {
-                    Image(uiImage: image)
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxHeight: 180)
-                        .frame(maxWidth: .infinity)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .listRowInsets(EdgeInsets())
-                }
-            }
-
-            if confidenceLabel != nil || notesText != nil {
-                Section {
-                    if let confidenceLabel {
-                        HStack {
-                            Image(systemName: "info.circle")
-                                .foregroundStyle(.tint)
-                            Text("Claude's confidence: \(confidenceLabel)")
-                                .font(.footnote)
-                        }
-                    }
-                    if let notesText, !notesText.isEmpty {
-                        Text(notesText)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            Section {
-                TextField("Name", text: $nameText)
-                    .textInputAutocapitalization(.words)
-                TextField("Brand (optional)", text: $brandText)
-                    .textInputAutocapitalization(.words)
-                TextField("Portion", text: $portionText)
-            } footer: {
-                Text("Edit anything that looks off before logging.")
-            }
-
-            Section("Nutrition") {
-                field(label: "Calories", text: $caloriesText, suffix: "kcal")
-                field(label: "Protein", text: $proteinText, suffix: "g")
-                field(label: "Carbs", text: $carbsText, suffix: "g")
-                field(label: "Fat", text: $fatText, suffix: "g")
-            }
-
-            Section {
-                Button {
-                    save()
-                } label: {
-                    Label(
-                        addToMyFoods ? "Save to My Foods" : "Add to \(mealType.displayName)",
-                        systemImage: addToMyFoods ? "checkmark.circle.fill" : "plus.circle.fill"
-                    )
-                    .labelStyle(TitleAndIconLabelStyle())
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(Double(caloriesText) == nil || nameText.trimmingCharacters(in: .whitespaces).isEmpty)
-
-                Button("Analyze again") {
-                    stage = .ready
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity)
-            }
-        }
-    }
-
-    private func field(label: String, text: Binding<String>, suffix: String) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField("0", text: text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing)
-                .monospacedDigit()
-                .frame(maxWidth: 100)
-            Text(suffix)
-                .foregroundStyle(.secondary)
-                .frame(width: 36, alignment: .leading)
-        }
-    }
-
     // MARK: - Actions
 
     private func loadPickerItem(_ item: PhotosPickerItem) async {
@@ -345,22 +235,21 @@ struct FoodPhotoSheet: View {
         imageData = nil
         pickerItem = nil
         description = ""
-        recognizedServingGrams = nil
         errorMessage = nil
         stage = .pickSource
     }
 
     private func analyze() async {
         guard let imageData else { return }
+        let hint = description.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
         stage = .analyzing
         errorMessage = nil
         do {
-            let meal = try await env.service.recognize(
-                imageData: imageData,
-                hint: description.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty
-            )
-            prefill(from: meal)
-            stage = .result
+            let meal = try await env.service.recognize(imageData: imageData, hint: hint)
+            // Hand the estimate to the portion sheet — same path as Describe-with-AI — so serving
+            // units, gram weights, and the My Foods/staple toolbar all behave identically.
+            onEstimated(meal.toSearchResult(userText: hint, source: .photo))
+            dismiss()
         } catch FoodRecognitionError.outOfCredits {
             stage = .ready
             showPaywall = true
@@ -368,220 +257,6 @@ struct FoodPhotoSheet: View {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             stage = .ready
         }
-    }
-
-    private func prefill(from meal: RecognizedMeal) {
-        nameText = meal.name
-        brandText = meal.brand ?? ""
-        recognizedServingGrams = meal.servingGrams
-        confidenceLabel = meal.confidence.flatMap { $0.isEmpty ? nil : $0 }
-
-        // Claude now returns macros for exactly the portion it describes — if the user typed
-        // "100g of mac and cheese", portion="100g" and the macros below are for 100g. No
-        // intake-vs-canonical scaling needed.
-        caloriesText = String(Int(meal.caloriesPerServing.rounded()))
-        proteinText = String(format: "%.1f", meal.proteinPerServing)
-        carbsText = String(format: "%.1f", meal.carbsPerServing)
-        fatText = String(format: "%.1f", meal.fatPerServing)
-
-        // Recipe-like portions belong in Notes, not in the serving label — keep the serving
-        // generic so the row reads "1 serving" while the full description is preserved below.
-        let portionRaw = meal.portionDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        let aiCaveat = meal.notes.flatMap { $0.isEmpty ? nil : $0 }
-
-        if RecognizedMeal.looksLikeRecipeExplanation(portionRaw) {
-            portionText = "1 serving"
-            notesText = [portionRaw, aiCaveat].compactMap { $0 }.joined(separator: "\n")
-        } else {
-            portionText = portionRaw
-            notesText = aiCaveat
-        }
-    }
-
-    private func save() {
-        guard let cals = Double(caloriesText), cals > 0 else { return }
-        let trimmedName = nameText.trimmingCharacters(in: .whitespaces)
-        guard !trimmedName.isEmpty else { return }
-        let trimmedBrandRaw = brandText.trimmingCharacters(in: .whitespaces)
-        let trimmedBrand: String? = trimmedBrandRaw.isEmpty ? nil : trimmedBrandRaw
-        let trimmedPortion = portionText.trimmingCharacters(in: .whitespaces)
-        let useEach = RecognizedMeal.shouldUseEachServing(
-            name: trimmedName,
-            portionDescription: trimmedPortion,
-            userText: description
-        )
-
-        let protein = Double(proteinText) ?? 0
-        let carbs = Double(carbsText) ?? 0
-        let fat = Double(fatText) ?? 0
-        let externalId = FoodSearchResult.localIdentityId(prefix: "photo", name: trimmedName, brand: trimmedBrand)
-        let storedNotes: String? = notesText.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
-
-        // Resolve native unit from the AI's portion text. Composite plates ("burger and fries")
-        // collapse to "ea"; "1 bar" parses to its noun; "2 Tbsp" parses to its measurement unit
-        // with both gram + ml siblings populated.
-        let resolved = resolveNative(
-            portion: trimmedPortion,
-            useEach: useEach,
-            recognizedGrams: recognizedServingGrams
-        )
-        // The user's typed calories/macros are PER THE WHOLE SERVING the AI named (e.g., per
-        // 2 tbsp). Store per-native so unit conversions in the picker work; set quantity to
-        // match nativesPerServing so the displayed total still equals what the user typed.
-        let perNativeDivisor = max(resolved.nativesPerServing, 1)
-        let calsPerNative = cals / perNativeDivisor
-        let proteinPerNative = protein / perNativeDivisor
-        let carbsPerNative = carbs / perNativeDivisor
-        let fatPerNative = fat / perNativeDivisor
-
-        if !addToMyFoods {
-            let log = ensureDayLog()
-            let entry = FoodEntry(
-                name: trimmedName,
-                brand: trimmedBrand,
-                nativeUnit: resolved.unit,
-                nativeUnitGrams: resolved.grams,
-                nativeUnitMilliliters: resolved.ml,
-                selectedUnit: resolved.unit,
-                quantity: perNativeDivisor,
-                caloriesPerServing: calsPerNative,
-                proteinPerServing: proteinPerNative,
-                carbsPerServing: carbsPerNative,
-                fatPerServing: fatPerNative,
-                mealType: mealType,
-                source: .photo,
-                externalId: externalId,
-                notes: storedNotes,
-                timestamp: Date(),
-                dayLog: log
-            )
-            modelContext.insert(entry)
-        }
-        upsertCached(
-            externalId: externalId,
-            name: trimmedName,
-            brand: trimmedBrand,
-            nativeUnit: resolved.unit,
-            nativeUnitGrams: resolved.grams,
-            nativeUnitMilliliters: resolved.ml,
-            calories: calsPerNative,
-            protein: proteinPerNative,
-            carbs: carbsPerNative,
-            fat: fatPerNative,
-            notes: storedNotes
-        )
-        try? modelContext.save()
-        dismiss()
-        onLogged()
-    }
-
-    /// Parse the AI's portion description ("1 bar", "2 Tbsp") into a native unit token + per-
-    /// native gram weight + (when the portion is a volume measurement) per-native ml + how
-    /// many natives equal the AI's reported per-serving values. Falls back to "ea" for
-    /// composite/recipe-style portions where no clean unit noun is available.
-    private struct ResolvedNative {
-        let unit: String
-        let grams: Double?
-        let ml: Double?
-        /// How many natives the AI's per-serving values represent. For "2 Tbsp" this is 2 —
-        /// the typed-into-the-form calories cover 2 tbsp, so per-native = typed / 2 and the
-        /// log quantity should be 2 so the displayed total matches what the user typed.
-        let nativesPerServing: Double
-    }
-
-    private func resolveNative(portion: String, useEach: Bool, recognizedGrams: Double?) -> ResolvedNative {
-        if useEach || RecognizedMeal.looksLikeRecipeExplanation(portion) {
-            return ResolvedNative(unit: "ea", grams: nil, ml: nil, nativesPerServing: 1)
-        }
-        guard let parsed = ServingMath.parseServingDescription(portion),
-              parsed.count > 0,
-              !parsed.unit.isEmpty else {
-            return ResolvedNative(unit: "ea", grams: nil, ml: nil, nativesPerServing: 1)
-        }
-        let token = ServingMath.normalizeUnitToken(parsed.unit)
-        if token.isEmpty {
-            return ResolvedNative(unit: "ea", grams: nil, ml: nil, nativesPerServing: 1)
-        }
-        if !ServingMath.isMeasurementUnit(token) {
-            // Countable noun like "1 bar" or "2 cookies".
-            let perNative = recognizedGrams.map { $0 / parsed.count }
-            return ResolvedNative(unit: token, grams: perNative, ml: nil, nativesPerServing: 1)
-        }
-        if ServingMath.isVolumeUnit(token), let mlPerUnit = ServingMath.millilitersPerVolumeUnit[token] {
-            // Volume measurement like "2 Tbsp" — use the measurement as native (mirrors
-            // the barcode path) and seed both gram + ml siblings on the picker.
-            let perNativeGrams = recognizedGrams.map { $0 / parsed.count }
-            return ResolvedNative(unit: token, grams: perNativeGrams, ml: mlPerUnit, nativesPerServing: parsed.count)
-        }
-        // Mass-unit measurement ("57 g"): collapse to loose-mass native.
-        return ResolvedNative(unit: "ea", grams: nil, ml: nil, nativesPerServing: 1)
-    }
-
-    private func upsertCached(
-        externalId: String,
-        name: String,
-        brand: String?,
-        nativeUnit: String,
-        nativeUnitGrams: Double?,
-        nativeUnitMilliliters: Double?,
-        calories: Double,
-        protein: Double,
-        carbs: Double,
-        fat: Double,
-        notes: String?
-    ) {
-        if let existing = cachedFoods.first(where: { $0.externalId == externalId }) {
-            existing.lastUsed = .now
-            if !addToMyFoods { existing.useCount += 1 }
-            existing.lastSelectedUnit = nativeUnit
-            existing.lastSelectedQuantity = 1
-            if addToMyFoods { existing.isInMyFoods = true }
-        } else {
-            let cached = CachedFood(
-                externalId: externalId,
-                name: name,
-                brand: brand,
-                nativeUnit: nativeUnit,
-                nativeUnitGrams: nativeUnitGrams,
-                nativeUnitMilliliters: nativeUnitMilliliters,
-                lastSelectedUnit: nativeUnit,
-                lastSelectedQuantity: 1,
-                caloriesPerServing: calories,
-                proteinPerServing: protein,
-                carbsPerServing: carbs,
-                fatPerServing: fat,
-                source: .photo,
-                isInMyFoods: addToMyFoods,
-                lastUsed: .now,
-                useCount: addToMyFoods ? 0 : 1,
-                notes: notes
-            )
-            modelContext.insert(cached)
-        }
-        trimRecents(limit: 100)
-    }
-
-    private func trimRecents(limit: Int) {
-        let descriptor = FetchDescriptor<CachedFood>(
-            predicate: #Predicate<CachedFood> { $0.isFavorite == false && $0.isInMyFoods == false },
-            sortBy: [SortDescriptor(\.lastUsed, order: .reverse)]
-        )
-        guard let recentNonFavorites = try? modelContext.fetch(descriptor),
-              recentNonFavorites.count > limit else { return }
-
-        for cached in recentNonFavorites.dropFirst(limit) {
-            modelContext.delete(cached)
-        }
-    }
-
-    private func ensureDayLog() -> DayLog {
-        let day = Calendar.current.startOfDay(for: date)
-        if let existing = DayLog.preferredForDay(dayLogs, on: day) {
-            return existing
-        }
-        let new = DayLog(date: day)
-        modelContext.insert(new)
-        return new
     }
 }
 
