@@ -217,6 +217,107 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         }
     }
 
+    func importRecipe(images: [Data]) async throws -> ImportedRecipe {
+        guard !images.isEmpty else { throw FoodRecognitionError.noResult }
+
+        // Cap the image count to bound the request payload (multi-page scans / PDFs).
+        var content: [ContentBlock] = images.prefix(5).map { data in
+            .image(source: ImageSource(
+                type: "base64",
+                mediaType: "image/jpeg",
+                data: data.base64EncodedString()
+            ))
+        }
+        content.append(.text(buildImportRecipePrompt()))
+
+        let body = RequestBody(
+            model: model,
+            maxTokens: 2048,
+            messages: [Message(role: "user", content: content)],
+            tools: [importRecipeTool],
+            toolChoice: ToolChoice(type: "tool", name: "import_recipe")
+        )
+
+        let bodyData = try JSONEncoder().encode(body)
+
+        do {
+            let data = try await executeAuthedRequest(body: bodyData)
+            let decoded = try JSONDecoder().decode(ImportRecipeResponseBody.self, from: data)
+            guard let toolUse = decoded.content.first(where: { $0.type == "tool_use" }),
+                  let input = toolUse.input else {
+                throw FoodRecognitionError.noResult
+            }
+            let ingredients = (input.ingredients ?? [])
+                .compactMap { raw -> ImportedIngredient? in
+                    let name = raw.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !name.isEmpty else { return nil }
+                    let amount = (raw.amount ?? 0) > 0 ? raw.amount! : 1
+                    let unit = raw.unit.flatMap { $0.isEmpty ? nil : $0 } ?? "g"
+                    let brand = raw.brand.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : t }
+                    return ImportedIngredient(name: name, amount: amount, unit: unit, brand: brand)
+                }
+            guard !ingredients.isEmpty else { throw FoodRecognitionError.noResult }
+            return ImportedRecipe(
+                name: (input.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
+                ingredients: ingredients,
+                servingAmount: input.serving_amount.flatMap { $0 > 0 ? $0 : nil },
+                servingUnit: input.serving_unit.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : t },
+                notes: input.notes.flatMap { let t = $0.trimmingCharacters(in: .whitespacesAndNewlines); return t.isEmpty ? nil : t }
+            )
+        } catch is DecodingError {
+            throw FoodRecognitionError.invalidResponse
+        } catch let err as FoodRecognitionError {
+            throw err
+        } catch {
+            throw FoodRecognitionError.networkFailure(error.localizedDescription)
+        }
+    }
+
+    private func buildImportRecipePrompt() -> String {
+        """
+        The image(s) show a recipe — it may be a photo of a cookbook page, a handwritten card, a screenshot, or a scanned/printed document. Read it and transcribe the recipe so it can be analyzed for nutrition.
+
+        Extract:
+        • name — the recipe's title. If none is visible, infer a short descriptive name.
+        • ingredients — every ingredient listed, with its quantity. For each: name (the food, with any brand split into the brand field), amount (a number), and unit (g, oz, lb, kg, ml, l, cup, tbsp, tsp, fl oz, or a singular countable noun like egg, clove, slice). Convert fractions to decimals (½ → 0.5). If an ingredient has no stated amount, use amount 1 with a sensible unit. Do NOT invent ingredients that aren't in the recipe.
+        • serving_amount / serving_unit — only if the recipe states a yield ("makes 12 muffins", "serves 4"): e.g. 12 + "muffin", or 4 + "serving". Omit if not stated.
+        • notes — any short prep note worth keeping. Optional.
+
+        Transcribe only — do NOT estimate nutrition here. Submit via the import_recipe tool only.
+        """
+    }
+
+    private var importRecipeTool: Tool {
+        Tool(
+            name: "import_recipe",
+            description: "Submit a recipe transcribed from an image — name, ingredient list, and optional yield.",
+            inputSchema: Schema(
+                type: "object",
+                properties: [
+                    "name": Property(type: "string", description: "Recipe title (inferred if none is shown)"),
+                    "ingredients": Property(
+                        type: "array",
+                        description: "Every ingredient in the recipe with its quantity.",
+                        items: Property(
+                            type: "object",
+                            description: "One ingredient.",
+                            properties: [
+                                "name": Property(type: "string", description: "Ingredient name; split any brand into the brand field"),
+                                "amount": Property(type: "number", description: "Numeric quantity; fractions as decimals (0.5). Use 1 if not stated."),
+                                "unit": Property(type: "string", description: "Unit token: g, oz, lb, kg, ml, l, cup, tbsp, tsp, fl oz, or a singular countable noun (egg, clove, slice)"),
+                                "brand": Property(type: "string", description: "Brand if named; omit otherwise"),
+                            ]
+                        )
+                    ),
+                    "serving_amount": Property(type: "number", description: "Stated yield amount (12 for '12 muffins', 4 for 'serves 4'); omit if not stated"),
+                    "serving_unit": Property(type: "string", description: "Unit for serving_amount ('muffin', 'serving'); omit if not stated"),
+                    "notes": Property(type: "string", description: "Short prep note worth keeping; omit if none"),
+                ],
+                required: ["ingredients"]
+            )
+        )
+    }
+
     private func buildRecipePrompt(input: RecipeAnalysisInput) -> String {
         var lines: [String] = []
         let recipeName = input.recipeName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -563,4 +664,28 @@ private struct YieldOptionInput: Decodable {
     let amount: Double
     let unit: String
     let servings_in_recipe: Double
+}
+
+private struct ImportRecipeResponseBody: Decodable {
+    let content: [ImportRecipeResponseContent]
+}
+
+private struct ImportRecipeResponseContent: Decodable {
+    let type: String
+    let input: ImportRecipeToolInput?
+}
+
+private struct ImportRecipeToolInput: Decodable {
+    let name: String?
+    let ingredients: [ImportIngredientInput]?
+    let serving_amount: Double?
+    let serving_unit: String?
+    let notes: String?
+}
+
+private struct ImportIngredientInput: Decodable {
+    let name: String
+    let amount: Double?
+    let unit: String?
+    let brand: String?
 }

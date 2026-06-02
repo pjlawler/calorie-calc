@@ -1,5 +1,7 @@
 import SwiftUI
 import SwiftData
+import PhotosUI
+import UniformTypeIdentifiers
 
 /// Build a recipe from ingredients (manual entry or barcode scan), then ask Claude to estimate
 /// total recipe nutrition + suggested serving sizes. The user picks a serving size on the
@@ -37,6 +39,16 @@ struct RecipeBuilderSheet: View {
     @State private var showManualEntry = false
     @State private var showScanner = false
     @State private var manualPrefillBarcode: String?
+
+    // Recipe-import (photo / library / document scan / file) state. The AI transcribes the
+    // recipe into the build-stage fields for the user to review before analyzing.
+    @State private var showImportOptions = false
+    @State private var showImportCamera = false
+    @State private var showImportPhotoPicker = false
+    @State private var importPhotoItems: [PhotosPickerItem] = []
+    @State private var showDocumentScanner = false
+    @State private var showFileImporter = false
+    @State private var isImporting = false
 
     // Result-stage editable fields (populated from AI estimate). Totals are editable; the
     // serving-size picker + amount field derive per-serving values live.
@@ -104,12 +116,76 @@ struct RecipeBuilderSheet: View {
                     }
                 }
                 #endif
+                .confirmationDialog("Import Recipe", isPresented: $showImportOptions, titleVisibility: .visible) {
+                    #if os(iOS)
+                    Button("Take Photo") { showImportCamera = true }
+                    #endif
+                    Button("Choose Photo") { showImportPhotoPicker = true }
+                    #if os(iOS)
+                    Button("Scan Document") { showDocumentScanner = true }
+                    #endif
+                    Button("Choose File") { showFileImporter = true }
+                    Button("Cancel", role: .cancel) { }
+                }
+                .photosPicker(isPresented: $showImportPhotoPicker, selection: $importPhotoItems, maxSelectionCount: 5, matching: .images)
+                .onChange(of: importPhotoItems) { _, items in
+                    guard !items.isEmpty else { return }
+                    Task { await importFromPhotoItems(items) }
+                }
+                .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.image, .pdf], allowsMultipleSelection: true) { result in
+                    if case .success(let urls) = result {
+                        Task { await importFromFiles(urls) }
+                    }
+                }
+                #if os(iOS)
+                .fullScreenCover(isPresented: $showImportCamera) {
+                    CameraPicker(
+                        onImage: { image in
+                            showImportCamera = false
+                            if let data = RecipeImageLoader.jpeg(from: image) {
+                                Task { await runImport(images: [data]) }
+                            }
+                        },
+                        onCancel: { showImportCamera = false }
+                    )
+                    .ignoresSafeArea()
+                }
+                .fullScreenCover(isPresented: $showDocumentScanner) {
+                    DocumentScannerView(
+                        onScan: { datas in
+                            showDocumentScanner = false
+                            Task { await runImport(images: datas) }
+                        },
+                        onCancel: { showDocumentScanner = false }
+                    )
+                    .ignoresSafeArea()
+                }
+                #endif
+                .overlay {
+                    if isImporting {
+                        importingOverlay
+                    }
+                }
                 .task {
                     if lookupViewModel == nil {
                         lookupViewModel = FoodSearchViewModel(dataSource: dataSourceEnv.dataSource)
                     }
                 }
                 .sheet(isPresented: $showPaywall) { PaywallSheet() }
+        }
+    }
+
+    private var importingOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.25).ignoresSafeArea()
+            VStack(spacing: 12) {
+                ProgressView().controlSize(.large)
+                Text("Reading your recipe…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(24)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
         }
     }
 
@@ -134,6 +210,17 @@ struct RecipeBuilderSheet: View {
 
     private var buildView: some View {
         Form {
+            Section {
+                Button {
+                    showImportOptions = true
+                } label: {
+                    Label("Import from photo or document", systemImage: "doc.text.viewfinder")
+                }
+                .disabled(isImporting)
+            } footer: {
+                Text("Snap or pick a recipe — photo, document scan, or a file — and AI fills in the name and ingredients for you to review.")
+            }
+
             Section {
                 TextField("Name (e.g. Banana Oat Muffins)", text: $recipeName)
                     .textInputAutocapitalization(.words)
@@ -485,6 +572,78 @@ struct RecipeBuilderSheet: View {
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             stage = .build
+        }
+    }
+
+    // MARK: - Import a recipe from images
+
+    private func importFromPhotoItems(_ items: [PhotosPickerItem]) async {
+        var datas: [Data] = []
+        for item in items {
+            guard let raw = try? await item.loadTransferable(type: Data.self) else { continue }
+            #if os(iOS)
+            // Re-encode to JPEG (library items may be HEIC) so the request media type matches.
+            if let image = UIImage(data: raw), let jpeg = RecipeImageLoader.jpeg(from: image) {
+                datas.append(jpeg)
+            } else {
+                datas.append(raw)
+            }
+            #else
+            datas.append(raw)
+            #endif
+        }
+        importPhotoItems = []
+        await runImport(images: datas)
+    }
+
+    private func importFromFiles(_ urls: [URL]) async {
+        #if os(iOS)
+        let datas = RecipeImageLoader.imageDatas(from: urls)
+        #else
+        let datas: [Data] = urls.compactMap { try? Data(contentsOf: $0) }
+        #endif
+        await runImport(images: datas)
+    }
+
+    /// Send the recipe image(s) to the AI and prefill the build stage from the transcription.
+    private func runImport(images: [Data]) async {
+        let images = images.filter { !$0.isEmpty }
+        guard !images.isEmpty else {
+            errorMessage = "Couldn't read that — try another photo or file."
+            return
+        }
+        errorMessage = nil
+        isImporting = true
+        defer { isImporting = false }
+        do {
+            let imported = try await recognitionEnv.service.importRecipe(images: images)
+            applyImported(imported)
+        } catch FoodRecognitionError.outOfCredits {
+            showPaywall = true
+        } catch {
+            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Merge an imported recipe into the build fields without clobbering what the user already
+    /// entered — name/serving only fill if blank; ingredients append; notes append.
+    private func applyImported(_ imported: ImportedRecipe) {
+        if recipeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, !imported.name.isEmpty {
+            recipeName = imported.name
+        }
+        ingredients.append(contentsOf: imported.ingredients.map {
+            RecipeIngredient(name: $0.name, amount: $0.amount, unit: $0.unit, brand: $0.brand)
+        })
+        if let amount = imported.servingAmount, amount > 0,
+           buildServingAmountText.trimmingCharacters(in: .whitespaces).isEmpty {
+            buildServingAmountText = formatAmount(amount)
+            if let unit = imported.servingUnit, buildServingUnits.contains(unit) {
+                buildServingUnit = unit
+            }
+        }
+        if let notes = imported.notes, !notes.isEmpty {
+            let existing = buildNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+            buildNotes = existing.isEmpty ? notes : existing + "\n" + notes
         }
     }
 

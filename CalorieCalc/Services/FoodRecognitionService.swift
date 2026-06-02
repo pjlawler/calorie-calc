@@ -41,6 +41,28 @@ protocol FoodRecognitionService: Sendable {
     /// name + amount + unit. Returned totals are for the WHOLE recipe; the caller picks
     /// one of the yield options to derive per-serving nutrition.
     func analyzeRecipe(_ input: RecipeAnalysisInput) async throws -> AnalyzedRecipe
+    /// Transcribe a recipe from one or more images (a photo, document scan, or rendered PDF
+    /// pages) into its name + ingredient list + optional yield, to prefill the analyzer. This
+    /// only reads the recipe — nutrition is estimated separately via `analyzeRecipe`.
+    func importRecipe(images: [Data]) async throws -> ImportedRecipe
+}
+
+/// One ingredient transcribed from a recipe image by `importRecipe`.
+nonisolated struct ImportedIngredient: Sendable, Hashable {
+    let name: String
+    let amount: Double
+    let unit: String
+    let brand: String?
+}
+
+/// A recipe transcribed from one or more images — the ingredient list plus identity / yield
+/// info used to prefill the Recipe Analyzer's build stage for the user to review.
+nonisolated struct ImportedRecipe: Sendable, Hashable {
+    let name: String
+    let ingredients: [ImportedIngredient]
+    let servingAmount: Double?
+    let servingUnit: String?
+    let notes: String?
 }
 
 /// Input to `FoodRecognitionService.analyzeRecipe` — recipe identity and ingredient list
