@@ -288,16 +288,25 @@ app.post("/v1/subscriptions/notify", async (c) => {
 // callback came from Google. We grant `CREDITS_PER_AD` credits to the device id
 // we set on the ad request via `setUserId`.
 app.get("/v1/credits/grant", async (c) => {
-  const url = new URL(c.req.url);
+  // Verify against the RAW query string exactly as AdMob put it on the wire. AdMob
+  // signs those literal bytes (everything before `&signature=`), so we must not
+  // round-trip through `new URL(...).search` — the WHATWG URL parser can re-normalize
+  // the percent-encoding of values like the base64 `user_id` (`%3D`/`%2B`/`%2F`),
+  // which changes the bytes and makes every real reward fail `bad_signature`. The
+  // field-less save-time health ping has no percent-encoding, so it verifies either
+  // way — which is exactly why this only bit real rewards.
+  const rawUrl = c.req.url;
+  const qIdx = rawUrl.indexOf("?");
+  const rawQuery = qIdx >= 0 ? rawUrl.slice(qIdx + 1) : "";
 
   // AdMob's UI runs a reachability check on the SSV URL when you save it — a GET
   // with no query string. Treat that as a health check and 200, otherwise the
   // setup form flags the URL as broken and refuses to save it.
-  if (!url.search) {
+  if (!rawQuery) {
     return c.json({ ok: true });
   }
 
-  const ssv = await verifySSV(url.search.slice(1)); // strip the leading '?'
+  const ssv = await verifySSV(rawQuery);
   if (!ssv.ok) {
     // Per Google's SSV guidance, return 200 even on rejection — non-2xx puts the
     // callback into AdMob's retry queue, which serves no purpose for malformed

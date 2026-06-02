@@ -27,7 +27,8 @@ import { b64decode, derToRawECDSASig } from "./crypto-utils";
 // To populate: `curl https://gstatic.com/admob/reward/verifier-keys.json` and copy
 // each `keyId` (numeric, stringified) and `base64` field into this map.
 const PUBLIC_KEYS: Record<string, string> = {
-  // "3335741209": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQg...",
+  "3335741209":
+    "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE+nzvoGqvDeB9+SzE6igTl7TyK4JBbglwir9oTcQta8NuG26ZpZFxt+F2NDk7asTE6/2Yc8i1ATcGIqtuS5hv0Q==",
 };
 
 export type SSVResult =
@@ -74,12 +75,34 @@ export async function verifySSV(rawQueryString: string): Promise<SSVResult> {
       false,
       ["verify"],
     );
-    const valid = await crypto.subtle.verify(
-      { name: "ECDSA", hash: "SHA-256" },
-      key,
-      rawSig as BufferSource,
-      new TextEncoder().encode(signedMessage) as BufferSource,
-    );
+    // AdMob signs the parameter *values*, then percent-encodes them for transit. For
+    // numeric params the encoded and decoded forms are identical, so most integrations
+    // never notice — but a base64 `user_id` carries `=`/`+`/`/` padding that arrives
+    // as `%3D`/`%2B`/`%2F`, and the signature only matches the decoded form. Verify
+    // against both the on-the-wire bytes and their percent-decoded form, accepting
+    // whichever validates, so we're correct regardless of which characters a given
+    // device id happens to contain.
+    const candidates = [signedMessage];
+    try {
+      const decoded = decodeURIComponent(signedMessage);
+      if (decoded !== signedMessage) candidates.push(decoded);
+    } catch {
+      // Malformed escape sequence — stick with the raw form only.
+    }
+
+    let valid = false;
+    for (const candidate of candidates) {
+      const ok = await crypto.subtle.verify(
+        { name: "ECDSA", hash: "SHA-256" },
+        key,
+        rawSig as BufferSource,
+        new TextEncoder().encode(candidate) as BufferSource,
+      );
+      if (ok) {
+        valid = true;
+        break;
+      }
+    }
     if (!valid) return { ok: false, error: "bad_signature" };
 
     // Re-parse the full query so the caller sees every reward field.

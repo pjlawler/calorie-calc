@@ -7,13 +7,17 @@
 	<key>com.apple.developer.aps-environment</key>
 	<string>development</string>
 	<!--
-	  App Attest environment. Use "development" for Xcode/TestFlight builds (paired with
-	  ALLOW_DEV_ATTESTATION=true on the proxy) and "production" for App Store builds
-	  (ALLOW_DEV_ATTESTATION=false). Without this entitlement DCAppAttestService.isSupported
-	  is false even on capable devices.
+	  App Attest environment, driven by the APP_ATTEST_ENV build setting so it tracks the
+	  build configuration: Debug → "development", Release → "production" (see the per-config
+	  buildSettings in project.pbxproj). Local Xcode builds attest against Apple's dev
+	  environment (paired with ALLOW_DEV_ATTESTATION=true on the proxy); archived builds
+	  (TestFlight + App Store) attest against production. Without this entitlement
+	  DCAppAttestService.isSupported is false even on capable devices. Pinning a single
+	  hardcoded value here (was "production") forced local debug builds to attest against
+	  the wrong environment, which could make generateAssertion fail and churn the device id.
 	-->
 	<key>com.apple.developer.devicecheck.appattest-environment</key>
-	<string>production</string>
+	<string>$(APP_ATTEST_ENV)</string>
 	<key>com.apple.developer.healthkit</key>
 	<true/>
 	<key>com.apple.developer.healthkit.background-delivery</key>

@@ -267,11 +267,14 @@ struct PaywallSheet: View {
         }
         do {
             try await rewardedAd.present(from: rootVC)
-            // Credits arrive via SSV — usually before the dismissal transition finishes,
-            // but a refresh confirms either way and trips the auto-dismiss.
-            await entitlements.refresh()
-            // Pre-load the next one so a second tap on a still-presented paywall is also
-            // instant. Errors here are non-fatal — the button just disables.
+            // The reward is granted server-side via AdMob's SSV callback, which is
+            // asynchronous — it can land a second or two after the ad dismisses. Poll
+            // entitlements for a short window so a slightly-late callback still trips the
+            // auto-dismiss instead of leaving the user staring at the paywall.
+            await awaitCreditGrant()
+            // If the grant never arrived in the polling window, pre-load the next ad so a
+            // retry is instant. (When it did arrive, the .onChange handlers have already
+            // dismissed us, so this is a no-op.) Errors here are non-fatal.
             await loadAdIfNeeded()
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -279,6 +282,24 @@ struct PaywallSheet: View {
         #else
         errorMessage = "Rewarded videos aren't available on this platform."
         #endif
+    }
+
+    /// Polls `/v1/account/state` for a few seconds after an ad dismisses, giving
+    /// AdMob's asynchronous SSV callback time to credit the device. Returns the
+    /// moment credits (or a subscription) appear — which trips the `.onChange`
+    /// auto-dismiss — or after the timeout, whichever comes first.
+    private func awaitCreditGrant() async {
+        // SSV callbacks usually land within 1–2s, but a cold proxy or slow network can
+        // push that out, so we give it ~5s. The first refresh runs immediately (the
+        // grant is often already in by the time the dismissal transition finishes); the
+        // remaining attempts are spaced a second apart.
+        for attempt in 0..<6 {
+            await entitlements.refresh()
+            if entitlements.creditsRemaining > 0 || entitlements.subscriptionActive { return }
+            if attempt < 5 {
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
     }
 
     #if canImport(UIKit)

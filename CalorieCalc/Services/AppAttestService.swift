@@ -34,8 +34,12 @@ actor AppAttestService {
             return stored
         }
         let keyId = try await registerNewKey()
-        Self.writeKeychain(keyId)
+        let writeStatus = Self.writeKeychain(keyId)
         cachedKeyId = keyId
+        // Registration should happen once per install. If this logs on every launch, the
+        // device identity is churning — which re-rolls the initial credit grant and makes
+        // ad-reward credits land on an id the app has already abandoned.
+        print("AppAttestService: registered new key (keychain write status \(writeStatus))")
         return keyId
     }
 
@@ -74,10 +78,19 @@ actor AppAttestService {
             )
             return assertion.base64EncodedString()
         } catch {
-            // Apple invalidates keys on app restore / OS updates / tampering. Drop the cached
-            // keyId so the next call re-registers from scratch.
-            Self.deleteKeychain()
-            cachedKeyId = nil
+            // Only discard the key when Apple says it's genuinely unusable — `.invalidKey`
+            // is what you get when a key is invalidated by app restore / OS update / tamper.
+            // Transient failures (`.serverUnavailable`, networking) must NOT nuke a good key:
+            // doing so forces a re-registration and a brand-new device id, which churns
+            // identity (ad-reward credits then land on a stale id) and re-rolls the initial
+            // free-credit grant. Re-register only on a real invalid-key error.
+            if let dcError = error as? DCError, dcError.code == .invalidKey {
+                print("AppAttestService: key invalidated by Apple — discarding for re-registration")
+                Self.deleteKeychain()
+                cachedKeyId = nil
+            } else {
+                print("AppAttestService: assertion failed transiently, keeping key: \(error)")
+            }
             throw error
         }
     }
@@ -159,7 +172,11 @@ actor AppAttestService {
         return String(data: data, encoding: .utf8)
     }
 
-    private static func writeKeychain(_ value: String) {
+    /// Persists the keyId. Returns the OSStatus so the caller can surface failures —
+    /// a silent write failure means a new identity is minted on every launch, which is
+    /// precisely the churn we're guarding against.
+    @discardableResult
+    private static func writeKeychain(_ value: String) -> OSStatus {
         let data = Data(value.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -170,12 +187,16 @@ actor AppAttestService {
             kSecValueData as String: data,
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
-        let status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
+        var status = SecItemUpdate(query as CFDictionary, attrs as CFDictionary)
         if status == errSecItemNotFound {
             var add = query
             add.merge(attrs) { _, new in new }
-            SecItemAdd(add as CFDictionary, nil)
+            status = SecItemAdd(add as CFDictionary, nil)
         }
+        if status != errSecSuccess {
+            print("AppAttestService: keychain write failed, status \(status)")
+        }
+        return status
     }
 
     private static func deleteKeychain() {
