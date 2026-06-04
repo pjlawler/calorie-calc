@@ -53,16 +53,7 @@ struct DayDetailView: View {
                     .foregroundStyle(.primary)
                     .textCase(.uppercase)
                 Spacer()
-                Button {
-                    showAddSheet = true
-                } label: {
-                    Label("Log", systemImage: "plus.circle.fill")
-                        .labelStyle(TitleAndIconLabelStyle())
-                        .font(.subheadline.weight(.semibold))
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .accessibilityLabel("Log food")
+                LogFoodButton { showAddSheet = true }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal)

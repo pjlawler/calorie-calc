@@ -368,9 +368,19 @@ struct FoodPortionSheet: View {
                         Button {
                             isEditingMacros.toggle()
                         } label: {
-                            Text(isEditingMacros ? "Done" : "Edit")
-                                .textCase(nil)
-                                .font(.subheadline.weight(.semibold))
+                            if isEditingMacros {
+                                Text("Save")
+                                    .textCase(nil)
+                                    .font(.subheadline.weight(.bold))
+                                    .foregroundStyle(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 5)
+                                    .background(Capsule().fill(Color.accentColor))
+                            } else {
+                                Text("Edit")
+                                    .textCase(nil)
+                                    .font(.subheadline.weight(.semibold))
+                            }
                         }
                     }
                 } footer: {
@@ -386,12 +396,12 @@ struct FoodPortionSheet: View {
 
                 if pickMealAndDate {
                     Section("Add to") {
+                        DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
                         Picker("Meal", selection: $selectedMealType) {
                             ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
                                 Text(meal.displayName).tag(meal)
                             }
                         }
-                        DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
                     }
                 } else if editingEntry == nil && !addToMyFoods {
                     // Standard log flow: let the user retarget the meal before logging. The
@@ -989,6 +999,12 @@ private struct EditableMacroBreakdownView: View {
                         .font(.title3.weight(.bold).monospacedDigit())
                         .fixedSize(horizontal: true, vertical: false)
                         .foregroundStyle(.tint)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.accentColor, lineWidth: 1.5)
+                        )
                         .focused($focusedField, equals: kind)
                         .onChange(of: text.wrappedValue) { _, newValue in
                             // Only a change to the focused field is a real user edit. The parent
