@@ -166,6 +166,7 @@ private struct WeekCalendarBody: View {
     /// while a new week is fetching so the hero number can smoothly animate from the
     /// previous week's value to the new one instead of flashing through `—`.
     @State private var stableMathData: MathCardData?
+    @State private var showAddSheet = false
 
     private var weekDates: [Date] {
         viewModel.assembler(for: period, weekStart: currentPeriod.weekStart).weekDates
@@ -176,9 +177,15 @@ private struct WeekCalendarBody: View {
         ScrollView {
             VStack(spacing: 12) {
                 Color.clear.frame(height: 0).id("top")
-                Text("CalorieCalc")
-                    .font(.largeTitle.bold())
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                HStack(alignment: .bottom) {
+                    Text("CalorieCalc")
+                        .font(.largeTitle.bold())
+                    Spacer()
+                    // Same "Log" button as the day-detail screen. Opens to today's log and the
+                    // time-of-day-appropriate meal (FoodSearchView defaults its meal slot).
+                    LogFoodButton { showAddSheet = true }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 VStack(spacing: 8) {
                     DayCellHeader()
@@ -218,6 +225,10 @@ private struct WeekCalendarBody: View {
                 priorDaysVariance: isToday ? priorDaysVariance : nil,
                 weeklyRemaining: isToday ? displayMathData.totalVariance : nil
             )
+        }
+        .sheet(isPresented: $showAddSheet) {
+            // Same sheet as the day-detail "Log" button — seeded to today, date changeable inside.
+            FoodSearchView(date: Calendar.current.startOfDay(for: .now))
         }
         .onAppear { captureStableData() }
         .onChange(of: mathCardData) { _, _ in captureStableData() }

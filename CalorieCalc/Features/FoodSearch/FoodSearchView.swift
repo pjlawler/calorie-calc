@@ -3,6 +3,9 @@ import SwiftData
 
 struct FoodSearchView: View {
 
+    /// The day the sheet opens against — seeds the portion sheet's date picker. From day-detail
+    /// it's that day; from the weekly "Log" button it's today. Either way the user can retarget
+    /// the date in the sheet, so both entry points behave identically.
     let date: Date
 
     @Environment(\.modelContext) private var modelContext
@@ -153,7 +156,7 @@ struct FoodSearchView: View {
                 }
             }
             .sheet(item: $portionTarget) { target in
-                FoodPortionSheet(result: target, mealType: mealType, date: date, onMealChange: { mealType = $0 }) { }
+                FoodPortionSheet(result: target, mealType: mealType, date: date, pickMealAndDate: true, onMealChange: { mealType = $0 }) { }
             }
             .sheet(isPresented: $showScanner) {
                 BarcodeScannerView { code in

@@ -396,12 +396,12 @@ struct FoodPortionSheet: View {
 
                 if pickMealAndDate {
                     Section("Add to") {
+                        DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
                         Picker("Meal", selection: $selectedMealType) {
                             ForEach(MealType.allCases.sorted(by: { $0.order < $1.order }), id: \.self) { meal in
                                 Text(meal.displayName).tag(meal)
                             }
                         }
-                        DatePicker("Date", selection: $selectedDate, displayedComponents: .date)
                     }
                 } else if editingEntry == nil && !addToMyFoods {
                     // Standard log flow: let the user retarget the meal before logging. The
