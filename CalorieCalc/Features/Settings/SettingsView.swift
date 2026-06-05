@@ -404,6 +404,8 @@ private struct SettingsForm: View {
     @State private var showRestoreConfirm = false
     @State private var showRelaunchPrompt = false
     @State private var migrationStatusMessage: String?
+    @State private var showClearDataConfirm = false
+    @State private var clearDataErrorMessage: String?
 
     private var defaultTab: AppTab {
         get { AppTab(rawValue: defaultTabRaw) ?? .week }
@@ -703,9 +705,81 @@ private struct SettingsForm: View {
                 Text("Visible only in debug builds.")
             }
             #endif
+
+            Section {
+                Button("Clear all data", role: .destructive) {
+                    showClearDataConfirm = true
+                }
+            } footer: {
+                Text("Permanently deletes everything you've entered — food logs, weights, workouts, supplements, saved foods, tags, and goals — from this device and every iCloud device on your account. This can't be undone. Your Apple Health data is not affected and will remain.")
+            }
+            .confirmationDialog(
+                "Are you sure you want to permanently delete all of your entered data?",
+                isPresented: $showClearDataConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete all data", role: .destructive) { clearAllData() }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("This can't be undone, and the app will close so it can reload from a clean slate. Apple Health data will remain.")
+            }
+            .alert(
+                "Couldn't clear data",
+                isPresented: Binding(
+                    get: { clearDataErrorMessage != nil },
+                    set: { if !$0 { clearDataErrorMessage = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) { clearDataErrorMessage = nil }
+            } message: {
+                Text(clearDataErrorMessage ?? "")
+            }
         }
         .sheet(isPresented: $showAIConsentSheet) {
             AIConsentSheet()
+        }
+    }
+
+    /// Permanently deletes all user-entered, CloudKit-synced data, then terminates the app so it
+    /// relaunches against the empty store. The local HealthKit cache (CachedWorkout /
+    /// CachedDailySteps) is left alone — it mirrors Apple Health, which we promise to preserve,
+    /// and rebuilds itself on the next sync.
+    ///
+    /// Two deliberate choices here:
+    /// - We delete each object individually rather than using `modelContext.delete(model:)`. The
+    ///   bulk form issues an `NSBatchDeleteRequest` that bypasses SwiftData's change tracking, so
+    ///   the CloudKit mirror never learns about the deletions — the records stay on the server and
+    ///   the sync engine re-downloads them right back. Per-object deletes register as tombstones
+    ///   that export to CloudKit, so the data stays gone across devices.
+    /// - We `exit(0)` synchronously right after the save instead of letting the view re-render.
+    ///   This screen is bound to a `UserProfile` we just deleted; any subsequent body evaluation
+    ///   (e.g. the Units picker reading `$profile.weightUnit`) would dereference a deleted model
+    ///   and crash. Terminating in the same call stack means SwiftUI never re-renders the stale
+    ///   binding, and relaunch rebootstraps a fresh profile cleanly.
+    private func clearAllData() {
+        do {
+            try deleteAll(FoodEntry.self)
+            try deleteAll(SupplementEntry.self)
+            try deleteAll(ManualWorkout.self)
+            try deleteAll(DayLog.self)
+            try deleteAll(WeightEntry.self)
+            try deleteAll(CachedFood.self)
+            try deleteAll(FoodTag.self)
+            try deleteAll(GoalPeriod.self)
+            try deleteAll(UserProfile.self)
+            try modelContext.save()
+            exit(0)
+        } catch {
+            clearDataErrorMessage = error.localizedDescription
+        }
+    }
+
+    /// Fetches and deletes every instance of `type` one at a time so each deletion is tracked by
+    /// SwiftData and exported to CloudKit (unlike the bulk `delete(model:)` batch form).
+    private func deleteAll<T: PersistentModel>(_ type: T.Type) throws {
+        let items = try modelContext.fetch(FetchDescriptor<T>())
+        for item in items {
+            modelContext.delete(item)
         }
     }
 
