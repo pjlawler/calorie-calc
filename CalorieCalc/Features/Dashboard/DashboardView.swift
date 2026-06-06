@@ -196,7 +196,7 @@ struct DashboardView: View {
     private func cardsFor(metric: HistoryMetric, summary: HistorySummary) -> [MetricSummaryCard] {
         let unit = metric.unit
         switch timeframe {
-        case .days7, .days14, .custom:
+        case .thisWeek, .days7, .days14, .custom:
             return [
                 MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
                 MetricSummaryCard(id: "total", title: totalTitleForShortRange, value: summary.total, unit: unit)
@@ -233,6 +233,7 @@ struct DashboardView: View {
 
     private var totalTitleForShortRange: String {
         switch timeframe {
+        case .thisWeek: "Week Total"
         case .days7: "7-Day Total"
         case .days14: "14-Day Total"
         case .days30: "30-Day Total"
@@ -310,7 +311,7 @@ struct DashboardView: View {
     private func supplementCards(for summary: SupplementHistorySummary) -> [MetricSummaryCard] {
         let unit = summary.unit
         switch timeframe {
-        case .days7, .days14, .custom:
+        case .thisWeek, .days7, .days14, .custom:
             return [
                 MetricSummaryCard(id: "day-avg", title: "Day Avg", value: summary.dayAvg, unit: unit),
                 MetricSummaryCard(id: "total", title: totalTitleForShortRange, value: summary.total, unit: unit),
@@ -612,6 +613,14 @@ struct DashboardView: View {
         if !includesTodayInProgress {
             end = calendar.date(byAdding: .day, value: -1, to: end) ?? end
         }
+        if timeframe == .thisWeek {
+            // Week-start day through today (a partial calendar week), honoring the user's
+            // configured week-start. Clamp so excluding today on the week's first day doesn't
+            // invert the range.
+            let weekStart = profiles.first?.weekStart ?? .monday
+            let start = weekStart.startOfWeek(containing: .now, calendar: calendar)
+            return (start, max(end, start))
+        }
         let days = timeframe.daysBack ?? 30
         let start = calendar.date(byAdding: .day, value: -(days - 1), to: end) ?? end
         return (start, end)
@@ -668,7 +677,7 @@ struct DashboardView: View {
 
     private var timeframePicker: some View {
         HStack(spacing: 4) {
-            if timeframe != .custom {
+            if timeframe.prependsLast {
                 Text("Last")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

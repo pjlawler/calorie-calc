@@ -106,6 +106,17 @@ nonisolated enum Weekday: Int, Codable, CaseIterable, Hashable, Sendable, Identi
         case .saturday: "Saturday"
         }
     }
+
+    /// Start of the week (this weekday, used as the week-start setting) that contains `date` —
+    /// i.e. the most recent occurrence of `self` on or before `date`, normalized to midnight.
+    /// `Weekday.rawValue` matches `Calendar.component(.weekday:)` (Sun=1…Sat=7), and this reuses
+    /// the same `(weekday - weekStart + 7) % 7` offset the plan math uses elsewhere.
+    func startOfWeek(containing date: Date, calendar: Calendar = .current) -> Date {
+        let day = calendar.startOfDay(for: date)
+        let weekday = calendar.component(.weekday, from: day)
+        let offset = (weekday - rawValue + 7) % 7
+        return calendar.date(byAdding: .day, value: -offset, to: day) ?? day
+    }
 }
 
 nonisolated enum WeightUnit: String, Codable, CaseIterable, Hashable, Sendable {

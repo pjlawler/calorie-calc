@@ -28,9 +28,15 @@ struct WeightLogView: View {
         if timeframe == .custom { return entries }
         let cal = Calendar.current
         let today = cal.startOfDay(for: .now)
-        let days = timeframe.daysBack ?? 30
-        let start = cal.date(byAdding: .day, value: -(days - 1), to: today) ?? today
         let endExclusive = cal.date(byAdding: .day, value: 1, to: today) ?? today
+        let start: Date
+        if timeframe == .thisWeek {
+            let weekStart = profile?.weekStart ?? .monday
+            start = weekStart.startOfWeek(containing: .now, calendar: cal)
+        } else {
+            let days = timeframe.daysBack ?? 30
+            start = cal.date(byAdding: .day, value: -(days - 1), to: today) ?? today
+        }
         return entries.filter { $0.timestamp >= start && $0.timestamp < endExclusive }
     }
 
