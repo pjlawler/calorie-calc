@@ -17,6 +17,9 @@ actor AppAttestService {
     private let attestService = DCAppAttestService.shared
 
     private var cachedKeyId: String?
+    // Held while a registration is in flight so concurrent first-callers await the same
+    // registration instead of each starting their own (see deviceId()).
+    private var registrationTask: Task<String, Error>?
 
     private static let keychainService = "com.lawlerinnovationsinc-calorie"
     private static let keychainAccount = "AppAttest.keyId"
@@ -33,13 +36,42 @@ actor AppAttestService {
             cachedKeyId = stored
             return stored
         }
+        // Single-flight the registration. `deviceId()` is called concurrently by several
+        // services on a cold launch (entitlements, subscriptions, the AI services, the
+        // rewarded-ad loader). Actors are reentrant across `await`, so without this guard
+        // each concurrent first-caller would start its OWN registerNewKey() while the
+        // first is suspended on its network round-trips — minting several App Attest keys
+        // and server device records in a single launch, and stranding any ad reward that
+        // was tagged with one of the losing identities. Funnelling everyone through one
+        // Task makes registration happen exactly once.
+        if let existing = registrationTask {
+            return try await existing.value
+        }
+        let task = Task { try await self.performRegistration() }
+        registrationTask = task
+        defer { registrationTask = nil }
+        return try await task.value
+    }
+
+    /// Generates + registers a new key, persists it, and caches it. Extracted so the
+    /// single-flight Task in `deviceId()` has exactly one thing to await. Caches the keyId
+    /// in memory unconditionally so every caller this session shares ONE identity (no
+    /// mid-session churn); a failure to persist only risks a re-register on the next cold
+    /// launch, which we log loudly rather than silently absorbing.
+    private func performRegistration() async throws -> String {
         let keyId = try await registerNewKey()
         let writeStatus = Self.writeKeychain(keyId)
+        // Read back to confirm the write actually stuck — a silent failure here is what
+        // turns into cross-launch identity churn.
+        let persisted = writeStatus == errSecSuccess && Self.readKeychain() == keyId
         cachedKeyId = keyId
-        // Registration should happen once per install. If this logs on every launch, the
-        // device identity is churning — which re-rolls the initial credit grant and makes
-        // ad-reward credits land on an id the app has already abandoned.
-        print("AppAttestService: registered new key (keychain write status \(writeStatus))")
+        if persisted {
+            print("AppAttestService: registered new key (persisted)")
+        } else {
+            // If this recurs, identity is churning across launches — re-rolling the
+            // initial credit grant and stranding ad-reward credits on abandoned ids.
+            print("AppAttestService: registered new key but keychain did NOT persist (status \(writeStatus)) — identity may churn across launches")
+        }
         return keyId
     }
 

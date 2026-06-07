@@ -289,14 +289,18 @@ struct PaywallSheet: View {
     /// moment credits (or a subscription) appear — which trips the `.onChange`
     /// auto-dismiss — or after the timeout, whichever comes first.
     private func awaitCreditGrant() async {
-        // SSV callbacks usually land within 1–2s, but a cold proxy or slow network can
-        // push that out, so we give it ~5s. The first refresh runs immediately (the
+        // SSV callbacks usually land within 1–2s, but a cold proxy or — more commonly — a
+        // mediated third-party ad network can push that out well past 5s. We poll up to
+        // ~12s so a slow-but-valid reward still trips the auto-dismiss instead of leaving
+        // the user thinking the ad "didn't work." The first refresh runs immediately (the
         // grant is often already in by the time the dismissal transition finishes); the
-        // remaining attempts are spaced a second apart.
-        for attempt in 0..<6 {
+        // remaining attempts are spaced a second apart, and we return the moment credits
+        // appear, so the common fast case is unaffected.
+        let maxAttempts = 12
+        for attempt in 0..<maxAttempts {
             await entitlements.refresh()
             if entitlements.creditsRemaining > 0 || entitlements.subscriptionActive { return }
-            if attempt < 5 {
+            if attempt < maxAttempts - 1 {
                 try? await Task.sleep(for: .seconds(1))
             }
         }
