@@ -46,6 +46,13 @@ APPSTORE_BUNDLE_ID = "com.lawlerinnovationsinc-calorie"
 # "Production" for the live App Store; use "Sandbox" only on a worker dedicated to
 # TestFlight subscription testing.
 APPSTORE_ENVIRONMENT = "Production"
+# Temporary "free AI for everyone" promo. "1" entitles every authenticated device for
+# AI calls regardless of credits or subscription, and does NOT debit balances — meant
+# to bridge the gap until the subscription + rewarded-ad updates clear App Store review.
+# Set back to "0" and `wrangler deploy` to restore normal credit/subscription gating;
+# every banked balance is exactly where it was. The DAILY_REQUEST_LIMIT abuse ceiling
+# still applies while this is on.
+PROMO_FREE_AI = "1"
 
 [[kv_namespaces]]
 binding = "DEVICES"

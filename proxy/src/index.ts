@@ -28,6 +28,10 @@ type Env = {
   SUBSCRIPTION_PRODUCT_ID: string;
   APPSTORE_BUNDLE_ID: string;
   APPSTORE_ENVIRONMENT: string;
+  // Temporary "free AI for everyone" promo. "1"/"true" entitles every authenticated
+  // device for /v1/messages regardless of credits or subscription, without draining
+  // balances. Flip off (or remove) to restore normal credit/subscription gating.
+  PROMO_FREE_AI?: string;
   DEVICES: KVNamespace;
   CHALLENGES: KVNamespace;
   RATE_LIMITS: KVNamespace;
@@ -49,6 +53,13 @@ app.get("/", (c) => c.text("calorie-calc-proxy ok"));
 function initialCreditsFor(env: Env, headers: Headers): number {
   if (headers.get("X-Debug-Build") === "1") return 1;
   return parseInt(env.INITIAL_FREE_CREDITS, 10) || 0;
+}
+
+// Temporary promo switch — see PROMO_FREE_AI in wrangler.toml. When on, everyone gets
+// AI access without spending credits, so users don't hit the paywall while the
+// subscription + rewarded-ad updates are still pending App Store approval.
+function promoFreeAI(env: Env): boolean {
+  return env.PROMO_FREE_AI === "1" || env.PROMO_FREE_AI === "true";
 }
 
 // Step 1 of registration: server issues a fresh challenge that the client passes to
@@ -151,9 +162,12 @@ app.get("/v1/account/state", async (c) => {
   await linkInstallToDevice(c.env, device, deviceId, installId);
   await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
 
+  // During the free-AI promo, surface a non-zero balance so the app's paywall poll
+  // auto-dismisses and never treats the user as out of credits. The stored value is
+  // untouched — this only affects what we report, not what's banked.
   return c.json({
     subscriptionActive: isSubscriptionActive(device, Date.now()),
-    creditsRemaining: device.credits,
+    creditsRemaining: promoFreeAI(c.env) ? Math.max(device.credits, 1) : device.credits,
     subscriptionExpiresAt: device.subscriptionExpiresAt,
   });
 });
@@ -514,7 +528,7 @@ app.post("/v1/messages", async (c) => {
   await linkInstallToDevice(c.env, device, deviceId, installId);
 
   const now = Date.now();
-  const ent = hasEntitlement(device, now);
+  const ent = hasEntitlement(device, now, promoFreeAI(c.env));
   if (!ent.ok) {
     // Persist the counter and any grandfather grant before bailing — otherwise a
     // valid assertion gets "wasted" without storing the new counter, breaking the

@@ -70,11 +70,19 @@ export function isSubscriptionActive(d: StoredDevice, now: number): boolean {
 }
 
 export type EntitlementCheck =
-  | { ok: true; reason: "subscribed" | "credits" }
+  | { ok: true; reason: "subscribed" | "credits" | "promo" }
   | { ok: false; reason: "no_credits" };
 
-export function hasEntitlement(d: StoredDevice, now: number): EntitlementCheck {
+// `promoFreeAI` is the temporary "free AI for everyone" switch (PROMO_FREE_AI env
+// var), used to bridge the gap until the subscription + rewarded-ad flows are live in
+// the App Store. When on, a device with no sub and no credits is still entitled — but
+// crucially the promo check is placed BEFORE the credit check, so users with real
+// credits are reported as "promo" too and never get debited (the caller only spends a
+// credit when reason === "credits"). Flip the env var off and every balance is exactly
+// where it was before the promo.
+export function hasEntitlement(d: StoredDevice, now: number, promoFreeAI = false): EntitlementCheck {
   if (isSubscriptionActive(d, now)) return { ok: true, reason: "subscribed" };
+  if (promoFreeAI) return { ok: true, reason: "promo" };
   if (d.credits > 0) return { ok: true, reason: "credits" };
   return { ok: false, reason: "no_credits" };
 }
