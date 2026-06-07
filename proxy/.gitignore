@@ -4,3 +4,6 @@ dist/
 *.log
 .env
 .dev.vars
+
+# daily AI activity snapshot log (CSV is tracked, log is not)
+data/ai-report.log
