@@ -101,6 +101,7 @@ app.post("/v1/attest/register", async (c) => {
     grandfatheredAt: null,
     rateLimitDay: "",
     rateLimitCount: 0,
+    installId: null,
   };
   await c.env.DEVICES.put(`d:${keyId}`, serializeDevice(stored));
   return c.json({ deviceId: keyId });
@@ -147,6 +148,7 @@ app.get("/v1/account/state", async (c) => {
   const initial = initialCreditsFor(c.env, c.req.raw.headers);
   const installId = c.req.header("X-Install-Id");
   await grantInitialCreditsIfNeeded(c.env, device, deviceId, installId, initial);
+  await linkInstallToDevice(c.env, device, deviceId, installId);
   await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
 
   return c.json({
@@ -338,6 +340,23 @@ async function recordSSVOutcome(
   }
 }
 
+// Ad-reward churn stopgap. Remembers the install's CURRENT device so a rewarded-ad
+// grant tagged with an older (churned-away) device id can be redirected to the device
+// the app is actually polling now. Mutates `device.installId` (persisted by the
+// caller's existing device put) and writes the forward pointer cur:<installId> ->
+// deviceId. The `installId === device.installId` guard keeps this to one extra KV write
+// per (device, install) first-sight rather than on every authed call.
+async function linkInstallToDevice(
+  env: Env,
+  device: StoredDevice,
+  deviceId: string,
+  installId: string | undefined,
+): Promise<void> {
+  if (!installId || device.installId === installId) return;
+  device.installId = installId;
+  await env.DEVICES.put(`cur:${installId}`, deviceId);
+}
+
 // AdMob Server-Side Verification callback. AdMob hits this URL with a GET when a
 // user finishes a rewarded video. The signature on the query string proves the
 // callback came from Google. We grant `CREDITS_PER_AD` credits to the device id
@@ -387,7 +406,25 @@ app.get("/v1/credits/grant", async (c) => {
   }
   await c.env.RATE_LIMITS.put(`g:${txId}`, "1", { expirationTtl: 60 * 60 * 24 * 30 });
 
-  const stored = await c.env.DEVICES.get(`d:${deviceId}`);
+  let stored = await c.env.DEVICES.get(`d:${deviceId}`);
+  // Churn rescue: the reward must land on the device the app is polling NOW. If the
+  // granted id has since churned to a new identity for the same install, follow its
+  // installId -> cur:<installId> to the install's current device and credit that
+  // instead. No-op when there's no churn (cur points back at deviceId) or no mapping.
+  let targetId = deviceId;
+  if (stored) {
+    const grantedDev = parseDevice(stored);
+    if (grantedDev.installId) {
+      const current = await c.env.DEVICES.get(`cur:${grantedDev.installId}`);
+      if (current && current !== deviceId) {
+        const currentStored = await c.env.DEVICES.get(`d:${current}`);
+        if (currentStored) {
+          targetId = current;
+          stored = currentStored;
+        }
+      }
+    }
+  }
   if (!stored) {
     // Same retry-suppression rationale as the SSV-rejection branch above: an
     // unknown device id can't be fixed by retrying, so return 200 + log.
@@ -399,10 +436,14 @@ app.get("/v1/credits/grant", async (c) => {
   const amount = parseInt(c.env.CREDITS_PER_AD, 10) || 5;
   const before = device.credits;
   device.credits += amount;
-  await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+  await c.env.DEVICES.put(`d:${targetId}`, serializeDevice(device));
 
-  console.log("ssv granted", deviceId, txId, before, "->", device.credits);
-  await recordSSVOutcome(c.env, "granted", { deviceId, txId });
+  if (targetId !== deviceId) {
+    console.log("ssv granted (redirected churn)", deviceId, "->", targetId, txId, before, "->", device.credits);
+  } else {
+    console.log("ssv granted", targetId, txId, before, "->", device.credits);
+  }
+  await recordSSVOutcome(c.env, "granted", { deviceId: targetId, txId });
   return c.json({ ok: true });
 });
 
@@ -470,6 +511,7 @@ app.post("/v1/messages", async (c) => {
   if (await grantInitialCreditsIfNeeded(c.env, device, deviceId, installId, initial)) {
     console.log("messages grandfather", deviceId, "install", installId ?? "(none)", "+", initial, "->", device.credits);
   }
+  await linkInstallToDevice(c.env, device, deviceId, installId);
 
   const now = Date.now();
   const ent = hasEntitlement(device, now);

@@ -21,6 +21,11 @@ export type StoredDevice = {
   grandfatheredAt: number | null;
   rateLimitDay: string;
   rateLimitCount: number;
+  // Most recent iCloud install id seen on an authed call from this device. Lets the
+  // rewarded-ad grant handler reverse-map a churned-away device id back to its install
+  // and redirect the credit to the install's current device. Null on legacy records
+  // and devices that have never sent X-Install-Id.
+  installId: string | null;
 };
 
 export function parseDevice(raw: string): StoredDevice {
@@ -35,6 +40,7 @@ export function parseDevice(raw: string): StoredDevice {
     grandfatheredAt: obj.grandfatheredAt ?? null,
     rateLimitDay: obj.rateLimitDay ?? "",
     rateLimitCount: obj.rateLimitCount ?? 0,
+    installId: obj.installId ?? null,
   };
 }
 
