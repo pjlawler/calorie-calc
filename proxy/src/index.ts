@@ -204,6 +204,15 @@ app.post("/v1/subscriptions/verify", async (c) => {
     await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
     return c.json({ error: "wrong_product" }, 400);
   }
+  // Environment gate: a Sandbox (TestFlight) receipt must not unlock a Production
+  // entitlement. Apple signs both Sandbox and Production JWS with a valid cert chain,
+  // so the signature check above can't distinguish them — only the `environment`
+  // claim can. Reject any mismatch with APPSTORE_ENVIRONMENT.
+  if (tx.environment !== c.env.APPSTORE_ENVIRONMENT) {
+    await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
+    console.log("subscriptions/verify wrong_environment", tx.environment, "expected", c.env.APPSTORE_ENVIRONMENT);
+    return c.json({ error: "wrong_environment" }, 400);
+  }
 
   await applyTransactionToDevice(c.env, deviceId, device, tx);
 
@@ -254,6 +263,13 @@ app.post("/v1/subscriptions/notify", async (c) => {
   if (tx.productId !== c.env.SUBSCRIPTION_PRODUCT_ID) {
     return c.json({ ok: true });
   }
+  // Same environment gate as /verify: ignore notifications from the wrong environment
+  // so a Sandbox renewal/refund can't move a Production entitlement (and vice versa).
+  // 200 + log, since a non-2xx just pins Apple's retry queue.
+  if (tx.environment !== c.env.APPSTORE_ENVIRONMENT) {
+    console.log("notify environment mismatch", tx.environment, "expected", c.env.APPSTORE_ENVIRONMENT);
+    return c.json({ ok: true });
+  }
 
   // Look up which devices own this originalTransactionId (populated by /verify).
   const deviceListRaw = await c.env.DEVICES.get(`o:${tx.originalTransactionId}`);
@@ -282,6 +298,41 @@ app.post("/v1/subscriptions/notify", async (c) => {
 
   return c.json({ ok: true });
 });
+
+// Diagnostics for the rewarded-ad grant pipeline. Rewarded-video volume is ~1/day,
+// so a read-modify-write on a single KV record races essentially never — good enough
+// to settle the question the Worker logs can't (they only retain a few days): of the
+// SSV callbacks that arrive, how many actually land credits vs. drop as `unknown_device`
+// because the App Attest identity churned out from under the reward. `recent` keeps the
+// credited `deviceId` for each event so an `unknown_device` can be cross-referenced
+// against the device table to confirm churn. Read it back with:
+//   wrangler kv key get --binding RATE_LIMITS ssv:stats --remote
+async function recordSSVOutcome(
+  env: Env,
+  outcome: string,
+  detail?: { deviceId?: string | null; txId?: string | null },
+): Promise<void> {
+  try {
+    const raw = await env.RATE_LIMITS.get("ssv:stats");
+    const stats = raw
+      ? (JSON.parse(raw) as { counts: Record<string, number>; recent: unknown[] })
+      : { counts: {}, recent: [] };
+    stats.counts[outcome] = (stats.counts[outcome] ?? 0) + 1;
+    stats.recent.unshift({
+      outcome,
+      deviceId: detail?.deviceId ?? null,
+      txId: detail?.txId ?? null,
+      at: new Date().toISOString(),
+    });
+    // Keep a bounded ring so the record can't grow without limit.
+    stats.recent = stats.recent.slice(0, 100);
+    await env.RATE_LIMITS.put("ssv:stats", JSON.stringify(stats));
+  } catch (e) {
+    // Instrumentation must never affect the grant outcome — swallow and lean on the
+    // existing console.log lines if this write fails.
+    console.log("ssv stat write failed", String(e));
+  }
+}
 
 // AdMob Server-Side Verification callback. AdMob hits this URL with a GET when a
 // user finishes a rewarded video. The signature on the query string proves the
@@ -312,6 +363,7 @@ app.get("/v1/credits/grant", async (c) => {
     // callback into AdMob's retry queue, which serves no purpose for malformed
     // signatures. We log internally so the rejection is still observable.
     console.log("ssv rejected", ssv.error);
+    await recordSSVOutcome(c.env, `rejected:${ssv.error}`);
     return c.json({ ok: false, reason: ssv.error });
   }
 
@@ -319,6 +371,7 @@ app.get("/v1/credits/grant", async (c) => {
   const deviceId = ssv.params.get("user_id");
   if (!txId || !deviceId) {
     console.log("ssv missing_fields", { txId, deviceId });
+    await recordSSVOutcome(c.env, "missing_fields", { deviceId, txId });
     return c.json({ ok: false, reason: "missing_fields" });
   }
 
@@ -335,6 +388,7 @@ app.get("/v1/credits/grant", async (c) => {
     // Same retry-suppression rationale as the SSV-rejection branch above: an
     // unknown device id can't be fixed by retrying, so return 200 + log.
     console.log("ssv unknown device", deviceId);
+    await recordSSVOutcome(c.env, "unknown_device", { deviceId, txId });
     return c.json({ ok: false, reason: "unknown_device" });
   }
   const device = parseDevice(stored);
@@ -344,6 +398,7 @@ app.get("/v1/credits/grant", async (c) => {
   await c.env.DEVICES.put(`d:${deviceId}`, serializeDevice(device));
 
   console.log("ssv granted", deviceId, txId, before, "->", device.credits);
+  await recordSSVOutcome(c.env, "granted", { deviceId, txId });
   return c.json({ ok: true });
 });
 

@@ -23,9 +23,11 @@ APPLE_APP_ID = "X8629DMYVG.com.lawlerinnovationsinc-calorie"
 # Per-device daily request quota. Abuse ceiling, not the paywall — sized so a
 # compromised App Attest key can only run up ~$30/mo of Anthropic cost.
 DAILY_REQUEST_LIMIT = "50"
-# When true, accept the App Attest "appattestdevelop" AAGUID. Flip to false
-# before App Store submission so dev-environment attestations are rejected.
-ALLOW_DEV_ATTESTATION = "true"
+# When true, accept the App Attest "appattestdevelop" AAGUID (local Xcode debug
+# builds). Set "false" in production so only TestFlight/App Store builds (production
+# attestation) register. Local debug builds against this worker will be rejected with
+# bad_aaguid until this is flipped back or they're pointed at a separate dev worker.
+ALLOW_DEV_ATTESTATION = "false"
 # Credits granted per AdMob rewarded-video completion (verified via SSV in Phase 3).
 CREDITS_PER_AD = "5"
 # One-time grant fired on a device's first /v1/messages or /v1/account/state call
@@ -38,9 +40,12 @@ INITIAL_FREE_CREDITS = "50"
 SUBSCRIPTION_PRODUCT_ID = "com.lawlerinnovationsinc_calorie.ai.monthly"
 # Used to verify the `bundleId` claim in JWS receipts coming back from StoreKit.
 APPSTORE_BUNDLE_ID = "com.lawlerinnovationsinc-calorie"
-# Sandbox while testing TestFlight purchases; flip to "Production" before
-# App Store submission so forged sandbox notifications can't grant prod entitlements.
-APPSTORE_ENVIRONMENT = "Sandbox"
+# Subscription environment gate, enforced in /v1/subscriptions/{verify,notify}: a
+# receipt/notification whose `environment` claim doesn't match this is rejected, so a
+# valid Sandbox (TestFlight) receipt can't grant a Production entitlement. Use
+# "Production" for the live App Store; use "Sandbox" only on a worker dedicated to
+# TestFlight subscription testing.
+APPSTORE_ENVIRONMENT = "Production"
 
 [[kv_namespaces]]
 binding = "DEVICES"
