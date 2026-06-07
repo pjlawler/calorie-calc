@@ -31,6 +31,10 @@ type Env = {
   DEVICES: KVNamespace;
   CHALLENGES: KVNamespace;
   RATE_LIMITS: KVNamespace;
+  // Slack Incoming Webhook for the daily SSV monitor verdict. Set with
+  // `wrangler secret put ALERT_WEBHOOK_URL`. Optional — the monitor no-ops (and
+  // logs the verdict instead) when unset, so deploys don't require it.
+  ALERT_WEBHOOK_URL?: string;
 };
 
 const app = new Hono<{ Bindings: Env }>();
@@ -537,4 +541,103 @@ app.post("/v1/messages", async (c) => {
   });
 });
 
-export default app;
+// === Daily SSV reward monitor (Cron Trigger) ===
+// Runs in the Worker itself, so it reads `ssv:stats` and the device table through the
+// native KV bindings — no external auth/token. Posts a RED/YELLOW/GREEN verdict to Slack.
+
+type SSVStats = {
+  counts: Record<string, number>;
+  recent: Array<{ outcome: string; deviceId: string | null; txId: string | null; at: string }>;
+};
+
+async function postSlack(env: Env, text: string): Promise<void> {
+  if (!env.ALERT_WEBHOOK_URL) {
+    console.log("ssv monitor (no webhook set):", text);
+    return;
+  }
+  try {
+    const r = await fetch(env.ALERT_WEBHOOK_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!r.ok) console.log("ssv monitor slack post non-2xx", r.status);
+  } catch (e) {
+    console.log("ssv monitor slack post failed", String(e));
+  }
+}
+
+async function runSSVMonitor(env: Env): Promise<void> {
+  const raw = await env.RATE_LIMITS.get("ssv:stats");
+  if (!raw) {
+    await postSlack(env, "⏳ SSV reward monitor: no rewarded-ad callbacks recorded yet.");
+    return;
+  }
+  const stats = JSON.parse(raw) as SSVStats;
+  const now = Date.now();
+  const DAY = 24 * 60 * 60 * 1000;
+
+  // Tally outcomes seen within a time window from the `recent` ring (capped at 100;
+  // at ~1 ad/day that's many weeks of history, plenty for 24h/7d windows).
+  const tally = (cutoff: number) => {
+    const w = { granted: 0, unknown_device: 0, rejected: 0, missing_fields: 0 };
+    for (const e of stats.recent) {
+      const t = Date.parse(e.at);
+      if (Number.isNaN(t) || t < cutoff) continue;
+      if (e.outcome === "granted") w.granted++;
+      else if (e.outcome === "unknown_device") w.unknown_device++;
+      else if (e.outcome === "missing_fields") w.missing_fields++;
+      else if (e.outcome.startsWith("rejected")) w.rejected++;
+    }
+    return w;
+  };
+  const d1 = tally(now - DAY);
+  const d7 = tally(now - 7 * DAY);
+
+  // Churn confirmation: an unknown_device id that EXISTS in the device table now means
+  // the identity did register — just after the reward fired against an id it had
+  // already abandoned. That's the churn smoking gun.
+  const unknownRecent = stats.recent.filter(
+    (e) => e.outcome === "unknown_device" && e.deviceId && Date.parse(e.at) >= now - 7 * DAY,
+  );
+  let churnConfirmed = 0;
+  for (const e of unknownRecent) {
+    if (await env.DEVICES.get(`d:${e.deviceId}`)) churnConfirmed++;
+  }
+
+  const denom = d1.granted + d1.unknown_device;
+  const unknownShare = denom > 0 ? d1.unknown_device / denom : 0;
+  let emoji = "🟢";
+  let level = "GREEN";
+  if (denom > 0 && (d1.unknown_device >= d1.granted || unknownShare > 0.2)) {
+    emoji = "🔴";
+    level = "RED";
+  } else if (d1.rejected > 0) {
+    emoji = "🟡";
+    level = "YELLOW";
+  }
+
+  const cumulative =
+    Object.entries(stats.counts)
+      .map(([k, v]) => `${k}=${v}`)
+      .join(", ") || "none";
+  const lines = [
+    `${emoji} *SSV reward monitor — ${level}*`,
+    `Last 24h: ${d1.granted} granted, ${d1.unknown_device} unknown_device` +
+      (d1.rejected ? `, ${d1.rejected} rejected` : "") +
+      (d1.missing_fields ? `, ${d1.missing_fields} missing_fields` : ""),
+    `Last 7d: ${d7.granted} granted, ${d7.unknown_device} unknown_device`,
+    unknownRecent.length
+      ? `Churn check: ${churnConfirmed}/${unknownRecent.length} stranded ids are registered now → churn ${churnConfirmed ? "confirmed" : "unconfirmed"}.`
+      : "Churn check: no unknown_device events in the last 7d.",
+    `Cumulative: ${cumulative}`,
+  ];
+  await postSlack(env, lines.join("\n"));
+}
+
+export default {
+  fetch: (req: Request, env: Env, ctx: ExecutionContext) => app.fetch(req, env, ctx),
+  scheduled: (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
+    ctx.waitUntil(runSSVMonitor(env));
+  },
+};
