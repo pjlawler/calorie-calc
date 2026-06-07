@@ -316,20 +316,13 @@ struct FoodPortionSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    if editingEntry == nil {
-                        TextField("Name", text: $nameText)
-                            .textInputAutocapitalization(.words)
-                            .font(.headline)
-                        TextField("Brand (optional)", text: $brandText)
-                            .textInputAutocapitalization(.words)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(result.name).font(.headline)
-                        if let brand = result.brand, !brand.isEmpty {
-                            Text(brand).font(.subheadline).foregroundStyle(.secondary)
-                        }
-                    }
+                    TextField("Name", text: $nameText)
+                        .textInputAutocapitalization(.words)
+                        .font(.headline)
+                    TextField("Brand (optional)", text: $brandText)
+                        .textInputAutocapitalization(.words)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
 
                 Section {
