@@ -1,10 +1,34 @@
 import Foundation
 
+/// Identifies which AI feature a /v1/messages call serves. Drives two things: the
+/// per-flow default model this build sends, and the `X-AI-Flow` header that lets the
+/// proxy re-route the model server-side in future without an App Store release.
+/// Builds shipped before this header existed send no flow, so proxy routing can
+/// never touch them.
+enum AIFlow: String {
+    case photo = "photo"
+    case describe = "describe"
+    case recipeAnalyze = "recipe-analyze"
+    case recipeImport = "recipe-import"
+    case insights = "insights"
+
+    /// Cost-tiered defaults: Sonnet for the structured food-estimation flows, Haiku
+    /// for narrating numbers the app already computed, Opus only where its high-res
+    /// vision earns the cost (reading nutrition labels / small print on import).
+    var model: String {
+        switch self {
+        case .photo, .describe, .recipeAnalyze: return "claude-sonnet-4-6"
+        case .recipeImport: return "claude-opus-4-8"
+        case .insights: return "claude-haiku-4-5"
+        }
+    }
+}
+
 final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
 
     private let attest: AppAttestService
     private let entitlements: EntitlementService?
-    private let model: String
+    private let modelOverride: String?
     private let session: URLSession
     private let endpoint: URL
 
@@ -12,19 +36,23 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         proxyBaseURL: URL,
         attest: AppAttestService,
         entitlements: EntitlementService? = nil,
-        model: String = "claude-opus-4-8",
+        modelOverride: String? = nil,
         session: URLSession = .shared
     ) {
         self.attest = attest
         self.entitlements = entitlements
         self.endpoint = proxyBaseURL.appendingPathComponent("v1/messages")
-        self.model = model
+        self.modelOverride = modelOverride
         self.session = session
+    }
+
+    private func model(for flow: AIFlow) -> String {
+        modelOverride ?? flow.model
     }
 
     /// Builds an authenticated POST to the proxy. The proxy adds the Anthropic API key
     /// server-side; the device proves itself via App Attest assertion bound to `body`.
-    private func authedRequest(body: Data) async throws -> URLRequest {
+    private func authedRequest(body: Data, flow: AIFlow) async throws -> URLRequest {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "content-type")
@@ -50,6 +78,10 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         // so this is purely a hint — App Attest still authenticates the device.
         req.addValue("1", forHTTPHeaderField: "X-Debug-Build")
         #endif
+        // Names the AI feature this call serves so the proxy can re-route the model
+        // server-side (cost tuning without an App Store release). Outside the
+        // assertion's bound bytes — routing is a cost lever, not a security boundary.
+        req.addValue(flow.rawValue, forHTTPHeaderField: "X-AI-Flow")
         req.httpBody = body
         return req
     }
@@ -59,8 +91,8 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
     /// and notifies `entitlements` of the outcome so the in-app credit display stays
     /// in sync with the proxy. Decrement is optimistic — `EntitlementService.refresh()`
     /// after the call still authoritatively reconciles with the server.
-    private func executeAuthedRequest(body: Data) async throws -> Data {
-        let req = try await authedRequest(body: body)
+    private func executeAuthedRequest(body: Data, flow: AIFlow) async throws -> Data {
+        let req = try await authedRequest(body: body, flow: flow)
         let (data, response) = try await session.data(for: req)
         guard let http = response as? HTTPURLResponse else {
             throw FoodRecognitionError.invalidResponse
@@ -89,7 +121,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
 
     func recognize(imageData: Data, hint: String?) async throws -> RecognizedMeal {
         let body = RequestBody(
-            model: model,
+            model: model(for: .photo),
             maxTokens: 1024,
             messages: [
                 Message(role: "user", content: [
@@ -108,7 +140,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         let bodyData = try JSONEncoder().encode(body)
 
         do {
-            let data = try await executeAuthedRequest(body: bodyData)
+            let data = try await executeAuthedRequest(body: bodyData, flow: .photo)
             let decoded = try JSONDecoder().decode(ResponseBody.self, from: data)
             guard let toolUse = decoded.content.first(where: { $0.type == "tool_use" }),
                   let input = toolUse.input else {
@@ -140,7 +172,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         guard !trimmed.isEmpty else { throw FoodRecognitionError.noResult }
 
         let body = RequestBody(
-            model: model,
+            model: model(for: .describe),
             maxTokens: 1024,
             messages: [
                 Message(role: "user", content: [.text(buildDescribePrompt(description: trimmed))])
@@ -152,7 +184,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         let bodyData = try JSONEncoder().encode(body)
 
         do {
-            let data = try await executeAuthedRequest(body: bodyData)
+            let data = try await executeAuthedRequest(body: bodyData, flow: .describe)
             let decoded = try JSONDecoder().decode(ResponseBody.self, from: data)
             guard let toolUse = decoded.content.first(where: { $0.type == "tool_use" }),
                   let input = toolUse.input else {
@@ -183,7 +215,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         guard !input.ingredients.isEmpty else { throw FoodRecognitionError.noResult }
 
         let body = RequestBody(
-            model: model,
+            model: model(for: .recipeAnalyze),
             maxTokens: 1024,
             messages: [
                 Message(role: "user", content: [.text(buildRecipePrompt(input: input))])
@@ -195,7 +227,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         let bodyData = try JSONEncoder().encode(body)
 
         do {
-            let data = try await executeAuthedRequest(body: bodyData)
+            let data = try await executeAuthedRequest(body: bodyData, flow: .recipeAnalyze)
             let decoded = try JSONDecoder().decode(RecipeResponseBody.self, from: data)
             guard let toolUse = decoded.content.first(where: { $0.type == "tool_use" }),
                   let toolInput = toolUse.input else {
@@ -238,7 +270,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         content.append(.text(buildImportRecipePrompt()))
 
         let body = RequestBody(
-            model: model,
+            model: model(for: .recipeImport),
             maxTokens: 2048,
             messages: [Message(role: "user", content: content)],
             tools: [importRecipeTool],
@@ -248,7 +280,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         let bodyData = try JSONEncoder().encode(body)
 
         do {
-            let data = try await executeAuthedRequest(body: bodyData)
+            let data = try await executeAuthedRequest(body: bodyData, flow: .recipeImport)
             let decoded = try JSONDecoder().decode(ImportRecipeResponseBody.self, from: data)
             guard let toolUse = decoded.content.first(where: { $0.type == "tool_use" }),
                   let input = toolUse.input else {

@@ -73,7 +73,7 @@ final class NutritionAnalysisService: Sendable {
         proxyBaseURL: URL,
         attest: AppAttestService,
         entitlements: EntitlementService? = nil,
-        model: String = "claude-opus-4-8",
+        model: String = AIFlow.insights.model,
         session: URLSession = .shared
     ) {
         self.attest = attest
@@ -113,6 +113,9 @@ final class NutritionAnalysisService: Sendable {
         // signals a debug iOS build so the proxy grants 1 initial credit instead of 50.
         req.addValue("1", forHTTPHeaderField: "X-Debug-Build")
         #endif
+        // Names the AI feature this call serves so the proxy can re-route the model
+        // server-side — mirrors ClaudeFoodRecognitionService.authedRequest.
+        req.addValue(AIFlow.insights.rawValue, forHTTPHeaderField: "X-AI-Flow")
         req.httpBody = bodyData
 
         do {

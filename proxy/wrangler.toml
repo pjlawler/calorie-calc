@@ -53,6 +53,11 @@ APPSTORE_ENVIRONMENT = "Production"
 # every banked balance is exactly where it was. The DAILY_REQUEST_LIMIT abuse ceiling
 # still applies while this is on.
 PROMO_FREE_AI = "1"
+# Optional per-flow model override, consulted only for requests that carry the
+# X-AI-Flow header (app builds after build 3 — older builds are never affected).
+# Keys: photo, describe, recipe-analyze, recipe-import, insights. Any flow missing
+# here falls back to DEFAULT_MODEL_ROUTES in src/index.ts. Example:
+# MODEL_ROUTES = '{"photo":"claude-sonnet-4-6","insights":"claude-haiku-4-5"}'
 
 [[kv_namespaces]]
 binding = "DEVICES"

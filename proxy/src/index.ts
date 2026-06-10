@@ -32,6 +32,11 @@ type Env = {
   // device for /v1/messages regardless of credits or subscription, without draining
   // balances. Flip off (or remove) to restore normal credit/subscription gating.
   PROMO_FREE_AI?: string;
+  // Optional JSON map of AI flow -> model, e.g. {"photo":"claude-sonnet-4-6"}.
+  // Overrides DEFAULT_MODEL_ROUTES per flow. Only consulted when the request
+  // carries an X-AI-Flow header (app builds newer than build 3) — older builds
+  // send no header and their body is forwarded verbatim.
+  MODEL_ROUTES?: string;
   DEVICES: KVNamespace;
   CHALLENGES: KVNamespace;
   RATE_LIMITS: KVNamespace;
@@ -58,6 +63,31 @@ function initialCreditsFor(env: Env, headers: Headers): number {
   if (headers.get("X-Debug-Build") === "1") return 1;
   if (headers.get("X-StoreKit-Env") === "Sandbox") return 1;
   return parseInt(env.INITIAL_FREE_CREDITS, 10) || 0;
+}
+
+// Per-flow model routing for app builds that name their flow via X-AI-Flow. Keys
+// match the AIFlow enum in ClaudeFoodRecognitionService.swift. Cost-tiered: Sonnet
+// for structured food estimation, Haiku for narrating app-computed numbers, Opus
+// where high-res vision earns its cost (nutrition labels on recipe import).
+// MODEL_ROUTES in wrangler.toml overrides any entry without a code change.
+const DEFAULT_MODEL_ROUTES: Record<string, string> = {
+  "photo": "claude-sonnet-4-6",
+  "describe": "claude-sonnet-4-6",
+  "recipe-analyze": "claude-sonnet-4-6",
+  "recipe-import": "claude-opus-4-8",
+  "insights": "claude-haiku-4-5",
+};
+
+function modelForFlow(env: Env, flow: string): string | undefined {
+  if (env.MODEL_ROUTES) {
+    try {
+      const routes = JSON.parse(env.MODEL_ROUTES) as Record<string, string>;
+      if (typeof routes[flow] === "string") return routes[flow];
+    } catch {
+      // Malformed override — fall through to the code defaults.
+    }
+  }
+  return DEFAULT_MODEL_ROUTES[flow];
 }
 
 // Temporary promo switch — see PROMO_FREE_AI in wrangler.toml. When on, everyone gets
@@ -505,8 +535,10 @@ async function applyTransactionToDevice(
   }
 }
 
-// Authenticated proxy. Body is a verbatim Anthropic /v1/messages payload — the worker
-// adds auth and rate-limits, but doesn't inspect or reshape the JSON.
+// Authenticated proxy. Body is an Anthropic /v1/messages payload — the worker adds
+// auth and rate-limits. For requests carrying an X-AI-Flow header (app builds newer
+// than build 3) it also rewrites `model` per MODEL_ROUTES; bodies without the header
+// are forwarded verbatim, byte-for-byte, as before.
 app.post("/v1/messages", async (c) => {
   const deviceId = c.req.header("X-Device-Id");
   const assertion = c.req.header("X-Assertion");
@@ -573,6 +605,22 @@ app.post("/v1/messages", async (c) => {
     return c.json({ error: "rate_limited" }, 429);
   }
 
+  // Server-side model routing. Runs after assertion verification (the assertion is
+  // bound to the client's exact body bytes) and rewrites only the upstream copy.
+  // No X-AI-Flow header — every build shipped so far — means no rewrite ever.
+  let upstreamBody: BodyInit = rawBody;
+  const flow = c.req.header("X-AI-Flow");
+  const routedModel = flow ? modelForFlow(c.env, flow) : undefined;
+  if (routedModel) {
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(rawBody)) as { model?: string };
+      parsed.model = routedModel;
+      upstreamBody = JSON.stringify(parsed);
+    } catch {
+      // Body isn't valid JSON — forward verbatim and let Anthropic reject it.
+    }
+  }
+
   const upstream = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -580,7 +628,7 @@ app.post("/v1/messages", async (c) => {
       "anthropic-version": "2023-06-01",
       "content-type": "application/json",
     },
-    body: rawBody,
+    body: upstreamBody,
   });
 
   // Persist counter regardless of upstream outcome — the assertion was valid and
@@ -598,6 +646,8 @@ app.post("/v1/messages", async (c) => {
     "status", upstream.status,
     "ent", ent.reason,
     "credits", before, "->", device.credits,
+    "flow", flow ?? "-",
+    "model", routedModel ?? "client",
   );
 
   if (upstream.status >= 400) {
