@@ -113,6 +113,9 @@ Secrets.xcconfig
 # Claude Code local settings
 .claude/
 
+# Cloudflare Wrangler local state
+.wrangler/
+
 # Logs / DBs
 *.log
 *.sqlite
