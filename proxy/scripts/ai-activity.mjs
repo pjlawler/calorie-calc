@@ -81,7 +81,9 @@ async function fetchDeviceRecords(token) {
     });
     if (!res.ok) return null;
     try {
-      return JSON.parse(await res.text());
+      const rec = JSON.parse(await res.text());
+      rec._key = key;
+      return rec;
     } catch {
       return null;
     }
@@ -230,6 +232,20 @@ async function main() {
   console.log(`  Caveats: install base is young, so low "dormant" is expected — repeat usage`);
   console.log(`  over a 30/60-day window is the real test. "Lifetime calls" counts all authed`);
   console.log(`  calls (registration, credit grants, AI), so it slightly overstates AI depth.`);
+
+  // Heavy hitters: top devices by lifetime authed calls, so day-over-day runs show
+  // whether the same devices keep coming back. Key is truncated — enough to recognize
+  // a device across runs without printing the full identity.
+  const top = [...aiEver].sort((a, b) => (b.counter ?? 0) - (a.counter ?? 0)).slice(0, 5);
+  console.log(`\n--- Top devices by lifetime calls (watchlist) ---`);
+  console.log(`  device           lifetime   last.ai.day   today   registered   region`);
+  for (const d of top) {
+    const id = (d._key ?? "").replace(/^d:/, "").slice(0, 12);
+    const todayCalls = d.rateLimitDay === today ? (d.rateLimitCount ?? 0) : 0;
+    console.log(
+      `  ${id.padEnd(14)}   ${String(d.counter ?? 0).padStart(8)}   ${d.rateLimitDay ?? "—"}    ${String(todayCalls).padStart(5)}   ${regDay(d) || "—"}   ${d.lastCountry ?? "—"}`,
+    );
+  }
 
   console.log(`\n--- Trend (last ${TREND_DAYS} days; "·" = not captured) ---`);
   console.log(fmtTable(history, totals));

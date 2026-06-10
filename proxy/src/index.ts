@@ -128,6 +128,7 @@ app.post("/v1/attest/register", async (c) => {
     rateLimitDay: "",
     rateLimitCount: 0,
     installId: null,
+    lastCountry: null,
   };
   await c.env.DEVICES.put(`d:${keyId}`, serializeDevice(stored));
   return c.json({ deviceId: keyId });
@@ -556,6 +557,11 @@ app.post("/v1/messages", async (c) => {
       subscriptionActive: false,
     }, 402);
   }
+
+  // Stamp the Cloudflare-observed country of this AI call onto the record (kept on
+  // both persist paths below). Observability only — never used for gating.
+  const country = (c.req.raw.cf?.country as string | undefined) ?? null;
+  if (country) device.lastCountry = country;
 
   // Abuse ceiling, not the paywall. Subscribers and credit users alike are bounded
   // here so a compromised key can't run our Anthropic bill into the ground. The count

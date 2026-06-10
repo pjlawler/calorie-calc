@@ -26,6 +26,10 @@ export type StoredDevice = {
   // and redirect the credit to the install's current device. Null on legacy records
   // and devices that have never sent X-Install-Id.
   installId: string | null;
+  // Cloudflare-observed country (ISO 3166-1 alpha-2) of the device's most recent AI
+  // call. Observability only — never used for gating. Null until the first AI call
+  // after this field shipped.
+  lastCountry: string | null;
 };
 
 export function parseDevice(raw: string): StoredDevice {
@@ -41,6 +45,7 @@ export function parseDevice(raw: string): StoredDevice {
     rateLimitDay: obj.rateLimitDay ?? "",
     rateLimitCount: obj.rateLimitCount ?? 0,
     installId: obj.installId ?? null,
+    lastCountry: obj.lastCountry ?? null,
   };
 }
 
