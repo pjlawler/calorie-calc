@@ -115,6 +115,10 @@ const COLS = [
   "registered_devices",
   "active_subscribers",
   "total_worker_requests",
+  // Of today's unique active AI devices, how many registered on an earlier calendar day
+  // (i.e. came back to use AI after the day they signed up). New = unique - returning, so
+  // only the returning count is stored. Appended last so old rows just read "" for it.
+  "returning_devices",
 ];
 
 function loadHistory() {
@@ -139,13 +143,14 @@ function saveHistory(map) {
 
 function fmtTable(history, totals) {
   const dates = [...new Set([...history.keys(), ...totals.keys()])].sort().slice(-TREND_DAYS);
-  const head = "  date         uniq.devices   ai.reqs   total.reqs";
+  const head = "  date         uniq.devices   returning   ai.reqs   total.reqs";
   const rows = dates.map((d) => {
     const h = history.get(d) ?? {};
     const uniq = h.unique_active_devices ?? "·";
+    const ret = h.returning_devices || "·";
     const ai = h.ai_requests ?? "·";
     const tot = h.total_worker_requests || totals.get(d) || "·";
-    return `  ${d}   ${String(uniq).padStart(10)}   ${String(ai).padStart(7)}   ${String(tot).padStart(9)}`;
+    return `  ${d}   ${String(uniq).padStart(10)}   ${String(ret).padStart(9)}   ${String(ai).padStart(7)}   ${String(tot).padStart(9)}`;
   });
   return [head, ...rows].join("\n");
 }
@@ -167,6 +172,21 @@ async function main() {
     (d) => d.subscriptionExpiresAt && d.subscriptionExpiresAt > nowMs,
   ).length;
 
+  // Returning = active today AND first registered on an earlier calendar day. New = the rest.
+  const regDay = (d) => (d.registeredAt ? new Date(d.registeredAt).toISOString().slice(0, 10) : "");
+  const returningDevices = activeToday.filter((d) => regDay(d) && regDay(d) < today).length;
+  const newDevices = uniqueDevices - returningDevices;
+
+  // Retention snapshot (as-of-now) from the durable per-device fields. rateLimitDay is the
+  // device's most recent AI-call day; counter is its lifetime authed-call count.
+  const aiEver = records.filter((d) => d.rateLimitDay);
+  const dayDiff = (d) => Math.floor((new Date(today) - new Date(d)) / 86400_000);
+  const recency = (d) => dayDiff(d.rateLimitDay);
+  const within = (n) => aiEver.filter((d) => recency(d) <= n).length;
+  const counters = aiEver.map((d) => d.counter ?? 0).sort((a, b) => a - b);
+  const pct = (p) => (counters.length ? counters[Math.floor((counters.length - 1) * p)] : 0);
+  const oneAndDone = counters.filter((c) => c <= 2).length;
+
   // Upsert today's snapshot, backfill total_worker_requests for every analytics day.
   const history = loadHistory();
   for (const [d, reqs] of totals) {
@@ -182,6 +202,7 @@ async function main() {
     registered_devices: String(registered),
     active_subscribers: String(subscribers),
     total_worker_requests: String(totals.get(today) ?? history.get(today)?.total_worker_requests ?? ""),
+    returning_devices: String(returningDevices),
   });
   saveHistory(history);
 
@@ -190,17 +211,31 @@ async function main() {
 
   console.log(`\n=== calorie_calc AI activity — ${today} UTC ===\n`);
   console.log(`AI calls today           : ${aiRequests}${partial}`);
-  console.log(`Unique devices today     : ${uniqueDevices}`);
+  console.log(`Unique devices today     : ${uniqueDevices}  (${newDevices} new / ${returningDevices} returning)`);
   console.log(
     `Avg calls / device       : ${uniqueDevices ? (aiRequests / uniqueDevices).toFixed(1) : "—"}`,
   );
   console.log(`Registered devices       : ${registered}  (${keyCount} device records)`);
   console.log(`Active subscribers       : ${subscribers}`);
+
+  const share = (n) => (aiEver.length ? ((100 * n) / aiEver.length).toFixed(1) : "—");
+  console.log(`\n--- Retention (live snapshot of all devices that ever used AI) ---`);
+  console.log(`Devices that ever used AI : ${aiEver.length}`);
+  console.log(`Last used AI today        : ${within(0)}  (${share(within(0))}%)`);
+  console.log(`Last used AI ≤7 days ago  : ${within(7)}  (${share(within(7))}%)`);
+  console.log(`Last used AI ≤30 days ago : ${within(30)}  (${share(within(30))}%)`);
+  console.log(`Dormant 30+ days          : ${aiEver.length - within(30)}  (${share(aiEver.length - within(30))}%)`);
+  console.log(`Lifetime calls / device   : median ${pct(0.5)}  p90 ${pct(0.9)}  max ${counters[counters.length - 1] ?? 0}`);
+  console.log(`One-and-done (≤2 calls)   : ${oneAndDone}  (${share(oneAndDone)}%)`);
+  console.log(`  Caveats: install base is young, so low "dormant" is expected — repeat usage`);
+  console.log(`  over a 30/60-day window is the real test. "Lifetime calls" counts all authed`);
+  console.log(`  calls (registration, credit grants, AI), so it slightly overstates AI depth.`);
+
   console.log(`\n--- Trend (last ${TREND_DAYS} days; "·" = not captured) ---`);
   console.log(fmtTable(history, totals));
   console.log(`\nHistory file: ${CSV_PATH}`);
   console.log(
-    `Note: unique-device & ai-call columns exist only for days this ran; total.reqs backfills from analytics.\n`,
+    `Note: unique-device, returning & ai-call columns exist only for days this ran; total.reqs backfills from analytics.\n`,
   );
 }
 

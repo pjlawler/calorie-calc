@@ -62,6 +62,11 @@ struct RootView: View {
             // `rewardedAd.bootstrap()` initialises Google Mobile Ads (no-op in the stub build
             // before the SDK is added).
             subscription.startListeningForTransactions()
+            // Resolve the StoreKit environment (Production vs Sandbox) before the first
+            // entitlement poll so AI calls carry the `X-StoreKit-Env` header. The proxy
+            // uses it to keep the free-AI promo on for App Store users while letting
+            // App Review / TestFlight (Sandbox) reach the paywall — see StoreKitEnvironment.
+            await StoreKitEnvironment.shared.prime()
             await subscription.loadProduct()
             await entitlements.refresh()
             // ATT must resolve before the ad SDK can request personalized fills. Prompting

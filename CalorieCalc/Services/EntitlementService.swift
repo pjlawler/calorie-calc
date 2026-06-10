@@ -83,6 +83,12 @@ final class EntitlementService {
             // /v1/account/state can trip the initial credit grant, so both carry it.
             req.addValue(installId, forHTTPHeaderField: "X-Install-Id")
         }
+        if let skEnv = StoreKitEnvironment.shared.value {
+            // Limits the free-AI promo to Production users so the account-state poll
+            // reports real balances (not the promo's forced ≥1) in Sandbox — see
+            // StoreKitEnvironment. Mirrors the header sent on /v1/messages.
+            req.addValue(skEnv, forHTTPHeaderField: "X-StoreKit-Env")
+        }
         #if DEBUG
         // Mirror of the same header sent on /v1/messages — see ClaudeFoodRecognitionService
         // for the full rationale. Either endpoint can trip the initial credit grant for a

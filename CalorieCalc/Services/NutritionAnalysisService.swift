@@ -103,6 +103,11 @@ final class NutritionAnalysisService: Sendable {
             // either endpoint can trip the initial grant, so both carry the install id.
             req.addValue(installId, forHTTPHeaderField: "X-Install-Id")
         }
+        if let skEnv = StoreKitEnvironment.shared.value {
+            // Limits the free-AI promo to Production users — see StoreKitEnvironment and
+            // ClaudeFoodRecognitionService for the full rationale.
+            req.addValue(skEnv, forHTTPHeaderField: "X-StoreKit-Env")
+        }
         #if DEBUG
         // Mirror of the same header sent on /v1/messages by ClaudeFoodRecognitionService —
         // signals a debug iOS build so the proxy grants 1 initial credit instead of 50.

@@ -36,6 +36,13 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
             // re-roll the initial free-credit grant. See InstallIdentity for details.
             req.addValue(installId, forHTTPHeaderField: "X-Install-Id")
         }
+        if let skEnv = StoreKitEnvironment.shared.value {
+            // Lets the proxy limit the free-AI promo to Production (App Store) users —
+            // Sandbox (App Review / TestFlight) falls through to the paywall. See
+            // StoreKitEnvironment. Omitted until resolved; the proxy treats absence as
+            // production.
+            req.addValue(skEnv, forHTTPHeaderField: "X-StoreKit-Env")
+        }
         #if DEBUG
         // Hint to the proxy that this is a debug build so it grants 1 initial credit
         // instead of the production amount, making the paywall flow easy to retest
