@@ -304,16 +304,17 @@ final class HealthKitService {
         let context = modelContainer.mainContext
         let now = Date()
         for (day, value) in buckets {
+            let key = CachedDailySteps.dayKey(for: day)
             let existing = try? context.fetch(
                 FetchDescriptor<CachedDailySteps>(
-                    predicate: #Predicate<CachedDailySteps> { $0.dayStart == day }
+                    predicate: #Predicate<CachedDailySteps> { $0.dayKey == key }
                 )
             ).first
             if let existing {
                 existing.stepCount = value
                 existing.updatedAt = now
             } else {
-                context.insert(CachedDailySteps(dayStart: day, stepCount: value, updatedAt: now))
+                context.insert(CachedDailySteps(dayKey: key, stepCount: value, updatedAt: now))
             }
         }
         try context.save()
@@ -369,10 +370,10 @@ final class HealthKitService {
     }
 
     func dailySteps(on date: Date, calendar: Calendar = .current) async throws -> Double {
-        let day = calendar.startOfDay(for: date)
+        let key = CachedDailySteps.dayKey(for: date, calendar: calendar)
         let context = modelContainer.mainContext
         let descriptor = FetchDescriptor<CachedDailySteps>(
-            predicate: #Predicate<CachedDailySteps> { $0.dayStart == day }
+            predicate: #Predicate<CachedDailySteps> { $0.dayKey == key }
         )
         return (try? context.fetch(descriptor))?.first?.stepCount ?? 0
     }
@@ -382,18 +383,21 @@ final class HealthKitService {
         through endDate: Date,
         calendar: Calendar = .current
     ) async throws -> [Date: Double] {
-        let rangeStart = calendar.startOfDay(for: startDate)
-        guard let rangeEnd = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: endDate)) else { return [:] }
+        let startKey = CachedDailySteps.dayKey(for: startDate, calendar: calendar)
+        let endKey = CachedDailySteps.dayKey(for: endDate, calendar: calendar)
         let context = modelContainer.mainContext
         let descriptor = FetchDescriptor<CachedDailySteps>(
             predicate: #Predicate<CachedDailySteps> {
-                $0.dayStart >= rangeStart && $0.dayStart < rangeEnd
+                $0.dayKey >= startKey && $0.dayKey <= endKey
             }
         )
         let rows = (try? context.fetch(descriptor)) ?? []
         var buckets: [Date: Double] = [:]
         for row in rows {
-            buckets[row.dayStart] = row.stepCount
+            // Rebuild the day's start-of-day Date in the current calendar so consumers keyed by
+            // Date still line up with the week grid's dates.
+            guard let day = CachedDailySteps.date(forDayKey: row.dayKey, calendar: calendar) else { continue }
+            buckets[day] = row.stepCount
         }
         return buckets
     }
