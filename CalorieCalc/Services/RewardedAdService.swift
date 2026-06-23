@@ -55,7 +55,29 @@ final class RewardedAdService {
         _ = await ATTrackingManager.requestTrackingAuthorization()
     }
 
+    /// Seconds to wait for a load to complete before giving up. Any single leg
+    /// below (GMA init, the ad fill, or the App Attest registration round-trips to
+    /// the proxy) can stall on a flaky network; without a ceiling the caller's
+    /// button hangs on "Preparing video…" indefinitely. The caller retries.
+    private let loadTimeout: Duration = .seconds(12)
+
     func loadAd() async throws {
+        // Race the real load against a deadline. Whichever child finishes first wins;
+        // a timeout cancels the in-flight load (URLSession + Task.sleep are
+        // cancellation-aware), leaving us in a clean not-ready state to retry from.
+        let timeout = loadTimeout
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await self.performLoad() }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw RewardedAdError.timedOut
+            }
+            defer { group.cancelAll() }
+            try await group.next()
+        }
+    }
+
+    private func performLoad() async throws {
         // Idempotent — guards against the paywall opening before RootView.task got
         // around to bootstrapping the SDK. Without this, the very first load on a
         // cold launch can race the GMA initializer and fail.
@@ -146,6 +168,7 @@ final class RewardedAdService {
 enum RewardedAdError: LocalizedError, Sendable {
     case notReady
     case sdkNotInstalled
+    case timedOut
 
     var errorDescription: String? {
         switch self {
@@ -153,6 +176,8 @@ enum RewardedAdError: LocalizedError, Sendable {
             "The ad isn't ready yet — give it a moment and try again."
         case .sdkNotInstalled:
             "Ad SDK isn't installed in this build."
+        case .timedOut:
+            "The video took too long to load."
         }
     }
 }

@@ -138,13 +138,15 @@ struct PaywallSheet: View {
 
     private var watchAdButton: some View {
         Button {
-            Task { await watchAd() }
+            // When a load has failed, the button doubles as a retry affordance;
+            // otherwise it presents the loaded ad.
+            Task { adLoadFailed ? await loadAdIfNeeded() : await watchAd() }
         } label: {
             HStack {
                 if isWatchingAd {
                     ProgressView().controlSize(.small)
                 } else {
-                    Image(systemName: "play.rectangle.fill")
+                    Image(systemName: adLoadFailed ? "arrow.clockwise" : "play.rectangle.fill")
                 }
                 Text(watchAdButtonLabel)
                     .fontWeight(.semibold)
@@ -153,12 +155,14 @@ struct PaywallSheet: View {
         }
         .buttonStyle(.bordered)
         .controlSize(.large)
-        .disabled(!rewardedAd.isReady || isWatchingAd || adLoadFailed)
+        // Enabled when the ad is ready (to watch) or a load failed (to retry);
+        // disabled only while a load is in flight or the ad is presenting.
+        .disabled(isWatchingAd || (!rewardedAd.isReady && !adLoadFailed))
     }
 
     private var watchAdButtonLabel: String {
         if isWatchingAd { return "Loading video…" }
-        if adLoadFailed { return "Video unavailable" }
+        if adLoadFailed { return "Video unavailable — tap to retry" }
         if !rewardedAd.isReady { return "Preparing video…" }
         return "Watch a video — earn credits"
     }
@@ -244,15 +248,32 @@ struct PaywallSheet: View {
         // ATT is resolved at app launch (see RootView.task) so it's reliably reachable
         // for reviewers — by the time we reach this point the user's tracking choice
         // is already recorded and the SDK will respect it on this request.
-        do {
-            try await rewardedAd.loadAd()
-            adLoadFailed = false
-            adLoadError = nil
-        } catch {
-            adLoadFailed = true
-            adLoadError = (error as NSError).localizedDescription
-            print("PaywallSheet.loadAd failed: \(error)")
+        //
+        // loadAd() self-times-out, so a stalled network leg surfaces as an error here
+        // rather than hanging the button on "Preparing video…". We retry a few times
+        // with backoff before giving up — only flipping `adLoadFailed` (which shows
+        // "Video unavailable") once attempts are exhausted, so the button stays on
+        // "Preparing video…" through the transient retries.
+        adLoadFailed = false
+        let maxAttempts = 3
+        for attempt in 1...maxAttempts {
+            do {
+                try await rewardedAd.loadAd()
+                adLoadFailed = false
+                adLoadError = nil
+                return
+            } catch is CancellationError {
+                return  // sheet dismissed mid-load — nothing to surface
+            } catch {
+                adLoadError = (error as NSError).localizedDescription
+                print("PaywallSheet.loadAd failed (attempt \(attempt)/\(maxAttempts)): \(error)")
+                if attempt < maxAttempts {
+                    // Linear backoff; bail out quietly if the sheet is dismissed.
+                    do { try await Task.sleep(for: .seconds(2 * attempt)) } catch { return }
+                }
+            }
         }
+        adLoadFailed = true
     }
 
     private func watchAd() async {
