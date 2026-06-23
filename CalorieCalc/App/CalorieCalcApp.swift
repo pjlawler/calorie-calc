@@ -91,6 +91,10 @@ struct CalorieCalcApp: App {
         // store. No-op once the install has run this branch (UserDefaults flag).
         CachedFoodStoreMigrator.restore(stagedFoods, into: modelContainer.mainContext)
 
+        // Drop the legacy Date-keyed step-cache rows now that CachedDailySteps keys by a
+        // timezone-stable yyyymmdd Int. HK sync rebuilds them. No-op after the first run.
+        StepsCacheMigrator.clearLegacyRowsIfNeeded(in: modelContainer.mainContext)
+
         healthKitService = HealthKitService(modelContainer: modelContainer)
         let openFoodFacts = OpenFoodFactsService()
         let usda = USDAFoodDataCentralService()

@@ -4,6 +4,7 @@ import SwiftData
 struct WeekCalendarView: View {
 
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(HealthKitService.self) private var healthKitService
 
     @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
@@ -69,6 +70,19 @@ struct WeekCalendarView: View {
             )
             .task(id: vm.referenceDate) { await vm.refreshHealthKit(for: weekPeriod, weekStart: ws) }
             .refreshable { await vm.refreshHealthKit(for: weekPeriod, weekStart: ws) }
+            // Re-anchor the week when the device timezone changes (travel) or the day rolls over at
+            // local midnight. Without this the grid stays frozen on the launch timezone's day/week
+            // boundaries until relaunch — see WeekCalendarViewModel.handleSignificantTimeChange.
+            #if canImport(UIKit)
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+                handleTimeChange(weekPeriod: weekPeriod, weekStart: ws)
+            }
+            #endif
+            // iOS often finalises a timezone change only after the app returns to the foreground,
+            // so re-check on activation too.
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { handleTimeChange(weekPeriod: weekPeriod, weekStart: ws) }
+            }
         } else {
             ProgressView().controlSize(.large)
         }
@@ -138,6 +152,19 @@ struct WeekCalendarView: View {
               let vm = viewModel else { return false }
         let dates = vm.assembler(for: current, weekStart: displayWeekStart).weekDates
         return !dates.contains { Calendar.current.isDate($0, inSameDayAs: .now) }
+    }
+
+    /// Responds to a timezone change or midnight rollover. Preserves the user's position: only
+    /// snaps to "now" if they were already on the current week, so a midnight tick doesn't yank
+    /// someone out of a past week they're reviewing. Forces a HealthKit refresh when the timezone
+    /// moved but the week didn't (so `.task(id:)` won't re-fire on its own).
+    private func handleTimeChange(weekPeriod: GoalPeriod, weekStart ws: Weekday) {
+        guard let vm = viewModel else { return }
+        let wasOnCurrentWeek = !showCurrentWeekButton
+        let timeZoneMoved = vm.handleSignificantTimeChange(reanchorToNow: wasOnCurrentWeek)
+        if timeZoneMoved && !wasOnCurrentWeek {
+            Task { await vm.refreshHealthKit(for: weekPeriod, weekStart: ws) }
+        }
     }
 
     private func ensureBootstrap() async {
