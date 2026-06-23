@@ -63,22 +63,33 @@ async function pool(items, n, fn) {
   return out;
 }
 
-async function fetchDeviceRecords(token) {
-  // wrangler handles pagination + token refresh as a side effect.
+function listDeviceKeys() {
+  // wrangler handles pagination + token refresh as a side effect. Run this BEFORE
+  // reading the token so wranglerToken() sees the freshened value (see main()).
   const raw = execSync(`npx wrangler kv key list --namespace-id ${DEVICES_NS}`, {
     cwd: PROXY_DIR,
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", "ignore"],
   }).toString();
-  const keys = JSON.parse(raw)
+  return JSON.parse(raw)
     .map((k) => k.name)
     .filter((name) => name.startsWith("d:"));
+}
 
+async function fetchDeviceRecords(keys, token) {
   const base = `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/storage/kv/namespaces/${DEVICES_NS}/values/`;
   const results = await pool(keys, CONCURRENCY, async (key) => {
     const res = await fetch(base + encodeURIComponent(key), {
       headers: { Authorization: `Bearer ${token}` },
     });
+    // Auth failures must be LOUD: a stale/expired token 401s on every value while
+    // the key list still succeeds, which would otherwise silently write a zeroed
+    // snapshot. Throw so the run aborts instead of recording bogus zeros.
+    if (res.status === 401 || res.status === 403) {
+      throw new Error(
+        `value fetch unauthorized (HTTP ${res.status}) — Wrangler token rejected; run \`wrangler login\``,
+      );
+    }
     if (!res.ok) return null;
     try {
       const rec = JSON.parse(await res.text());
@@ -158,9 +169,13 @@ function fmtTable(history, totals) {
 }
 
 async function main() {
+  // List keys first: `wrangler kv key list` refreshes an expired OAuth token on disk
+  // as a side effect. Only THEN read the token, so the value fetches and analytics
+  // query use the freshened credential rather than a stale one captured up front.
+  const keys = listDeviceKeys();
   const token = wranglerToken();
   const [{ records, keyCount }, totals] = await Promise.all([
-    fetchDeviceRecords(token),
+    fetchDeviceRecords(keys, token),
     dailyTotals(token),
   ]);
 
