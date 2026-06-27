@@ -488,7 +488,11 @@ struct FoodPortionSheet: View {
                                 .foregroundStyle(stagedNewInMyFoods ? Color.accentColor : Color.secondary)
                         }
                         .accessibilityLabel(stagedNewInMyFoods ? "Remove from My Foods" : "Save to My Foods")
-                    } else if !pickMealAndDate {
+                    } else {
+                        // Log flows (tap a food / search a new one — pickMealAndDate) and the
+                        // tap-existing flow share the immediate fork toggle. A fresh search
+                        // result has no CachedFood, so isInMyFoods is false → defaults to
+                        // off and the user opts in; toggleMyFoods() creates the cached row.
                         Button { toggleMyFoods() } label: {
                             Image(systemName: "fork.knife")
                                 .foregroundStyle(isInMyFoods ? Color.accentColor : Color.secondary)
