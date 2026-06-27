@@ -132,14 +132,13 @@ final class SubscriptionService {
     private func postVerify(jws: String) async throws {
         struct Body: Encodable { let jwsRepresentation: String }
         let bodyData = try JSONEncoder().encode(Body(jwsRepresentation: jws))
-        let assertion = try await attest.assertion(for: bodyData)
-        let deviceId = try await attest.deviceId()
+        let attested = try await attest.attestedHeaders(for: bodyData)
 
         var req = URLRequest(url: proxyBaseURL.appendingPathComponent("v1/subscriptions/verify"))
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "content-type")
-        req.addValue(deviceId, forHTTPHeaderField: "X-Device-Id")
-        req.addValue(assertion, forHTTPHeaderField: "X-Assertion")
+        req.addValue(attested.deviceId, forHTTPHeaderField: "X-Device-Id")
+        req.addValue(attested.assertion, forHTTPHeaderField: "X-Assertion")
         req.httpBody = bodyData
 
         let (_, resp) = try await session.data(for: req)

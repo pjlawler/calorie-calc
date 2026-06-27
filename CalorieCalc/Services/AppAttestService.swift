@@ -22,7 +22,19 @@ actor AppAttestService {
     private var registrationTask: Task<String, Error>?
 
     private static let keychainService = "com.lawlerinnovationsinc-calorie"
+    // A Debug (Xcode = development env) build and a Release (TestFlight/App Store = production
+    // env) build share a keychain that survives uninstalls, so a single account name lets one
+    // build's key get reused by the other environment — which Apple rejects with
+    // DCError.invalidInput. We give the Debug build its OWN slot so the two coexist on one
+    // device. Production KEEPS the original "AppAttest.keyId" name on purpose: renaming it would
+    // make every existing install re-register a fresh identity on update, stranding ad-reward
+    // credits and re-rolling the initial grant — the exact churn this service guards against.
+    // #if DEBUG tracks APP_ATTEST_ENV exactly (Debug → development, Release → production).
+    #if DEBUG
+    private static let keychainAccount = "AppAttest.keyId.development"
+    #else
     private static let keychainAccount = "AppAttest.keyId"
+    #endif
 
     init(proxyBaseURL: URL, session: URLSession = .shared) {
         self.proxyBaseURL = proxyBaseURL
@@ -75,56 +87,83 @@ actor AppAttestService {
         return keyId
     }
 
-    /// Builds a base64 assertion over the request body. The proxy verifies it against the
-    /// stored public key.
-    func assertion(for body: Data) async throws -> String {
-        let keyId = try await deviceId()
-        guard let keyIdData = Data(base64Encoded: keyId) else {
-            throw AppAttestError.malformedKeyId
-        }
-        var input = keyIdData
-        input.append(body)
-        return try await sign(keyId: keyId, clientData: input)
+    /// The `X-Device-Id` + `X-Assertion` pair for one request. Returned together (rather than
+    /// having callers fetch the id via a separate `deviceId()` call) so the two ALWAYS name the
+    /// same key: a recovery re-registration inside the signing path changes the keyId mid-call,
+    /// and a stale `X-Device-Id` paired with a fresh assertion would be rejected by the proxy.
+    struct AttestedHeaders {
+        let deviceId: String
+        let assertion: String
     }
 
-    /// Signs a GET request that has no body. The proxy reconstructs the same byte string
-    /// (`keyId || "GET:" || path || ":" || timestampMs`) and verifies the assertion;
-    /// requests outside a 60s window are rejected. Use for read-only authenticated
-    /// endpoints like `/v1/account/state`.
-    func assertionForGet(path: String, timestampMs: Int64) async throws -> String {
-        let keyId = try await deviceId()
-        guard let keyIdData = Data(base64Encoded: keyId) else {
-            throw AppAttestError.malformedKeyId
-        }
-        var input = keyIdData
-        input.append(Data("GET:\(path):\(timestampMs)".utf8))
-        return try await sign(keyId: keyId, clientData: input)
-    }
-
-    private func sign(keyId: String, clientData: Data) async throws -> String {
-        let clientDataHash = Data(SHA256.hash(data: clientData))
-        do {
-            let assertion = try await attestService.generateAssertion(
-                keyId,
-                clientDataHash: clientDataHash
-            )
-            return assertion.base64EncodedString()
-        } catch {
-            // Only discard the key when Apple says it's genuinely unusable — `.invalidKey`
-            // is what you get when a key is invalidated by app restore / OS update / tamper.
-            // Transient failures (`.serverUnavailable`, networking) must NOT nuke a good key:
-            // doing so forces a re-registration and a brand-new device id, which churns
-            // identity (ad-reward credits then land on a stale id) and re-rolls the initial
-            // free-credit grant. Re-register only on a real invalid-key error.
-            if let dcError = error as? DCError, dcError.code == .invalidKey {
-                print("AppAttestService: key invalidated by Apple — discarding for re-registration")
-                Self.deleteKeychain()
-                cachedKeyId = nil
-            } else {
-                print("AppAttestService: assertion failed transiently, keeping key: \(error)")
+    /// Builds the attested headers for a POST body. The proxy verifies the assertion against
+    /// the stored public key for `deviceId`.
+    func attestedHeaders(for body: Data) async throws -> AttestedHeaders {
+        try await signedAssertion { keyId in
+            guard let keyIdData = Data(base64Encoded: keyId) else {
+                throw AppAttestError.malformedKeyId
             }
+            var input = keyIdData
+            input.append(body)
+            return input
+        }
+    }
+
+    /// Builds the attested headers for a GET request that has no body. The proxy reconstructs
+    /// the same byte string (`keyId || "GET:" || path || ":" || timestampMs`) and verifies the
+    /// assertion; requests outside a 60s window are rejected. Use for read-only authenticated
+    /// endpoints like `/v1/account/state`.
+    func attestedHeadersForGet(path: String, timestampMs: Int64) async throws -> AttestedHeaders {
+        try await signedAssertion { keyId in
+            guard let keyIdData = Data(base64Encoded: keyId) else {
+                throw AppAttestError.malformedKeyId
+            }
+            var input = keyIdData
+            input.append(Data("GET:\(path):\(timestampMs)".utf8))
+            return input
+        }
+    }
+
+    /// Signs `clientData(keyId)` with the current key and returns the keyId it used. If Apple
+    /// rejects the stored key as unusable — `.invalidKey` (invalidated by app restore / OS
+    /// update / tamper) or `.invalidInput` (notably what you get when the stored key was minted
+    /// under a different App Attest environment, e.g. after the same device runs both an Xcode
+    /// build [development] and a TestFlight build [production]; the keychain keyId survives the
+    /// uninstall, so the wrong-environment key keeps getting reused) — it discards the key,
+    /// registers a fresh one, and retries exactly ONCE.
+    ///
+    /// The single retry is deliberate: it bounds identity churn so a transient Apple blip can't
+    /// loop us into re-registering on every call. All other failures (`.serverUnavailable`,
+    /// networking) keep the key untouched and propagate — nuking a good key there would force a
+    /// needless re-registration, churning the device id (ad-reward credits then land on a stale
+    /// id) and re-rolling the initial free-credit grant.
+    private func signedAssertion(_ clientData: (String) throws -> Data) async throws -> AttestedHeaders {
+        let keyId = try await deviceId()
+        do {
+            let assertion = try await rawSign(keyId: keyId, clientData: try clientData(keyId))
+            return AttestedHeaders(deviceId: keyId, assertion: assertion)
+        } catch let error as DCError where error.code == .invalidKey || error.code == .invalidInput {
+            print("AppAttestService: key rejected by Apple (code \(error.code.rawValue)) — re-registering once and retrying")
+            Self.deleteKeychain()
+            cachedKeyId = nil
+            // Empty keychain + cache → deviceId() mints and registers a fresh key. If this
+            // retried assertion also fails, we let it propagate rather than loop.
+            let freshKeyId = try await deviceId()
+            let assertion = try await rawSign(keyId: freshKeyId, clientData: try clientData(freshKeyId))
+            return AttestedHeaders(deviceId: freshKeyId, assertion: assertion)
+        } catch {
+            print("AppAttestService: assertion failed transiently, keeping key: \(error)")
             throw error
         }
+    }
+
+    private func rawSign(keyId: String, clientData: Data) async throws -> String {
+        let clientDataHash = Data(SHA256.hash(data: clientData))
+        let assertion = try await attestService.generateAssertion(
+            keyId,
+            clientDataHash: clientDataHash
+        )
+        return assertion.base64EncodedString()
     }
 
     private func registerNewKey() async throws -> String {

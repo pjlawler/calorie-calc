@@ -1,3 +1,4 @@
+import DeviceCheck
 import Foundation
 
 nonisolated struct RecognizedMeal: Sendable, Hashable {
@@ -250,6 +251,17 @@ nonisolated enum FoodRecognitionError: LocalizedError, Sendable {
     case noResult
     case overQuota(String)
     case outOfCredits
+    case deviceVerificationFailed
+
+    /// Maps a low-level thrown error to the right case. App Attest (`DCError`) failures get a
+    /// friendly device-verification message instead of leaking Apple's raw
+    /// "com.apple.devicecheck.error error 2" string into the UI. The assertion path already
+    /// self-heals once (see AppAttestService.signedAssertion); this only surfaces when that
+    /// retry also fails.
+    static func from(_ error: Error) -> FoodRecognitionError {
+        if error is DCError { return .deviceVerificationFailed }
+        return .networkFailure(error.localizedDescription)
+    }
 
     var errorDescription: String? {
         switch self {
@@ -265,6 +277,8 @@ nonisolated enum FoodRecognitionError: LocalizedError, Sendable {
             "Claude rejected the request: \(message)"
         case .outOfCredits:
             "Out of AI credits. Watch a short ad to earn more, or upgrade for unlimited."
+        case .deviceVerificationFailed:
+            "Couldn't verify your device with Apple. Please try again in a moment."
         }
     }
 }
