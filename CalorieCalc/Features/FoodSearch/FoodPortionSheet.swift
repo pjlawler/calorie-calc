@@ -725,13 +725,11 @@ struct FoodPortionSheet: View {
     }
 
     private func normalizedSelectedDay(from pickerDate: Date) -> Date {
-        // DatePicker(.date) may round-trip through GMT and shift a day for some locales.
-        // Read Y/M/D in UTC, then rebuild in local calendar to preserve the user's chosen date.
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
-        let components = utc.dateComponents([.year, .month, .day], from: pickerDate)
-        let localDate = Calendar.current.date(from: components) ?? pickerDate
-        return Calendar.current.startOfDay(for: localDate)
+        // DatePicker(.date) presents and edits in the device's current time zone, so the
+        // chosen day is whatever Calendar.current reports — the same calendar used to bucket
+        // DayLogs at display time (and matching the manual-workout path). Reading Y/M/D in UTC
+        // shifts a day east of GMT (e.g. picking 6/27 in Bangkok would log to 6/26).
+        Calendar.current.startOfDay(for: pickerDate)
     }
 
     private func propagateNotesToCache(_ notes: String?) {
