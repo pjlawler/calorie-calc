@@ -1,3 +1,4 @@
+import DeviceCheck
 import Foundation
 
 struct PeriodNutritionData: Sendable {
@@ -42,6 +43,17 @@ enum NutritionAnalysisError: LocalizedError {
     case networkFailure(String)
     case noResult
     case outOfCredits
+    case deviceVerificationFailed
+
+    /// Maps a low-level thrown error to the right case. App Attest (`DCError`) failures get a
+    /// friendly device-verification message instead of leaking Apple's raw
+    /// "com.apple.devicecheck.error error 2" string into the UI. The assertion path already
+    /// self-heals once (see AppAttestService.signedAssertion); this only surfaces when that
+    /// retry also fails.
+    static func from(_ error: Error) -> NutritionAnalysisError {
+        if error is DCError { return .deviceVerificationFailed }
+        return .networkFailure(error.localizedDescription)
+    }
 
     var errorDescription: String? {
         switch self {
@@ -57,6 +69,8 @@ enum NutritionAnalysisError: LocalizedError {
             "Claude didn't return any analysis text."
         case .outOfCredits:
             "Out of AI credits. Watch a short ad to earn more, or upgrade for unlimited."
+        case .deviceVerificationFailed:
+            "Couldn't verify your device with Apple. Please try again in a moment."
         }
     }
 }
@@ -95,8 +109,9 @@ final class NutritionAnalysisService: Sendable {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "content-type")
-        req.addValue(try await attest.deviceId(), forHTTPHeaderField: "X-Device-Id")
-        req.addValue(try await attest.assertion(for: bodyData), forHTTPHeaderField: "X-Assertion")
+        let attested = try await attest.attestedHeaders(for: bodyData)
+        req.addValue(attested.deviceId, forHTTPHeaderField: "X-Device-Id")
+        req.addValue(attested.assertion, forHTTPHeaderField: "X-Assertion")
         let installId = InstallIdentity.shared.id
         if !installId.isEmpty {
             // Mirrors the header sent on /v1/messages by ClaudeFoodRecognitionService —
@@ -156,7 +171,7 @@ final class NutritionAnalysisService: Sendable {
         } catch let err as NutritionAnalysisError {
             throw err
         } catch {
-            throw NutritionAnalysisError.networkFailure(error.localizedDescription)
+            throw NutritionAnalysisError.from(error)
         }
     }
 

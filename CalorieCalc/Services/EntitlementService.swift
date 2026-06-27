@@ -69,13 +69,12 @@ final class EntitlementService {
     private func fetchState() async throws -> AccountState {
         let path = "/v1/account/state"
         let timestampMs = Int64(Date.now.timeIntervalSince1970 * 1000)
-        let assertion = try await attest.assertionForGet(path: path, timestampMs: timestampMs)
-        let deviceId = try await attest.deviceId()
+        let attested = try await attest.attestedHeadersForGet(path: path, timestampMs: timestampMs)
 
         var req = URLRequest(url: proxyBaseURL.appendingPathComponent("v1/account/state"))
         req.httpMethod = "GET"
-        req.addValue(deviceId, forHTTPHeaderField: "X-Device-Id")
-        req.addValue(assertion, forHTTPHeaderField: "X-Assertion")
+        req.addValue(attested.deviceId, forHTTPHeaderField: "X-Device-Id")
+        req.addValue(attested.assertion, forHTTPHeaderField: "X-Assertion")
         req.addValue(String(timestampMs), forHTTPHeaderField: "X-Timestamp")
         let installId = InstallIdentity.shared.id
         if !installId.isEmpty {

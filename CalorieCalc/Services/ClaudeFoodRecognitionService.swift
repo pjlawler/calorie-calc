@@ -56,8 +56,9 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.addValue("application/json", forHTTPHeaderField: "content-type")
-        req.addValue(try await attest.deviceId(), forHTTPHeaderField: "X-Device-Id")
-        req.addValue(try await attest.assertion(for: body), forHTTPHeaderField: "X-Assertion")
+        let attested = try await attest.attestedHeaders(for: body)
+        req.addValue(attested.deviceId, forHTTPHeaderField: "X-Device-Id")
+        req.addValue(attested.assertion, forHTTPHeaderField: "X-Assertion")
         let installId = InstallIdentity.shared.id
         if !installId.isEmpty {
             // iCloud-synced identifier so reinstalling on the same Apple ID can't
@@ -163,7 +164,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         } catch let err as FoodRecognitionError {
             throw err
         } catch {
-            throw FoodRecognitionError.networkFailure(error.localizedDescription)
+            throw FoodRecognitionError.from(error)
         }
     }
 
@@ -207,7 +208,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         } catch let err as FoodRecognitionError {
             throw err
         } catch {
-            throw FoodRecognitionError.networkFailure(error.localizedDescription)
+            throw FoodRecognitionError.from(error)
         }
     }
 
@@ -252,7 +253,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         } catch let err as FoodRecognitionError {
             throw err
         } catch {
-            throw FoodRecognitionError.networkFailure(error.localizedDescription)
+            throw FoodRecognitionError.from(error)
         }
     }
 
@@ -308,7 +309,7 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
         } catch let err as FoodRecognitionError {
             throw err
         } catch {
-            throw FoodRecognitionError.networkFailure(error.localizedDescription)
+            throw FoodRecognitionError.from(error)
         }
     }
 
