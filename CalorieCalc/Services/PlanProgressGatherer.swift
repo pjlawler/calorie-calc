@@ -30,8 +30,12 @@ enum PlanProgressGatherer {
         let start = calendar.startOfDay(for: planStartDate)
         let end = today
 
-        // Burn for the plan window. Best-effort — HealthKit may be unauthorized/empty.
-        let burns = (try? await healthKit.dailyWorkoutBurn(from: start, through: now)) ?? [:]
+        // Pull burns over a long horizon (up to a year back) once. The same per-day totals serve
+        // both the current-plan window and the long-term context block below — so a brand-new plan
+        // still gets a months-long behavior baseline to compare its target against.
+        let longStart = calendar.date(byAdding: .day, value: -(longTermWindowDays - 1), to: today) ?? today
+        let burnsStart = Swift.min(longStart, start)
+        let burns = (try? await healthKit.dailyWorkoutBurn(from: burnsStart, through: now)) ?? [:]
         let totals = HistoryAggregator.dailyTotals(dayLogs: dayLogs, workoutBurnByDay: burns)
 
         let calories = HistoryAggregator.summary(metric: .calories, start: start, end: end, dailyTotals: totals)
@@ -60,6 +64,16 @@ enum PlanProgressGatherer {
             return "Current plan — since \(fmt.string(from: planStartDate))"
         }()
 
+        let longTermContext = longTermContext(
+            totals: totals,
+            weightEntries: weightEntries,
+            displayUnit: displayUnit,
+            longStart: longStart,
+            today: today,
+            now: now,
+            calendar: calendar
+        )
+
         return PeriodNutritionData(
             periodLabel: label,
             dayCount: dayCount,
@@ -82,7 +96,49 @@ enum PlanProgressGatherer {
             weightUnitSuffix: displayUnit.suffix,
             goalWeight: profile.goalWeight,
             exerciseDayCount: exerciseDayCount,
-            currentPlanStartDate: planStartDate
+            currentPlanStartDate: planStartDate,
+            longTermContext: longTermContext
+        )
+    }
+
+    /// How far back the long-term context reaches (a 12-month cap to bound the HealthKit query
+    /// and prompt size).
+    private static let longTermWindowDays = 365
+
+    /// Behavior baseline over the long window. Returns `nil` when there's too little logged
+    /// history for it to add anything (≤ a couple weeks), so short-history users aren't given a
+    /// redundant block.
+    private static func longTermContext(
+        totals: [Date: HistoryAggregator.DailyTotals],
+        weightEntries: [WeightEntry],
+        displayUnit: WeightUnit,
+        longStart: Date,
+        today: Date,
+        now: Date,
+        calendar: Calendar
+    ) -> PlanHistoryContext? {
+        let loggedDays = totals.keys.filter { $0 >= longStart && $0 <= today && (totals[$0]?.calories ?? 0) > 0 }
+        guard loggedDays.count > 14 else { return nil }
+
+        let calories = HistoryAggregator.summary(metric: .calories, start: longStart, end: today, dailyTotals: totals)
+        let net = HistoryAggregator.summary(metric: .net, start: longStart, end: today, dailyTotals: totals)
+        let exercise = HistoryAggregator.summary(metric: .exercise, start: longStart, end: today, dailyTotals: totals)
+
+        let firstLogged = loggedDays.min() ?? longStart
+        let spanDays = (calendar.dateComponents([.day], from: firstLogged, to: today).day ?? 0) + 1
+
+        let weightSamples = weightEntries
+            .filter { $0.timestamp >= longStart && $0.timestamp <= now }
+            .sorted { $0.timestamp < $1.timestamp }
+            .map { WeightSample(date: $0.timestamp, weight: $0.weight(in: displayUnit)) }
+
+        return PlanHistoryContext(
+            loggedDayCount: loggedDays.count,
+            spanDays: spanDays,
+            avgCalories: calories.dayAvg,
+            avgNetCalories: net.dayAvg,
+            avgExercise: exercise.dayAvg,
+            weightSamples: weightSamples
         )
     }
 }
