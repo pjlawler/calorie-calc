@@ -421,9 +421,9 @@ private struct SettingsForm: View {
             }
 
             Section("Units") {
-                Picker("Weight", selection: $profile.weightUnit) {
+                Picker("Height/Weight", selection: $profile.weightUnit) {
                     ForEach(WeightUnit.allCases, id: \.self) { unit in
-                        Text(unit.suffix).tag(unit)
+                        Text(unit.systemName).tag(unit)
                     }
                 }
                 LabeledContent("Energy") { Text(profile.energyUnit.suffix) }

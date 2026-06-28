@@ -130,6 +130,15 @@ nonisolated enum WeightUnit: String, Codable, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// Measurement-system name shown in the Height/Weight units picker. Pounds implies the
+    /// standard (US customary) system — feet/inches + pounds — and kilograms implies metric.
+    var systemName: String {
+        switch self {
+        case .pounds: "Standard"
+        case .kilograms: "Metric"
+        }
+    }
+
     func convert(_ value: Double, to other: WeightUnit) -> Double {
         guard self != other else { return value }
         switch (self, other) {

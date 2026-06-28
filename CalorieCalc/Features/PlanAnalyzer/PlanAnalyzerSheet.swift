@@ -30,8 +30,7 @@ struct PlanAnalyzerSheet: View {
     // Inputs
     @State private var sex: BiologicalSex?
     @State private var age = 35
-    @State private var heightFeet = 5
-    @State private var heightInches = 9
+    @State private var heightTotalInches = 69   // imperial entry, in whole inches
     @State private var heightCm = 175.0
     @State private var weight = 0.0
     @State private var activity: NonExerciseActivityLevel = .sedentary
@@ -137,11 +136,10 @@ struct PlanAnalyzerSheet: View {
                         LabeledContent("Height") { Text("\(Int(heightCm)) cm").monospacedDigit() }
                     }
                 } else {
-                    Stepper(value: $heightFeet, in: 3...8) {
-                        LabeledContent("Height") { Text("\(heightFeet) ft \(heightInches) in").monospacedDigit() }
-                    }
-                    Stepper(value: $heightInches, in: 0...11) {
-                        LabeledContent("") { Text("\(heightInches) in").monospacedDigit() }
+                    Stepper(value: $heightTotalInches, in: 48...96) {
+                        LabeledContent("Height (\(heightTotalInches / 12)' \(heightTotalInches % 12)\")") {
+                            Text("\(heightTotalInches)\"").monospacedDigit()
+                        }
                     }
                 }
                 Stepper(value: $weight, in: weightRange, step: isMetric ? 0.5 : 1) {
@@ -314,7 +312,7 @@ struct PlanAnalyzerSheet: View {
         guard let sex, let profile = profiles.first else { return nil }
         let unit = profile.weightUnit
         let weightKg = unit.convert(weight, to: .kilograms)
-        let cm = isMetric ? heightCm : Double(heightFeet * 12 + heightInches) * 2.54
+        let cm = isMetric ? heightCm : Double(heightTotalInches) * 2.54
         return PlanAnalysisInput(
             heightCm: cm,
             weightKg: weightKg,
@@ -335,7 +333,7 @@ struct PlanAnalyzerSheet: View {
         guard let profile = profiles.first else { return }
         profile.biologicalSex = sex
         profile.birthYear = Calendar.current.component(.year, from: .now) - age
-        profile.heightCm = isMetric ? heightCm : Double(heightFeet * 12 + heightInches) * 2.54
+        profile.heightCm = isMetric ? heightCm : Double(heightTotalInches) * 2.54
         profile.nonExerciseActivity = activity
         profile.weightGoalPace = pace
         profile.planPreferencesNote = preferences.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -423,9 +421,7 @@ struct PlanAnalyzerSheet: View {
 
         if let cm = profile.heightCm {
             heightCm = cm
-            let totalInches = Int((cm / 2.54).rounded())
-            heightFeet = max(3, min(8, totalInches / 12))
-            heightInches = max(0, min(11, totalInches % 12))
+            heightTotalInches = max(48, min(96, Int((cm / 2.54).rounded())))
         }
 
         // Weight: latest logged weigh-in, else the profile's starting weight, converted to the
