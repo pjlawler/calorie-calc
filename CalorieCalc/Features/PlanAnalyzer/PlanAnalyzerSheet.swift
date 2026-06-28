@@ -7,6 +7,11 @@ import SwiftData
 /// `PlanCommitter` path the Settings screen uses.
 struct PlanAnalyzerSheet: View {
 
+    /// Called with the committed draft when the user taps Apply. The presenter (Settings) uses
+    /// this to sync its own plan draft so its steppers reflect the new values AND its Done
+    /// button doesn't re-commit a stale draft over the change.
+    var onApplied: ((GoalDraft) -> Void)?
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Environment(PlanAnalyzerEnvironment.self) private var env
@@ -398,6 +403,7 @@ struct PlanAnalyzerSheet: View {
         guard let profile = profiles.first else { return }
         PlanCommitter.commit(draft: draft, profile: profile, in: modelContext)
         try? modelContext.save()
+        onApplied?(draft)
         dismiss()
     }
 

@@ -691,7 +691,9 @@ private struct SettingsForm: View {
             AIConsentSheet()
         }
         .sheet(isPresented: $showPlanAnalyzer) {
-            PlanAnalyzerSheet()
+            // Sync the committed plan back into this screen's draft so the steppers update and
+            // tapping Done doesn't re-commit the pre-analyzer values over the AI's change.
+            PlanAnalyzerSheet(onApplied: { draft = $0 })
         }
         .sheet(isPresented: $showPlanQuestion) {
             PlanQuestionSheet()
