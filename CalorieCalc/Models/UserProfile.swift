@@ -65,6 +65,27 @@ final class UserProfile {
         self.updatedAt = updatedAt
     }
 
+    /// Copies every user-editable field from `other` onto this profile, leaving identity
+    /// (`id`, `createdAt`) untouched. Used by `DataDeduplicator` to fold the most recently
+    /// edited duplicate's values onto the canonical (earliest) row before deleting the rest,
+    /// so a user's latest plan/settings survive the collapse instead of the stale first row.
+    func copySettings(from other: UserProfile) {
+        dailyNetCalorieGoal = other.dailyNetCalorieGoal
+        dailyGrossCalorieGoal = other.dailyGrossCalorieGoal
+        dailyWorkoutCalorieGoal = other.dailyWorkoutCalorieGoal
+        bankSplit = other.bankSplit
+        weekStart = other.weekStart
+        bankingWeekdayRawValues = other.bankingWeekdayRawValues
+        weightUnit = other.weightUnit
+        energyUnit = other.energyUnit
+        tracksSupplements = other.tracksSupplements
+        includesTodayInProgress = other.includesTodayInProgress
+        startingWeight = other.startingWeight
+        startingWeightLoggedAt = other.startingWeightLoggedAt
+        goalWeight = other.goalWeight
+        updatedAt = other.updatedAt
+    }
+
     /// Banking days are the first `bankSplit.bankingDayCount` weekdays starting at `weekStart`.
     /// E.g. week starts Sunday + 5/2 → banking = Sun–Thu, off = Fri, Sat.
     func isBankingDay(_ weekday: Weekday) -> Bool {

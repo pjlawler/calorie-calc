@@ -8,7 +8,9 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(HealthKitService.self) private var healthKitService
 
-    @Query private var profiles: [UserProfile]
+    // Sort by createdAt so `profiles.first` resolves the same canonical row every other view
+    // uses — otherwise edits here could write to a different duplicate than the one displayed.
+    @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
     @Query(sort: \GoalPeriod.startDate) private var goalPeriods: [GoalPeriod]
     @Query(sort: \DayLog.date) private var dayLogs: [DayLog]
     @Query(sort: \FoodEntry.timestamp) private var foodEntries: [FoodEntry]

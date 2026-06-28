@@ -16,7 +16,8 @@ struct DayDetailView: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(HealthKitService.self) private var healthKitService
     @Query private var allDayLogs: [DayLog]
-    @Query private var profiles: [UserProfile]
+    // Sort by createdAt so `profiles.first` resolves the same canonical row as every other view.
+    @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
 
     @State private var viewModel: DayDetailViewModel?
     @State private var showAddSheet = false
