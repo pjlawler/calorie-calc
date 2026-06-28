@@ -396,7 +396,25 @@ private struct SettingsForm: View {
             }
 
             Section {
-                // Week shape comes first so the bank/bonus split is set before the user dials
+                GoalWeightField(profile: profile)
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker("Goal pace", selection: Binding(
+                        get: { profile.weightGoalPace },
+                        set: { profile.weightGoalPace = $0 }
+                    )) {
+                        Text("Not set").tag(WeightGoalPace?.none)
+                        ForEach(WeightGoalPace.allCases) { pace in
+                            Text(pace.displayName).tag(WeightGoalPace?.some(pace))
+                        }
+                    }
+                    if let pace = profile.weightGoalPace {
+                        Text(pace.detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // Week shape comes next so the bank/bonus split is set before the user dials
                 // in calorie targets — the targets only make sense once the shape is decided.
                 Picker("Week starts on", selection: $draft.weekStart) {
                     ForEach(Weekday.allCases) { day in
@@ -479,8 +497,6 @@ private struct SettingsForm: View {
                         .foregroundStyle(.secondary)
                         .font(.footnote)
                 }
-
-                GoalWeightField(profile: profile)
             }
 
             Section("Apple Health") {
@@ -929,7 +945,7 @@ private struct GoalWeightField: View {
 
     var body: some View {
         HStack {
-            Text("Goal")
+            Text("Goal weight")
             Spacer()
             TextField("e.g., 170", text: $text)
                 .keyboardType(.decimalPad)
