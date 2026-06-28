@@ -238,6 +238,8 @@ struct PlanAnalyzerSheet: View {
                 Text("Estimated maintenance: \(plan.estimatedTDEE) kcal/day (BMR \(plan.estimatedBMR)).")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                medicalDisclaimer
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -256,6 +258,20 @@ struct PlanAnalyzerSheet: View {
             .padding(.vertical, 12)
             .background(.bar)
         }
+    }
+
+    private var medicalDisclaimer: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text("This plan is AI-generated and doesn't account for any medical conditions that limiting your calories or setting a workout goal could affect. Talk to your primary care provider before starting any significant change to your diet or fitness routine.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.ultraThinMaterial))
     }
 
     private func recommendedCard(_ plan: RecommendedPlan) -> some View {
