@@ -9,7 +9,8 @@ struct WeightLogView: View {
     @Query(sort: [SortDescriptor(\WeightEntry.timestamp, order: .reverse)])
     private var entries: [WeightEntry]
 
-    @Query private var profiles: [UserProfile]
+    // Sort by createdAt so `profiles.first` resolves the same canonical row as every other view.
+    @Query(sort: \UserProfile.createdAt) private var profiles: [UserProfile]
 
     @State private var inputText: String = ""
     @State private var selectedUnit: WeightUnit = .pounds

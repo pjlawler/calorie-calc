@@ -168,6 +168,10 @@ struct WeekCalendarView: View {
     }
 
     private func ensureBootstrap() async {
+        // Collapse any duplicate profiles / open periods CloudKit may have synced in (e.g. from
+        // another install on the same iCloud account) before resolving `profiles.first`, so plan
+        // edits and plan display always target the same canonical row.
+        DataDeduplicator.run(in: modelContext)
         if profiles.isEmpty {
             modelContext.insert(UserProfile())
             try? modelContext.save()
