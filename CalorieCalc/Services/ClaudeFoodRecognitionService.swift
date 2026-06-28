@@ -12,6 +12,7 @@ enum AIFlow: String {
     case recipeImport = "recipe-import"
     case insights = "insights"
     case planAnalyze = "plan-analyze"
+    case planQuestion = "plan-question"
 
     /// Cost-tiered defaults: Sonnet for the structured food-estimation flows, Haiku
     /// for narrating numbers the app already computed, Opus only where its high-res
@@ -24,6 +25,9 @@ enum AIFlow: String {
         // Structured reasoning (pick a split that fits preferences, sanity-check the math)
         // plus coaching prose — same tier as the other reasoning flows.
         case .planAnalyze: return "claude-sonnet-4-6"
+        // Reasoning over the user's plan + progress to answer a free-form question — Sonnet
+        // rather than the insights Haiku, since it has to diagnose, not just narrate numbers.
+        case .planQuestion: return "claude-sonnet-4-6"
         }
     }
 }

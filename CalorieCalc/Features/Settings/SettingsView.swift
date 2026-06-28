@@ -333,6 +333,7 @@ private struct SettingsForm: View {
     @Environment(\.openURL) private var openURL
     @State private var showAIConsentSheet = false
     @State private var showPlanAnalyzer = false
+    @State private var showPlanQuestion = false
     @State private var showImporter = false
     @State private var importStatusMessage: String?
     @State private var showWipeConfirm = false
@@ -413,6 +414,11 @@ private struct SettingsForm: View {
                     showPlanAnalyzer = true
                 } label: {
                     Label("Build my plan with AI", systemImage: "sparkles")
+                }
+                Button {
+                    showPlanQuestion = true
+                } label: {
+                    Label("Ask about my plan", systemImage: "questionmark.bubble")
                 }
             } header: {
                 Text("My Plan")
@@ -686,6 +692,9 @@ private struct SettingsForm: View {
         }
         .sheet(isPresented: $showPlanAnalyzer) {
             PlanAnalyzerSheet()
+        }
+        .sheet(isPresented: $showPlanQuestion) {
+            PlanQuestionSheet()
         }
     }
 
