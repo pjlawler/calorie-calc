@@ -32,6 +32,20 @@ final class UserProfile {
     var startingWeightLoggedAt: Date?
     var goalWeight: Double?
 
+    // MARK: AI Plan Analyzer inputs
+    // Biometrics the AI Plan Analyzer uses for calorie math (Mifflin–St Jeor) and to
+    // prefill its form on a re-run. All optional so the feature stays opt-in and the
+    // SwiftData/CloudKit store migrates without a manual step (scalars, so the CloudKit
+    // optional-to-many rule doesn't apply). Enum-backed fields are stored as raw strings
+    // and exposed through the typed computed accessors below.
+    var heightCm: Double?
+    var birthYear: Int?
+    var biologicalSexRaw: String?
+    var nonExerciseActivityRaw: String?
+    var weightGoalPaceRaw: String?
+    /// Last free-text preferences the user gave the analyzer, so re-runs prefill it.
+    var planPreferencesNote: String?
+
     var createdAt: Date = Date()
     var updatedAt: Date = Date()
 
@@ -83,7 +97,33 @@ final class UserProfile {
         startingWeight = other.startingWeight
         startingWeightLoggedAt = other.startingWeightLoggedAt
         goalWeight = other.goalWeight
+        heightCm = other.heightCm
+        birthYear = other.birthYear
+        biologicalSexRaw = other.biologicalSexRaw
+        nonExerciseActivityRaw = other.nonExerciseActivityRaw
+        weightGoalPaceRaw = other.weightGoalPaceRaw
+        planPreferencesNote = other.planPreferencesNote
         updatedAt = other.updatedAt
+    }
+
+    // MARK: AI Plan Analyzer typed accessors
+
+    /// Typed view over `biologicalSexRaw`. Stored raw so the schema migrates cleanly.
+    var biologicalSex: BiologicalSex? {
+        get { biologicalSexRaw.flatMap(BiologicalSex.init(rawValue:)) }
+        set { biologicalSexRaw = newValue?.rawValue }
+    }
+
+    /// Typed view over `nonExerciseActivityRaw`.
+    var nonExerciseActivity: NonExerciseActivityLevel? {
+        get { nonExerciseActivityRaw.flatMap(NonExerciseActivityLevel.init(rawValue:)) }
+        set { nonExerciseActivityRaw = newValue?.rawValue }
+    }
+
+    /// Typed view over `weightGoalPaceRaw`.
+    var weightGoalPace: WeightGoalPace? {
+        get { weightGoalPaceRaw.flatMap(WeightGoalPace.init(rawValue:)) }
+        set { weightGoalPaceRaw = newValue?.rawValue }
     }
 
     /// Banking days are the first `bankSplit.bankingDayCount` weekdays starting at `weekStart`.
