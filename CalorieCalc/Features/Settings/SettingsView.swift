@@ -353,6 +353,20 @@ private struct SettingsForm: View {
         get { AppTab(rawValue: defaultTabRaw) ?? .week }
     }
 
+    /// Next multiple of `step` strictly above `value` (clamped to `max`). For a value already on
+    /// the grid this is `value + step`; for an off-grid value it snaps up to the grid (2076 → 2100
+    /// at step 50). Assumes non-negative values.
+    private func snappedUp(_ value: Int, step: Int, max: Int) -> Int {
+        Swift.min((value / step + 1) * step, max)
+    }
+
+    /// Nearest multiple of `step` strictly below `value` (clamped to `min`). On-grid → `value - step`;
+    /// off-grid → snaps down to the grid (2076 → 2050 at step 50).
+    private func snappedDown(_ value: Int, step: Int, min: Int) -> Int {
+        let lower = value % step == 0 ? value - step : (value / step) * step
+        return Swift.max(lower, min)
+    }
+
     var body: some View {
         Form {
             Section {
@@ -382,7 +396,25 @@ private struct SettingsForm: View {
             }
 
             Section {
-                // Week shape comes first so the bank/bonus split is set before the user dials
+                GoalWeightField(profile: profile)
+                VStack(alignment: .leading, spacing: 4) {
+                    Picker("Goal pace", selection: Binding(
+                        get: { profile.weightGoalPace },
+                        set: { profile.weightGoalPace = $0 }
+                    )) {
+                        Text("Not set").tag(WeightGoalPace?.none)
+                        ForEach(WeightGoalPace.allCases) { pace in
+                            Text(pace.displayName).tag(WeightGoalPace?.some(pace))
+                        }
+                    }
+                    if let pace = profile.weightGoalPace {
+                        Text(pace.detail)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                // Week shape comes next so the bank/bonus split is set before the user dials
                 // in calorie targets — the targets only make sense once the shape is decided.
                 Picker("Week starts on", selection: $draft.weekStart) {
                     ForEach(Weekday.allCases) { day in
@@ -396,14 +428,28 @@ private struct SettingsForm: View {
                 }
                 BankingDaysPreview(weekStart: draft.weekStart, bankSplit: draft.bankSplit)
 
-                Stepper(value: $draft.dailyNetCalorieGoal, in: 800...5000, step: 50) {
+                // Snap to the step grid rather than adding the raw step, so an odd value (e.g.
+                // 2076 from an applied AI plan) lands on a clean multiple: 2076 + → 2100, − → 2050.
+                Stepper {
                     LabeledContent("Target Daily Net") { Text("\(draft.dailyNetCalorieGoal) kcal").monospacedDigit() }
+                } onIncrement: {
+                    draft.dailyNetCalorieGoal = snappedUp(draft.dailyNetCalorieGoal, step: 50, max: 5000)
+                } onDecrement: {
+                    draft.dailyNetCalorieGoal = snappedDown(draft.dailyNetCalorieGoal, step: 50, min: 800)
                 }
-                Stepper(value: $draft.dailyWorkoutCalorieGoal, in: 0...3000, step: 25) {
+                Stepper {
                     LabeledContent("Daily workout goal") { Text("\(draft.dailyWorkoutCalorieGoal) kcal").monospacedDigit() }
+                } onIncrement: {
+                    draft.dailyWorkoutCalorieGoal = snappedUp(draft.dailyWorkoutCalorieGoal, step: 25, max: 3000)
+                } onDecrement: {
+                    draft.dailyWorkoutCalorieGoal = snappedDown(draft.dailyWorkoutCalorieGoal, step: 25, min: 0)
                 }
-                Stepper(value: $draft.dailyGrossCalorieGoal, in: 800...6000, step: 50) {
+                Stepper {
                     LabeledContent("Daily eating goal") { Text("\(draft.dailyGrossCalorieGoal) kcal").monospacedDigit() }
+                } onIncrement: {
+                    draft.dailyGrossCalorieGoal = snappedUp(draft.dailyGrossCalorieGoal, step: 50, max: 6000)
+                } onDecrement: {
+                    draft.dailyGrossCalorieGoal = snappedDown(draft.dailyGrossCalorieGoal, step: 50, min: 800)
                 }
                 if draft.bankSplit.offDayCount > 0 {
                     LabeledContent("Bonus day(s)") {
@@ -451,8 +497,6 @@ private struct SettingsForm: View {
                         .foregroundStyle(.secondary)
                         .font(.footnote)
                 }
-
-                GoalWeightField(profile: profile)
             }
 
             Section("Apple Health") {
@@ -901,7 +945,7 @@ private struct GoalWeightField: View {
 
     var body: some View {
         HStack {
-            Text("Goal")
+            Text("Goal weight")
             Spacer()
             TextField("e.g., 170", text: $text)
                 .keyboardType(.decimalPad)

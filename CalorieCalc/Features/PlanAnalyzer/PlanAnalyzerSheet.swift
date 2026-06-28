@@ -40,7 +40,6 @@ struct PlanAnalyzerSheet: View {
     @State private var weight = 0.0
     @State private var activity: NonExerciseActivityLevel = .sedentary
     @State private var workoutGoal = 150
-    @State private var pace: WeightGoalPace = .moderate
     @State private var preferences = ""
 
     // Consent + paywall + validation
@@ -181,19 +180,6 @@ struct PlanAnalyzerSheet: View {
                 Text("Workout goal")
             } footer: {
                 Text("Your target average daily burn from deliberate exercise.")
-            }
-
-            Section {
-                Picker("Goal", selection: $pace) {
-                    ForEach(WeightGoalPace.allCases) { p in
-                        Text(p.displayName).tag(p)
-                    }
-                }
-                Text(pace.detail)
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Text("Weight goal")
             }
 
             Section {
@@ -341,7 +327,9 @@ struct PlanAnalyzerSheet: View {
             sex: sex,
             activity: activity,
             workoutCalorieGoal: workoutGoal,
-            pace: pace,
+            // Pace now lives in Settings → My Plan ("Goal pace"); fall back to a moderate
+            // default if the user hasn't set it.
+            pace: profile.weightGoalPace ?? .moderate,
             preferencesNote: preferences,
             weightUnitSuffix: unit.suffix,
             currentWeekStart: profile.weekStart
@@ -356,7 +344,6 @@ struct PlanAnalyzerSheet: View {
         profile.birthYear = Calendar.current.component(.year, from: .now) - age
         profile.heightCm = isMetric ? heightCm : Double(heightTotalInches) * 2.54
         profile.nonExerciseActivity = activity
-        profile.weightGoalPace = pace
         profile.planPreferencesNote = preferences.trimmingCharacters(in: .whitespacesAndNewlines)
         profile.updatedAt = .now
         try? modelContext.save()
@@ -437,7 +424,6 @@ struct PlanAnalyzerSheet: View {
             age = max(13, min(100, Calendar.current.component(.year, from: .now) - by))
         }
         if let level = profile.nonExerciseActivity { activity = level }
-        if let p = profile.weightGoalPace { pace = p }
         if let note = profile.planPreferencesNote { preferences = note }
         workoutGoal = profile.dailyWorkoutCalorieGoal
 

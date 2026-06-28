@@ -33,6 +33,10 @@ struct PeriodNutritionData: Sendable {
     /// say how long they've actually been on this plan and flag that it's too early to judge a
     /// recent change — even if the analysis window itself is longer.
     let currentPlanStartDate: Date?
+    /// Longer-horizon behavior summary (independent of the current plan), so the AI can judge
+    /// whether a newly-set target actually differs from what the user has been doing for months,
+    /// and read a longer weight trend. `nil` for flows that don't supply it (e.g. period insights).
+    let longTermContext: PlanHistoryContext?
 
     init(
         periodLabel: String,
@@ -56,7 +60,8 @@ struct PeriodNutritionData: Sendable {
         weightUnitSuffix: String,
         goalWeight: Double?,
         exerciseDayCount: Int,
-        currentPlanStartDate: Date? = nil
+        currentPlanStartDate: Date? = nil,
+        longTermContext: PlanHistoryContext? = nil
     ) {
         self.periodLabel = periodLabel
         self.dayCount = dayCount
@@ -80,12 +85,24 @@ struct PeriodNutritionData: Sendable {
         self.goalWeight = goalWeight
         self.exerciseDayCount = exerciseDayCount
         self.currentPlanStartDate = currentPlanStartDate
+        self.longTermContext = longTermContext
     }
 }
 
 struct WeightSample: Sendable {
     let date: Date
     let weight: Double
+}
+
+/// Long-horizon behavior summary (well beyond the current plan window) used as CONTEXT by the
+/// plan-question flow — e.g. "you've averaged ~1,600 net for the past 6 months".
+struct PlanHistoryContext: Sendable {
+    let loggedDayCount: Int
+    let spanDays: Int
+    let avgCalories: Double
+    let avgNetCalories: Double
+    let avgExercise: Double
+    let weightSamples: [WeightSample]
 }
 
 enum NutritionAnalysisError: LocalizedError {
@@ -348,6 +365,14 @@ final class NutritionAnalysisService: Sendable {
           • A ~500 kcal/day net deficit ≈ about 1 lb/week of loss; ~250/day ≈ ½ lb/week. Use \
             the weight samples to estimate the ACTUAL trend and rate, and compare it to what \
             their net numbers PREDICT.
+          • If a "Longer history" block is provided, USE IT — don't limit yourself to the \
+            current-plan window when it's too short to be meaningful. Especially: if the plan \
+            was just set/changed, compare its target to their long-run average intake. If the \
+            new target is basically what they've already been eating for months, eating to plan \
+            will change nothing — say exactly that (e.g. "you set 1,600 today, but you've \
+            averaged ~1,600/day for the past 6 months, so this won't move things"), recommend a \
+            meaningfully different number, and tell them to give it several weeks. Read the \
+            long-run weight trend when the current-plan window has too little data to show one.
 
         Structure your answer like this (prose, with a short bulleted action list at the end):
 
@@ -447,6 +472,19 @@ final class NutritionAnalysisService: Sendable {
             formatter.formatOptions = [.withFullDate]
             lines.append("")
             lines.append("Current plan took effect: \(formatter.string(from: planStart)) — about \(days) day\(days == 1 ? "" : "s") ago. If they only recently changed or started the plan (a week or two), weight needs more time to respond — say it's too early to judge and to keep going.")
+        }
+
+        if let lt = d.longTermContext {
+            lines.append("")
+            lines.append("Longer history for context (independent of the current plan — \(lt.loggedDayCount) logged day\(lt.loggedDayCount == 1 ? "" : "s") spanning ~\(lt.spanDays) days):")
+            lines.append("- Long-run average intake: \(formatted(lt.avgCalories)) kCal/day; average net: \(formatted(lt.avgNetCalories)) kCal/day; average exercise: \(formatted(lt.avgExercise)) kCal/day.")
+            lines.append("- Use this to judge whether the CURRENT plan's target is actually a change from what they've been doing. If the new target ≈ their long-run average intake, eating to plan won't change anything — point that out and suggest a meaningfully different number, then several weeks to judge.")
+            if !lt.weightSamples.isEmpty {
+                let sorted = lt.weightSamples.sorted { $0.date < $1.date }
+                let f = ISO8601DateFormatter(); f.formatOptions = [.withFullDate]
+                let first = sorted.first!, last = sorted.last!
+                lines.append("- Long-run weight: \(formattedWeight(first.weight)) \(d.weightUnitSuffix) on \(f.string(from: first.date)) → \(formattedWeight(last.weight)) \(d.weightUnitSuffix) on \(f.string(from: last.date)). Read this longer trend when the current-plan window is too short to show one.")
+            }
         }
 
         lines.append("")
