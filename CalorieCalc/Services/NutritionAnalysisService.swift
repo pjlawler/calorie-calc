@@ -253,6 +253,8 @@ final class NutritionAnalysisService: Sendable {
 
     private var systemPrompt: String {
         """
+        Write your entire response in \(AIResponseLanguage.resolvedLanguageName()).
+
         You're a friendly nutrition coach talking directly to the user about how their \
         last period went. Write conversationally — second person ("you"), short \
         sentences, plain English. No clinical jargon, no disclaimers, no "as an AI". \
@@ -330,6 +332,8 @@ final class NutritionAnalysisService: Sendable {
 
     private var questionSystemPrompt: String {
         """
+        Write your entire response in \(AIResponseLanguage.resolvedLanguageName()).
+
         You're a friendly, honest nutrition coach. The user has a calorie plan in this app and \
         is asking a specific question about it. Answer THEIR question directly and in detail, \
         grounded in the plan and progress data below. Write conversationally — second person \

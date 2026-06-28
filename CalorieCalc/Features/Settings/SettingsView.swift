@@ -331,6 +331,7 @@ private struct SettingsForm: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AIConsentService.self) private var aiConsent
     @Environment(\.openURL) private var openURL
+    @AppStorage(AIResponseLanguage.storageKey) private var aiResponseLanguageRaw = AIResponseLanguage.deviceLanguage.rawValue
     @State private var showAIConsentSheet = false
     @State private var showPlanAnalyzer = false
     @State private var showPlanQuestion = false
@@ -493,6 +494,21 @@ private struct SettingsForm: View {
                 }
             } footer: {
                 Text("Custom labels you can attach to foods (e.g. \"Thai\", \"Vegan\", \"Low Calorie\") to filter your saved catalog and recents.")
+            }
+
+            if aiConsent.isGranted {
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { aiResponseLanguageRaw == AIResponseLanguage.english.rawValue },
+                        set: { aiResponseLanguageRaw = ($0 ? AIResponseLanguage.english : .deviceLanguage).rawValue }
+                    )) {
+                        Label("Reply in English", systemImage: "character.bubble")
+                    }
+                } header: {
+                    Text("AI Reply Language")
+                } footer: {
+                    Text("Off (default) replies in the app's language. Turn it on to always get AI replies in English.")
+                }
             }
 
             Section {

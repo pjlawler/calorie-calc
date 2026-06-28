@@ -472,13 +472,10 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
     /// Key contract: `portion` IS what the user is logging. If they named a quantity, that's
     /// the portion. If not, fall back to a canonical label serving. The macros are always
     /// for the portion as described — no separate "intake amount" / "canonical" split.
-    /// The user's preferred language, named in English (e.g. "Japanese", "Spanish"), so the
-    /// model can return human-readable text in the user's language. Falls back to English.
+    /// Language the model should write human-readable text in, named in English (e.g. "Japanese",
+    /// "Spanish"). Honors the user's AI response-language setting (device language vs. English).
     private var responseLanguageName: String {
-        let preferred = Locale.preferredLanguages.first ?? Locale.current.identifier
-        let code = Locale(identifier: preferred).language.languageCode?.identifier ?? "en"
-        // Name the language in English so the instruction itself reads cleanly to the model.
-        return Locale(identifier: "en").localizedString(forLanguageCode: code) ?? "English"
+        AIResponseLanguage.resolvedLanguageName()
     }
 
     private var sharedReturnRules: String {

@@ -177,6 +177,10 @@ final class PlanRecommendationService: Sendable {
 
     private var systemPrompt: String {
         """
+        Write the `narrative` and `notes` text in \(AIResponseLanguage.resolvedLanguageName()) \
+        (keep every other tool field — numbers and the bank_split / week_start tokens — exactly \
+        as specified).
+
         You're a friendly nutrition coach helping the user set up their calorie plan in this \
         app. Write conversationally — second person ("you"), short sentences, plain English. \
         No clinical jargon, no disclaimers, no "as an AI".
