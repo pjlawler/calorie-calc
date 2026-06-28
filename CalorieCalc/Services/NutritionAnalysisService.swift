@@ -29,6 +29,58 @@ struct PeriodNutritionData: Sendable {
     /// Number of days the workout history covers — passed so the AI can judge
     /// exercise consistency (daily vs. spotty) honestly against the period length.
     let exerciseDayCount: Int
+    /// When the user's CURRENT plan took effect (the open `GoalPeriod`'s start). Lets the AI
+    /// say how long they've actually been on this plan and flag that it's too early to judge a
+    /// recent change — even if the analysis window itself is longer.
+    let currentPlanStartDate: Date?
+
+    init(
+        periodLabel: String,
+        dayCount: Int,
+        totalCalories: Double,
+        avgCalories: Double,
+        totalProtein: Double,
+        avgProtein: Double,
+        totalCarbs: Double,
+        avgCarbs: Double,
+        totalFat: Double,
+        avgFat: Double,
+        totalExercise: Double,
+        avgExercise: Double,
+        totalNetCalories: Double,
+        avgNetCalories: Double,
+        dailyCalorieGoal: Int?,
+        dailyNetCalorieGoal: Int?,
+        dailyExerciseGoal: Int?,
+        weightSamples: [WeightSample],
+        weightUnitSuffix: String,
+        goalWeight: Double?,
+        exerciseDayCount: Int,
+        currentPlanStartDate: Date? = nil
+    ) {
+        self.periodLabel = periodLabel
+        self.dayCount = dayCount
+        self.totalCalories = totalCalories
+        self.avgCalories = avgCalories
+        self.totalProtein = totalProtein
+        self.avgProtein = avgProtein
+        self.totalCarbs = totalCarbs
+        self.avgCarbs = avgCarbs
+        self.totalFat = totalFat
+        self.avgFat = avgFat
+        self.totalExercise = totalExercise
+        self.avgExercise = avgExercise
+        self.totalNetCalories = totalNetCalories
+        self.avgNetCalories = avgNetCalories
+        self.dailyCalorieGoal = dailyCalorieGoal
+        self.dailyNetCalorieGoal = dailyNetCalorieGoal
+        self.dailyExerciseGoal = dailyExerciseGoal
+        self.weightSamples = weightSamples
+        self.weightUnitSuffix = weightUnitSuffix
+        self.goalWeight = goalWeight
+        self.exerciseDayCount = exerciseDayCount
+        self.currentPlanStartDate = currentPlanStartDate
+    }
 }
 
 struct WeightSample: Sendable {
@@ -97,6 +149,7 @@ final class NutritionAnalysisService: Sendable {
         self.session = session
     }
 
+    /// Period coaching summary (the "Analyze" / insights flow).
     func analyze(_ data: PeriodNutritionData) async throws -> String {
         let body = RequestBody(
             model: model,
@@ -104,6 +157,27 @@ final class NutritionAnalysisService: Sendable {
             system: systemPrompt,
             messages: [Message(role: "user", content: userPrompt(for: data))]
         )
+        return try await send(body, flow: .insights)
+    }
+
+    /// Answers a free-form question about the user's plan, grounded in the same period +
+    /// progress data the insights flow uses. Routed as `planQuestion` (Sonnet) since it has to
+    /// diagnose, not just narrate.
+    func answer(question: String, _ data: PeriodNutritionData) async throws -> String {
+        let trimmed = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw NutritionAnalysisError.noResult }
+        let body = RequestBody(
+            model: AIFlow.planQuestion.model,
+            maxTokens: 1024,
+            system: questionSystemPrompt,
+            messages: [Message(role: "user", content: answerPrompt(question: trimmed, for: data))]
+        )
+        return try await send(body, flow: .planQuestion)
+    }
+
+    /// Shared request execution for the text-returning flows: App Attest headers, status →
+    /// `NutritionAnalysisError` mapping, optimistic credit decrement, and text extraction.
+    private func send(_ body: RequestBody, flow: AIFlow) async throws -> String {
         let bodyData = try JSONEncoder().encode(body)
 
         var req = URLRequest(url: endpoint)
@@ -130,7 +204,7 @@ final class NutritionAnalysisService: Sendable {
         #endif
         // Names the AI feature this call serves so the proxy can re-route the model
         // server-side — mirrors ClaudeFoodRecognitionService.authedRequest.
-        req.addValue(AIFlow.insights.rawValue, forHTTPHeaderField: "X-AI-Flow")
+        req.addValue(flow.rawValue, forHTTPHeaderField: "X-AI-Flow")
         req.httpBody = bodyData
 
         do {
@@ -179,6 +253,8 @@ final class NutritionAnalysisService: Sendable {
 
     private var systemPrompt: String {
         """
+        Write your entire response in \(AIResponseLanguage.resolvedLanguageName()).
+
         You're a friendly nutrition coach talking directly to the user about how their \
         last period went. Write conversationally — second person ("you"), short \
         sentences, plain English. No clinical jargon, no disclaimers, no "as an AI". \
@@ -254,7 +330,81 @@ final class NutritionAnalysisService: Sendable {
         """
     }
 
+    private var questionSystemPrompt: String {
+        """
+        Write your entire response in \(AIResponseLanguage.resolvedLanguageName()).
+
+        You're a friendly, honest nutrition coach. The user has a calorie plan in this app and \
+        is asking a specific question about it. Answer THEIR question directly and in detail, \
+        grounded in the plan and progress data below. Write conversationally — second person \
+        ("you"), plain English, no clinical jargon, no "as an AI".
+
+        How to read their data:
+          • The "on-plan day calorie target" is the planned intake on a normal day, NOT a daily \
+            average. By design the user eats more on bonus days, so period AVERAGE GROSS will \
+            be above it — never flag that on its own.
+          • NET calories vs. the NET goal is the real adherence signal. Judge progress against \
+            net, not gross.
+          • A ~500 kcal/day net deficit ≈ about 1 lb/week of loss; ~250/day ≈ ½ lb/week. Use \
+            the weight samples to estimate the ACTUAL trend and rate, and compare it to what \
+            their net numbers PREDICT.
+
+        Structure your answer like this (prose, with a short bulleted action list at the end):
+
+        1. Restate where they stand, specifically and with their real numbers. Name their net \
+           goal, say whether they're hitting it (their average net vs. that goal), and describe \
+           their weight trend over the window (direction + rough rate). Example shape: "Your \
+           plan targets 1,600 net calories a day and you've been landing right around there. \
+           Over the last 4 weeks your weight has been basically flat, but the math says you \
+           should be losing close to a pound a week."
+
+        2. Give the honest why. If the numbers predict loss but the scale is flat, explain the \
+           usual reasons: day-to-day water/weight fluctuation makes short windows noisy (a few \
+           weeks isn't much to judge — especially if the plan changed recently), logging gaps, \
+           or exercise being over-credited. If their net is actually running above goal, say \
+           that's the cause.
+
+        3. End with "Here are a few things you can do:" and a short numbered/bulleted list of \
+           concrete, ordered steps tailored to their data. Draw from these levers:
+             • Log as accurately as possible — some foods are hard to estimate and AI guesses \
+               aren't always exact, which can hide calories.
+             • Make sure workouts are tracked accurately — Apple Health is usually more \
+               trustworthy than what a treadmill or machine reports.
+             • Adjust the plan: e.g. drop the net goal by ~100 kcal/day and watch it over the \
+               next 2–3 weeks. Suggest tightening bonus-day eating or adding/steadying exercise \
+               before big plan changes.
+
+        Be specific, not vague or generically encouraging. If weight data is sparse (few \
+        entries / short span) or the plan is new, say the read is preliminary and to keep \
+        logging. If they mention symptoms, medication, or anything medical, gently suggest they \
+        check with their doctor — you can't give medical advice.
+
+        Plain markdown. Aim for ~200–350 words. Never use the term "bank days" — say \
+        "bonus day(s)".
+        """
+    }
+
     private func userPrompt(for d: PeriodNutritionData) -> String {
+        periodContext(for: d)
+            + "\n\nAnalyze this period and give your assessment in the format described in the system prompt."
+    }
+
+    private func answerPrompt(question: String, for d: PeriodNutritionData) -> String {
+        """
+        The user is asking about their plan and progress.
+
+        Their question:
+        "\(question)"
+
+        \(periodContext(for: d))
+
+        Answer their question directly, following the system prompt.
+        """
+    }
+
+    /// The shared period + goals + weight block used by both the insights summary and the
+    /// plan-question flow. Excludes any closing instruction so each caller appends its own.
+    private func periodContext(for d: PeriodNutritionData) -> String {
         let proteinKcal = d.totalProtein * 4
         let carbsKcal = d.totalCarbs * 4
         let fatKcal = d.totalFat * 9
@@ -290,11 +440,17 @@ final class NutritionAnalysisService: Sendable {
             }
         }
 
-        lines.append("")
-        lines.append(weightSection(for: d))
+        if let planStart = d.currentPlanStartDate {
+            let cal = Calendar.current
+            let days = max(0, cal.dateComponents([.day], from: cal.startOfDay(for: planStart), to: cal.startOfDay(for: .now)).day ?? 0)
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withFullDate]
+            lines.append("")
+            lines.append("Current plan took effect: \(formatter.string(from: planStart)) — about \(days) day\(days == 1 ? "" : "s") ago. If they only recently changed or started the plan (a week or two), weight needs more time to respond — say it's too early to judge and to keep going.")
+        }
 
         lines.append("")
-        lines.append("Analyze this period and give your assessment in the format described in the system prompt.")
+        lines.append(weightSection(for: d))
         return lines.joined(separator: "\n")
     }
 

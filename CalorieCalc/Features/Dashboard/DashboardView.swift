@@ -438,7 +438,8 @@ struct DashboardView: View {
             weightSamples: weightSamples,
             weightUnitSuffix: displayUnit.suffix,
             goalWeight: profiles.first?.goalWeight,
-            exerciseDayCount: exerciseDayCount
+            exerciseDayCount: exerciseDayCount,
+            currentPlanStartDate: currentGoalPeriod?.startDate
         )
     }
 

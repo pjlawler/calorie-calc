@@ -11,6 +11,8 @@ enum AIFlow: String {
     case recipeAnalyze = "recipe-analyze"
     case recipeImport = "recipe-import"
     case insights = "insights"
+    case planAnalyze = "plan-analyze"
+    case planQuestion = "plan-question"
 
     /// Cost-tiered defaults: Sonnet for the structured food-estimation flows, Haiku
     /// for narrating numbers the app already computed, Opus only where its high-res
@@ -20,6 +22,12 @@ enum AIFlow: String {
         case .photo, .describe, .recipeAnalyze: return "claude-sonnet-4-6"
         case .recipeImport: return "claude-opus-4-8"
         case .insights: return "claude-haiku-4-5"
+        // Structured reasoning (pick a split that fits preferences, sanity-check the math)
+        // plus coaching prose — same tier as the other reasoning flows.
+        case .planAnalyze: return "claude-sonnet-4-6"
+        // Reasoning over the user's plan + progress to answer a free-form question — Sonnet
+        // rather than the insights Haiku, since it has to diagnose, not just narrate numbers.
+        case .planQuestion: return "claude-sonnet-4-6"
         }
     }
 }
@@ -464,13 +472,10 @@ final class ClaudeFoodRecognitionService: FoodRecognitionService, Sendable {
     /// Key contract: `portion` IS what the user is logging. If they named a quantity, that's
     /// the portion. If not, fall back to a canonical label serving. The macros are always
     /// for the portion as described — no separate "intake amount" / "canonical" split.
-    /// The user's preferred language, named in English (e.g. "Japanese", "Spanish"), so the
-    /// model can return human-readable text in the user's language. Falls back to English.
+    /// Language the model should write human-readable text in, named in English (e.g. "Japanese",
+    /// "Spanish"). Honors the user's AI response-language setting (device language vs. English).
     private var responseLanguageName: String {
-        let preferred = Locale.preferredLanguages.first ?? Locale.current.identifier
-        let code = Locale(identifier: preferred).language.languageCode?.identifier ?? "en"
-        // Name the language in English so the instruction itself reads cleanly to the model.
-        return Locale(identifier: "en").localizedString(forLanguageCode: code) ?? "English"
+        AIResponseLanguage.resolvedLanguageName()
     }
 
     private var sharedReturnRules: String {

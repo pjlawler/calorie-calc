@@ -9,6 +9,7 @@ struct CalorieCalcApp: App {
     private let foodDataSource: FoodDataSourceEnvironment
     private let foodRecognition: FoodRecognitionEnvironment
     private let nutritionAnalysis: NutritionAnalysisEnvironment
+    private let planAnalyzer: PlanAnalyzerEnvironment
     private let entitlementService: EntitlementService
     private let subscriptionService: SubscriptionService
     private let rewardedAdService: RewardedAdService
@@ -139,6 +140,13 @@ struct CalorieCalcApp: App {
                 entitlements: entitlements
             )
         )
+        planAnalyzer = PlanAnalyzerEnvironment(
+            service: PlanRecommendationService(
+                proxyBaseURL: proxyBaseURL,
+                attest: attest,
+                entitlements: entitlements
+            )
+        )
         aiConsentService = AIConsentService()
     }
 
@@ -149,6 +157,7 @@ struct CalorieCalcApp: App {
                 .environment(foodDataSource)
                 .environment(foodRecognition)
                 .environment(nutritionAnalysis)
+                .environment(planAnalyzer)
                 .environment(entitlementService)
                 .environment(subscriptionService)
                 .environment(rewardedAdService)

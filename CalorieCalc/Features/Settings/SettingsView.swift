@@ -127,73 +127,10 @@ struct SettingsView: View {
     /// If any of the five period-scoped fields changed, close the current period and open a new
     /// one starting at the first day of the current week (per the new `weekStart`). Also mirror
     /// the new values onto `UserProfile` so Dashboard bindings keep showing today's goals.
+    /// Shared with the AI Plan Analyzer's Apply path — see `PlanCommitter`.
     private func commitDraft() {
         guard let draft, let profile = profiles.first else { return }
-        // Fetch directly so we see any period bootstrapped in `seedDraftIfNeeded` — the `@Query`
-        // may not have refreshed yet within the same render cycle.
-        let latestPeriods = (try? modelContext.fetch(
-            FetchDescriptor<GoalPeriod>(sortBy: [SortDescriptor(\.startDate)])
-        )) ?? goalPeriods
-        guard let current = GoalPeriod.current(in: latestPeriods) else {
-            // Truly no current period — split immediately into a historical (pre-edit, from
-            // profile) and a current (post-edit, from draft) so past weeks keep the old values
-            // if the user ever gets here without an earlier bootstrap.
-            let startOfWeek = Calendar.current.startOfWeek(for: .now, firstWeekday: draft.weekStart.calendarValue)
-            if draft.differs(from: GoalDraft(from: profile)) {
-                let historical = GoalPeriod(
-                    startDate: profile.createdAt,
-                    endDate: startOfWeek,
-                    dailyNetCalorieGoal: profile.dailyNetCalorieGoal,
-                    dailyGrossCalorieGoal: profile.dailyGrossCalorieGoal,
-                    dailyWorkoutCalorieGoal: profile.dailyWorkoutCalorieGoal,
-                    bankSplit: profile.bankSplit,
-                    weekStart: profile.weekStart
-                )
-                modelContext.insert(historical)
-            }
-            let open = GoalPeriod(
-                startDate: draft.differs(from: GoalDraft(from: profile)) ? startOfWeek : profile.createdAt,
-                endDate: nil,
-                dailyNetCalorieGoal: draft.dailyNetCalorieGoal,
-                dailyGrossCalorieGoal: draft.dailyGrossCalorieGoal,
-                dailyWorkoutCalorieGoal: draft.dailyWorkoutCalorieGoal,
-                bankSplit: draft.bankSplit,
-                weekStart: draft.weekStart
-            )
-            modelContext.insert(open)
-            draft.mirror(onto: profile)
-            return
-        }
-        guard draft.differs(from: current) else {
-            // No goal changes — just mirror back in case pass-through was stale.
-            draft.mirror(onto: profile)
-            return
-        }
-
-        let startOfWeek = Calendar.current.startOfWeek(for: .now, firstWeekday: draft.weekStart.calendarValue)
-        // If the user hasn't moved forward in time from the current period (edge case: changing
-        // goals twice in one week), keep the same startDate and just overwrite the current
-        // period's values. Otherwise close + open.
-        if startOfWeek <= current.startDate {
-            current.dailyNetCalorieGoal = draft.dailyNetCalorieGoal
-            current.dailyGrossCalorieGoal = draft.dailyGrossCalorieGoal
-            current.dailyWorkoutCalorieGoal = draft.dailyWorkoutCalorieGoal
-            current.bankSplit = draft.bankSplit
-            current.weekStart = draft.weekStart
-        } else {
-            current.endDate = startOfWeek
-            let next = GoalPeriod(
-                startDate: startOfWeek,
-                endDate: nil,
-                dailyNetCalorieGoal: draft.dailyNetCalorieGoal,
-                dailyGrossCalorieGoal: draft.dailyGrossCalorieGoal,
-                dailyWorkoutCalorieGoal: draft.dailyWorkoutCalorieGoal,
-                bankSplit: draft.bankSplit,
-                weekStart: draft.weekStart
-            )
-            modelContext.insert(next)
-        }
-        draft.mirror(onto: profile)
+        PlanCommitter.commit(draft: draft, profile: profile, in: modelContext)
     }
 
     private func exportDatabaseCSV() {
@@ -394,7 +331,10 @@ private struct SettingsForm: View {
     @Environment(\.modelContext) private var modelContext
     @Environment(AIConsentService.self) private var aiConsent
     @Environment(\.openURL) private var openURL
+    @AppStorage(AIResponseLanguage.storageKey) private var aiResponseLanguageRaw = AIResponseLanguage.deviceLanguage.rawValue
     @State private var showAIConsentSheet = false
+    @State private var showPlanAnalyzer = false
+    @State private var showPlanQuestion = false
     @State private var showImporter = false
     @State private var importStatusMessage: String?
     @State private var showWipeConfirm = false
@@ -470,6 +410,17 @@ private struct SettingsForm: View {
                         Text("\(draft.bonusDayTarget) kcal").monospacedDigit()
                     }
                 }
+
+                Button {
+                    showPlanAnalyzer = true
+                } label: {
+                    Label("Build my plan with AI", systemImage: "sparkles")
+                }
+                Button {
+                    showPlanQuestion = true
+                } label: {
+                    Label("Ask about my plan", systemImage: "questionmark.bubble")
+                }
             } header: {
                 Text("My Plan")
             } footer: {
@@ -477,9 +428,9 @@ private struct SettingsForm: View {
             }
 
             Section("Units") {
-                Picker("Weight", selection: $profile.weightUnit) {
+                Picker("Height/Weight", selection: $profile.weightUnit) {
                     ForEach(WeightUnit.allCases, id: \.self) { unit in
-                        Text(unit.suffix).tag(unit)
+                        Text(unit.systemName).tag(unit)
                     }
                 }
                 LabeledContent("Energy") { Text(profile.energyUnit.suffix) }
@@ -543,6 +494,21 @@ private struct SettingsForm: View {
                 }
             } footer: {
                 Text("Custom labels you can attach to foods (e.g. \"Thai\", \"Vegan\", \"Low Calorie\") to filter your saved catalog and recents.")
+            }
+
+            if aiConsent.isGranted {
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { aiResponseLanguageRaw == AIResponseLanguage.english.rawValue },
+                        set: { aiResponseLanguageRaw = ($0 ? AIResponseLanguage.english : .deviceLanguage).rawValue }
+                    )) {
+                        Label("Reply in English", systemImage: "character.bubble")
+                    }
+                } header: {
+                    Text("AI Reply Language")
+                } footer: {
+                    Text("Off (default) replies in the app's language. Turn it on to always get AI replies in English.")
+                }
             }
 
             Section {
@@ -739,6 +705,14 @@ private struct SettingsForm: View {
         }
         .sheet(isPresented: $showAIConsentSheet) {
             AIConsentSheet()
+        }
+        .sheet(isPresented: $showPlanAnalyzer) {
+            // Sync the committed plan back into this screen's draft so the steppers update and
+            // tapping Done doesn't re-commit the pre-analyzer values over the AI's change.
+            PlanAnalyzerSheet(onApplied: { draft = $0 })
+        }
+        .sheet(isPresented: $showPlanQuestion) {
+            PlanQuestionSheet()
         }
     }
 
