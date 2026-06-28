@@ -5,6 +5,9 @@ import StoreKit
 struct RootView: View {
     @State private var selection: AppTab
     @AppStorage(AppAppearance.storageKey) private var appearanceRaw: String = AppAppearance.system.rawValue
+    /// One-time gate for the AI-plan-features "What's New" announcement.
+    @AppStorage("whatsNew.aiPlanFeatures.seen") private var whatsNewSeen = false
+    @State private var showWhatsNew = false
     @Environment(HealthKitService.self) private var healthKitService
     @Environment(EntitlementService.self) private var entitlements
     @Environment(SubscriptionService.self) private var subscription
@@ -40,7 +43,17 @@ struct RootView: View {
         .task(id: appearanceRaw) {
             AppAppearance.apply(appearance)
         }
+        .sheet(isPresented: $showWhatsNew, onDismiss: { whatsNewSeen = true }) {
+            WhatsNewSheet()
+        }
         .task {
+            // Show the AI-plan-features "What's New" once, but only to users with logged history
+            // (so a brand-new install doesn't get a "what's new" before they've used the app —
+            // they'll see it on a later launch once they've started logging).
+            if !whatsNewSeen {
+                let hasHistory = ((try? modelContext.fetchCount(FetchDescriptor<FoodEntry>())) ?? 0) > 0
+                if hasHistory { showWhatsNew = true }
+            }
             // Convert any pre-redesign rows (servingDescription / servingSizeGrams) into the new
             // nativeUnit / selectedUnit / quantity layout. No-op after first successful run.
             // BackupService snapshotted the previous-session store before this point, so there's
