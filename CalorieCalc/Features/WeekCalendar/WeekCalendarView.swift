@@ -681,13 +681,10 @@ private struct FavoriteQuickAddListSheet: View {
     }
 
     private func normalizedSelectedDay(from pickerDate: Date) -> Date {
-        // DatePicker(.date) may round-trip through GMT and shift a day for some locales.
-        // Read Y/M/D in UTC, then rebuild in local calendar to preserve the user's chosen date.
-        var utc = Calendar(identifier: .gregorian)
-        utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
-        let components = utc.dateComponents([.year, .month, .day], from: pickerDate)
-        let localDate = Calendar.current.date(from: components) ?? pickerDate
-        return Calendar.current.startOfDay(for: localDate)
+        // DatePicker(.date) hands back a Date in the local calendar; snap it to
+        // local start-of-day. (Reading Y/M/D via a UTC calendar here shifted the
+        // date back a day for UTC+ timezones, e.g. Bangkok logging to yesterday.)
+        Calendar.current.startOfDay(for: pickerDate)
     }
 }
 
