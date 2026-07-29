@@ -8,6 +8,17 @@ extension Date {
 }
 
 extension Calendar {
+    /// Normalizes a date coming from `DatePicker(.date)` (or `.now`) to the start of the day the
+    /// user actually chose, in *this* calendar's timezone.
+    ///
+    /// `DatePicker(.date)` hands back a `Date` already expressed in the local calendar, so the
+    /// correct normalization is simply `startOfDay`. An earlier version read the Y/M/D through a
+    /// UTC calendar and rebuilt them locally, which shifted the day back one for UTC+ timezones
+    /// (e.g. Bangkok logging entries to the previous day). Keep this local-only.
+    func loggingDay(from pickerDate: Date) -> Date {
+        startOfDay(for: pickerDate)
+    }
+
     /// The anchor date (midnight) for the start of the week containing `date`,
     /// using the supplied `firstWeekday` (1 = Sunday … 2 = Monday, etc.).
     func startOfWeek(for date: Date, firstWeekday: Int) -> Date {

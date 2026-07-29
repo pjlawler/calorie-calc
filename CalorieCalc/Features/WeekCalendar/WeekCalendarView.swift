@@ -681,10 +681,7 @@ private struct FavoriteQuickAddListSheet: View {
     }
 
     private func normalizedSelectedDay(from pickerDate: Date) -> Date {
-        // DatePicker(.date) hands back a Date in the local calendar; snap it to
-        // local start-of-day. (Reading Y/M/D via a UTC calendar here shifted the
-        // date back a day for UTC+ timezones, e.g. Bangkok logging to yesterday.)
-        Calendar.current.startOfDay(for: pickerDate)
+        Calendar.current.loggingDay(from: pickerDate)
     }
 }
 
