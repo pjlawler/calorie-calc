@@ -8,6 +8,11 @@ struct RootView: View {
     /// One-time gate for the AI-plan-features "What's New" announcement.
     @AppStorage("whatsNew.aiPlanFeatures.seen") private var whatsNewSeen = false
     @State private var showWhatsNew = false
+    /// First-run flow gates. Stored as epoch seconds (0 = unset) since `@AppStorage` can't hold
+    /// an optional `Date`.
+    @AppStorage("onboarding.completedAt") private var onboardingCompletedAt: Double = 0
+    @AppStorage("onboarding.firstLaunchedAt") private var firstLaunchedAt: Double = 0
+    @State private var showOnboarding = false
     @Environment(HealthKitService.self) private var healthKitService
     @Environment(EntitlementService.self) private var entitlements
     @Environment(SubscriptionService.self) private var subscription
@@ -46,7 +51,21 @@ struct RootView: View {
         .sheet(isPresented: $showWhatsNew, onDismiss: { whatsNewSeen = true }) {
             WhatsNewSheet()
         }
+        .fullScreenCover(isPresented: $showOnboarding) {
+            OnboardingFlow {
+                onboardingCompletedAt = Date().timeIntervalSince1970
+                showOnboarding = false
+            }
+        }
+        // The permission prompts skipped during onboarding fire the moment the flow closes.
+        .onChange(of: showOnboarding) { _, isShowing in
+            guard !isShowing else { return }
+            Task { await startPermissionPrompts() }
+        }
         .task {
+            // Decide on the first-run flow before anything else so the cover is up on the first
+            // frame rather than flashing an empty week calendar behind it.
+            evaluateOnboardingGate()
             // Show the AI-plan-features "What's New" once, but only to users with logged history
             // (so a brand-new install doesn't get a "what's new" before they've used the app —
             // they'll see it on a later launch once they've started logging).
@@ -62,10 +81,12 @@ struct RootView: View {
             // Unify Favorites + My Foods: backfills any pre-existing favorite that isn't yet in
             // My Foods. Idempotent — does nothing once the store is fully migrated.
             CachedFood.promoteFavoritesToMyFoods(in: modelContext)
-            // Kicks off auth (idempotent), the initial HK backfill into the SwiftData cache,
-            // observer queries with background delivery, and the 60s foreground refresh timer.
-            // Subsequent calls no-op.
-            await healthKitService.startBackgroundSync()
+            // HealthKit and ATT both raise system permission dialogs, which would stack on top of
+            // the first-run cover and ask a user who hasn't yet seen the app to grant access to
+            // their health data. Deferred to `startPermissionPrompts()` when onboarding is up.
+            if !showOnboarding {
+                await startPermissionPrompts()
+            }
 
             // Subscriptions/credits bootstrap. `startListeningForTransactions` survives the
             // task's cancellation since it's stored on the service. `loadProduct` is what
@@ -82,16 +103,12 @@ struct RootView: View {
             await StoreKitEnvironment.shared.prime()
             await subscription.loadProduct()
             await entitlements.refresh()
-            // ATT must resolve before the ad SDK can request personalized fills. Prompting
-            // here (rather than at first paywall open) guarantees the prompt is reachable
-            // for App Store reviewers who never burn through the initial credits.
-            await rewardedAd.requestATTIfNeeded()
-            await rewardedAd.bootstrap()
-
             // Defer the review prompt past bootstrap so it doesn't fight the splash/first-frame
             // work above. The service enforces a 10-launch minimum and a 3-per-year ceiling.
             try? await Task.sleep(for: .seconds(3))
-            ReviewPromptService.recordLaunchAndMaybePrompt(requestReview: requestReview)
+            if !showOnboarding {
+                ReviewPromptService.recordLaunchAndMaybePrompt(requestReview: requestReview)
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .background {
@@ -104,6 +121,42 @@ struct RootView: View {
                 NotificationCenter.default.post(name: .jumpToCurrentWeek, object: nil)
             }
         }
+    }
+
+    /// The bootstrap work that raises system permission dialogs, held back until the user is
+    /// actually looking at the app rather than at a cover on top of it.
+    ///
+    /// HealthKit: kicks off auth (idempotent), the initial HK backfill into the SwiftData cache,
+    /// observer queries with background delivery, and the 60s foreground refresh timer.
+    /// ATT: must resolve before the ad SDK can request personalized fills; prompting here (rather
+    /// than at first paywall open) guarantees the prompt is reachable for App Store reviewers who
+    /// never burn through the initial credits. Both are no-ops on subsequent calls.
+    private func startPermissionPrompts() async {
+        await healthKitService.startBackgroundSync()
+        await rewardedAd.requestATTIfNeeded()
+        await rewardedAd.bootstrap()
+    }
+
+    /// Stamps this install's first launch and asks `OnboardingGate` whether the first-run flow
+    /// should open. Uses counts and a one-row fetch rather than `@Query`: a returning user's food
+    /// log can be thousands of rows and nothing here needs the rows themselves.
+    private func evaluateOnboardingGate() {
+        if firstLaunchedAt == 0 { firstLaunchedAt = Date().timeIntervalSince1970 }
+
+        var profileDescriptor = FetchDescriptor<UserProfile>(sortBy: [SortDescriptor(\.createdAt)])
+        profileDescriptor.fetchLimit = 1
+        let earliestProfile = (try? modelContext.fetch(profileDescriptor))?.first
+
+        let signals = OnboardingGate.Signals(
+            completedAt: onboardingCompletedAt > 0
+                ? Date(timeIntervalSince1970: onboardingCompletedAt)
+                : nil,
+            firstLaunchedAt: Date(timeIntervalSince1970: firstLaunchedAt),
+            earliestProfileCreatedAt: earliestProfile?.createdAt,
+            hasLoggedFood: ((try? modelContext.fetchCount(FetchDescriptor<FoodEntry>())) ?? 0) > 0,
+            hasPlanHistory: ((try? modelContext.fetchCount(FetchDescriptor<GoalPeriod>())) ?? 0) > 1
+        )
+        showOnboarding = OnboardingGate.shouldPresent(signals)
     }
 }
 
